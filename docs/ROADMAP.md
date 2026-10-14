@@ -18,13 +18,13 @@ Demo: terminal-level proof the engine works through our trait.
 ## M1 — Walking skeleton
 | ID | Task | Acceptance |
 |---|---|---|
-| [ ] M1-01 | Ticker + `snapshot` event + `src/lib/api` typed wrapper | Frontend logs a live list from the fake engine at 1 Hz |
-| [ ] M1-02 | Design tokens, themes, custom title bar, layout shell (rail, list, status bar) | Matches UI_SPEC layout at 3 sizes; both themes; measured |
-| [ ] M1-03 | Virtualised torrent list, row component, sort, filter rail with counts, search | 1,000 fake torrents scroll at 60 fps; keyboard navigation works |
-| [ ] M1-04 | Add flow: paste magnet, drop file, Add dialog (name, size, files, folder) | Real ISO adds and downloads end to end |
-| [ ] M1-05 | Pause/resume/remove with confirm; row hover actions; context menu | Works on real torrent; delete-files off by default |
-| [ ] M1-06 | Settings store (JSON, versioned), download folder, theme setting | Survives restart; migration test |
-| [ ] M1-07 | Session persistence | Kill the process mid-download; list and progress restored |
+| [x] M1-01 | Ticker + `snapshot` event + `src/lib/api` typed wrapper | Frontend logs a live list from the fake engine at 1 Hz |
+| [x] M1-02 | Design tokens, themes, layout shell (rail, list, status bar). **Custom title bar deferred to M3-05** (keeps native Windows 11 snap layouts for now) | Both themes measured (text contrast 5.7:1); layout checked at 1100×700 and 480 px wide. Narrow widths below the 900 px window minimum are not supported until the remote UI (M6-09) |
+| [x] M1-03 | Virtualised torrent list, row component, sort, filter rail with counts, search | 1,000 fake torrents scroll at 60 fps; keyboard navigation works |
+| [~] M1-04 | Add flow: paste magnet, drop file, Add dialog (source, save folder). **Name/size/file tree in the dialog needs an engine `inspect` (list-only) call: moved to M2-01** | Verified in the mock: invalid magnet shows a plain-language error and keeps the dialog; valid magnet adds, closes, toasts. **Still open: a real ISO adds and downloads end to end in the Tauri window** (do with spikes S2/S3) |
+| [~] M1-05 | Pause/resume/remove with confirm; row hover actions; context menu | Verified in the mock: pause, remove dialog (delete-files off by default, choice remembered), context menu with keyboard navigation. **Still open: same actions on a real torrent in the Tauri window** |
+| [x] M1-06 | Settings store (JSON, versioned), download folder, theme setting | Survives restart; migration test |
+| [x] M1-07 | Session persistence | Kill the process mid-download; list and progress restored |
 
 Demo: add, watch, pause, remove a real torrent in the real UI.
 
@@ -46,6 +46,7 @@ Demo = **MVP**: replaces your current client for a week of normal use.
 | [ ] M3-01 | Accessibility pass (`design:accessibility-review`) | Keyboard-only run-through; contrast measured |
 | [ ] M3-02 | Design critique pass (`design:design-critique`, `web-design-guidelines`) | Findings fixed or logged |
 | [ ] M3-03 | Performance pass against ARCHITECTURE budgets | Numbers recorded in PERF.md |
+| [ ] M3-05 | Custom title bar integrated with the top bar (drag region, caption buttons) without losing Windows 11 snap layouts | Snap-layout flyout still appears on the maximize button; window drags and double-click maximizes |
 | [ ] M3-04 | Installer (MSI/NSIS), icon, app name decision | Install, upgrade, and uninstall tested on a clean user profile |
 
 ## M4 — Power features

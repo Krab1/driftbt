@@ -12,7 +12,7 @@ use async_trait::async_trait;
 use librqbit::api::TorrentIdOrHash;
 use librqbit::{
     AddTorrent, AddTorrentOptions, AddTorrentResponse, ListenerOptions, ManagedTorrent, Session,
-    SessionOptions, TorrentStatsState,
+    SessionOptions, SessionPersistenceConfig, TorrentStatsState,
 };
 
 use super::{EngineError, Result, TorrentEngine};
@@ -25,6 +25,8 @@ pub struct RqbitConfig {
     pub listen: Option<SocketAddr>,
     pub dht: bool,
     pub upnp: bool,
+    /// Where the torrent list is saved so it survives restarts; `None` disables persistence.
+    pub persistence_dir: Option<PathBuf>,
 }
 
 pub struct RqbitEngine {
@@ -43,8 +45,17 @@ impl RqbitEngine {
         }
         listen.enable_upnp_port_forwarding = cfg.upnp;
         opts.listen = Some(listen);
+        if let Some(dir) = cfg.persistence_dir {
+            opts.persistence = Some(SessionPersistenceConfig::Json { folder: Some(dir) });
+            opts.fastresume = true;
+        }
         let session = Session::new_with_opts(cfg.output_dir, opts).await.map_err(backend)?;
         Ok(Self { session })
+    }
+
+    /// Stop all networking and flush state; call before dropping if the list must be restored next run.
+    pub async fn shutdown(&self) {
+        self.session.stop().await;
     }
 
     /// Address the engine actually listens on (useful for tests and the port-check UI).
@@ -69,7 +80,8 @@ fn id_of(h: &ManagedTorrent) -> TorrentId {
 fn stats_of(h: &ManagedTorrent) -> TorrentStats {
     let s = h.stats();
     let state = match s.state {
-        TorrentStatsState::Initializing { .. } => TorrentState::Checking,
+        TorrentStatsState::Initializing { paused: true } => TorrentState::Paused,
+        TorrentStatsState::Initializing { paused: false } => TorrentState::Checking,
         TorrentStatsState::Live if s.finished => TorrentState::Seeding,
         TorrentStatsState::Live => TorrentState::Downloading,
         TorrentStatsState::Paused => TorrentState::Paused,
@@ -233,9 +245,15 @@ mod tests {
             .unwrap();
         let seeder_addr = seeder.listen_addr().expect("seeder listens");
 
-        let engine = RqbitEngine::new(RqbitConfig { output_dir: dl_dir.clone(), listen: Some(loopback), dht: false, upnp: false })
-            .await
-            .unwrap();
+        let engine = RqbitEngine::new(RqbitConfig {
+            output_dir: dl_dir.clone(),
+            listen: Some(loopback),
+            dht: false,
+            upnp: false,
+            persistence_dir: None,
+        })
+        .await
+        .unwrap();
         let mut req = AddRequest::new(AddSource::FileBytes(torrent_bytes.to_vec()));
         req.peers = vec![SocketAddr::from(([127, 0, 0, 1], seeder_addr.port()))];
         let id = engine.add(req).await.unwrap();
@@ -261,6 +279,50 @@ mod tests {
         engine.resume(&id).await.unwrap();
         engine.remove(&id, false).await.unwrap();
         assert!(engine.list().await.unwrap().is_empty());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// M1-07: the torrent list and its paused state survive a restart.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn torrent_list_survives_restart() {
+        let root = std::env::temp_dir().join(format!("drift-persist-test-{}", std::process::id()));
+        let (src, dl, state) = (root.join("src"), root.join("dl"), root.join("state"));
+        for d in [&src, &dl, &state] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let file = src.join("persist.bin");
+        std::fs::write(&file, payload()).unwrap();
+        let torrent = create_torrent(&file, CreateTorrentOptions::default(), &BlockingSpawner::new(1))
+            .await
+            .unwrap()
+            .as_bytes()
+            .unwrap();
+
+        let cfg = || RqbitConfig {
+            output_dir: dl.clone(),
+            listen: Some(([127, 0, 0, 1], 0).into()),
+            dht: false,
+            upnp: false,
+            persistence_dir: Some(state.clone()),
+        };
+        let first = RqbitEngine::new(cfg()).await.unwrap();
+        let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
+        req.paused = true;
+        let id = first.add(req).await.unwrap();
+        first.shutdown().await;
+        drop(first);
+
+        let second = RqbitEngine::new(cfg()).await.unwrap();
+        let list = second.list().await.unwrap();
+        assert_eq!(list.len(), 1, "torrent list was not restored");
+        assert_eq!(list[0].id, id);
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while second.list().await.unwrap()[0].state != TorrentState::Paused {
+            assert!(Instant::now() < deadline, "restored torrent never reported Paused");
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        second.shutdown().await;
 
         let _ = std::fs::remove_dir_all(&root);
     }

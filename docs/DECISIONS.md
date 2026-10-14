@@ -23,4 +23,8 @@ Append-only. Format: `D-n · date · decision — why — consequence`.
 - **D-15 · 2026-10-14 · No ratio spoofing** — the client always reports true uploaded/downloaded totals to trackers, with no fake-upload mode and no behaviour designed to avoid tracker detection. Reason: it defrauds trackers and other seeders, and it is the fastest way to get an account banned. The need behind it (poor ratio on dead torrents) is served by the ratio assistant instead.
 - **D-16 · 2026-10-14 · Remote UI reuses the desktop front-end** — one codebase, `api` layer with two transports; no separate web app.
 
+- **D-17 · 2026-10-14 · `tauri-plugin-dialog` for the folder picker** — official plugin, needed for "change download folder"; permission limited to `dialog:allow-open`. (CLAUDE.md rule 7 justification.)
+- **D-18 · 2026-10-14 · The frontend `api` has a mock transport used outside Tauri** — lets the UI be developed and measured in a plain browser with N fake torrents (`?n=1000`), and is the seam for the remote HTTP transport (M6-09). Selected at startup by `__TAURI_INTERNALS__`.
+- **D-19 · 2026-10-14 · Native window frame for now** — the custom title bar (M3-05) risks losing Windows 11 snap layouts; do it once the app is otherwise done.
+
 Note: rqbit already ships its own Tauri desktop app (web UI wrapped). We are not forking it; our value is a purpose-built native-feeling UI plus queue/rules/streaming UX.

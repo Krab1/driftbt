@@ -48,6 +48,67 @@ impl FakeEngine {
         self.inner.lock().unwrap().limits
     }
 
+    /// `n` varied fake torrents for UI development (`DRIFT_FAKE=n`). Deterministic.
+    pub fn demo(n: usize) -> Self {
+        let e = Self::new();
+        {
+            let mut g = e.inner.lock().unwrap();
+            let mut x: u64 = 0x9E37_79B9_7F4A_7C15;
+            let mut next = || {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                x
+            };
+            const NAMES: [&str; 8] = ["ubuntu-26.04-desktop-amd64.iso", "debian-13-netinst.iso", "archlinux-2026.10.01-x86_64.iso", "fedora-workstation-43.iso", "mint-22-cinnamon.iso", "opensuse-tumbleweed-dvd.iso", "alpine-standard-3.22.iso", "nixos-minimal-26.05.iso"];
+            for i in 0..n {
+                let id = TorrentId(format!("{:040x}", next() as u128 * 0x1_0000_0001 + i as u128));
+                let total = (50 + next() % 6000) * 1_048_576;
+                let roll = next() % 10;
+                let (state, progress) = match roll {
+                    0..=3 => (TorrentState::Downloading, next() % total),
+                    4..=7 => (TorrentState::Seeding, total),
+                    8 => (TorrentState::Paused, next() % total),
+                    _ => (TorrentState::Error, next() % total),
+                };
+                let down = if state == TorrentState::Downloading { 200_000 + next() % 15_000_000 } else { 0 };
+                let stats = TorrentStats {
+                    id: id.clone(),
+                    name: format!("{} ({})", NAMES[(next() % 8) as usize], i + 1),
+                    state,
+                    error: (state == TorrentState::Error).then(|| "No space left on the download drive.".to_string()),
+                    total_bytes: total,
+                    progress_bytes: progress,
+                    uploaded_bytes: next() % total,
+                    down_bps: down,
+                    up_bps: if state == TorrentState::Seeding { next() % 3_000_000 } else { 0 },
+                    peers_live: (next() % 60) as u32,
+                    eta_secs: (down > 0).then(|| (total - progress) / down),
+                };
+                g.torrents.insert(id, Entry { stats, files: Vec::new() });
+            }
+        }
+        e
+    }
+
+    /// Advance every downloading demo torrent by one second of its own speed.
+    pub fn step(&self) {
+        let mut g = self.inner.lock().unwrap();
+        for e in g.torrents.values_mut() {
+            let s = &mut e.stats;
+            if s.state == TorrentState::Downloading {
+                s.progress_bytes = (s.progress_bytes + s.down_bps).min(s.total_bytes);
+                if s.progress_bytes == s.total_bytes {
+                    s.state = TorrentState::Seeding;
+                    s.down_bps = 0;
+                    s.eta_secs = None;
+                } else {
+                    s.eta_secs = (s.total_bytes - s.progress_bytes).checked_div(s.down_bps);
+                }
+            }
+        }
+    }
+
     fn set_state(&self, id: &TorrentId, from: impl Fn(TorrentState) -> bool, to: TorrentState) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         let e = g.torrents.get_mut(id).ok_or(EngineError::NotFound)?;
