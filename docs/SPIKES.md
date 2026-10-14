@@ -32,6 +32,12 @@ Consequences for the plan:
 3. Streaming (M4-04) is feasible via `FileStream`.
 4. Risk R1 (no MSE) remains open until S2.
 
+### Notes from building the adapter (M0-06)
+- uTP is **off by default** in librqbit (`ListenerMode::TcpOnly`, upstream "once uTP is stable"). We enable `TcpAndUtp` only if S2 shows it helps.
+- DHT is on by default in `SessionOptions`; we turn it off for loopback tests.
+- Re-adding a magnet for a managed torrent makes librqbit try to resolve metadata first; the adapter checks the info-hash itself.
+- Loopback test (a real librqbit seeder session vs. our adapter, 127.0.0.1, no DHT/trackers) downloads 3 MiB in about 0.25 s.
+
 ## S2 — encryption and uTP peer-count spike (M0-03)
 Not run yet.
 

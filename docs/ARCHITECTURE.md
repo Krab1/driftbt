@@ -106,6 +106,8 @@ pub trait TorrentEngine: Send + Sync {
 }
 ```
 
+**As built (M0):** `crates/drift-core/src/engine/mod.rs` is authoritative. Implemented: `add`, `list`, `details`, `pause`, `resume`, `remove`, `set_files`, `set_limits`; ids are `&TorrentId` (lowercase info-hash hex) and every method returns `Result<_, EngineError>`. `set_network`, `set_ip_filter` and `stream_url` are added with the milestone that needs them (M5-05, M5-02, M4-04). `add` is idempotent (re-adding a managed torrent returns its id, even by bare magnet). ETA is derived in the adapter from speed because librqbit's own is private.
+
 Rules: no librqbit types in signatures. Errors are our `EngineError` enum. Anything librqbit can't do (queueing, scheduling, ratio goals) lives in `core`, driven through this trait (pause/resume).
 
 ## Contract: `SettingsStore`

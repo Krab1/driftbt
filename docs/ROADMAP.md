@@ -10,8 +10,8 @@ Order matters inside a milestone; milestones are sequential. Each milestone ends
 | [x] M0-02 | **S1** Read `librqbit` API (docs.rs + source) and fill the open questions in FEATURES.md: file re-selection, recheck, force-announce, bind interface, **IP filter hook (can we reject inbound and outbound peers by address before the handshake?)**, session persistence, stream URL | Table in `docs/SPIKES.md` with yes/no/how per item; FEATURES.md rows marked or struck |
 | [ ] M0-03 | **S2** Encryption/uTP spike: download a popular distro ISO, record peer count and speed; compare with a reference client on the same machine | Numbers in SPIKES.md; decision in DECISIONS.md |
 | [ ] M0-04 | **S3** Windows I/O spike: 6 GB ISO to a normal drive, with Defender on; note hash-check time and CPU | Numbers in SPIKES.md |
-| [ ] M0-05 | Define `TorrentEngine`, models, `FakeEngine` | Compiles; `core` has zero imports of tauri/librqbit (grep check in CI script) |
-| [ ] M0-06 | `rqbit.rs` adapter: add (magnet/file), list, pause/resume/remove | Integration test adds a loopback test torrent and completes it |
+| [x] M0-05 | Define `TorrentEngine`, models, `FakeEngine` | Compiles; `core` has zero imports of tauri/librqbit (grep check in CI script) |
+| [x] M0-06 | `rqbit.rs` adapter: add (magnet/file), list, pause/resume/remove | Integration test adds a loopback test torrent and completes it |
 
 Demo: terminal-level proof the engine works through our trait.
 
