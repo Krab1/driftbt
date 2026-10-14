@@ -1,0 +1,8 @@
+[package]
+name = "drift-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# Must stay free of tauri / axum / webview crates: see CLAUDE.md rule 2 (checked by scripts/check-core-deps.mjs).
+[dependencies]

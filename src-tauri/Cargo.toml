@@ -1,0 +1,12 @@
+[package]
+name = "drift"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+drift-core = { path = "../crates/drift-core" }
+tauri = { version = "2", features = [] }
