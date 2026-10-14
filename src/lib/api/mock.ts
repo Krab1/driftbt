@@ -1,5 +1,17 @@
 // In-browser stand-in used when the page runs outside Tauri (dev preview, UI tests).
-import type { Api, ApiError, Settings, TorrentState, TorrentStats } from "./types";
+// Mirrors the backend's behaviour closely enough to build and measure the UI against.
+import type {
+  Api,
+  ApiError,
+  Completed,
+  FileDetails,
+  OpenPayload,
+  Settings,
+  TorrentDetails,
+  TorrentPreview,
+  TorrentState,
+  TorrentStats,
+} from "./types";
 
 const NAMES = [
   "ubuntu-26.04-desktop-amd64.iso",
@@ -11,6 +23,7 @@ const NAMES = [
   "alpine-standard-3.22.iso",
   "nixos-minimal-26.05.iso",
 ];
+const PATHS = ["README.txt", "images/boot.img", "images/live/filesystem.squashfs", "images/live/initrd", "docs/manual.pdf", "docs/licenses/GPL-3.txt"];
 
 function rng(seed: number) {
   let x = seed >>> 0 || 1;
@@ -36,13 +49,13 @@ function demo(n: number): TorrentStats[] {
       id: i.toString(16).padStart(40, "0"),
       name: `${NAMES[Math.floor(r() * 8)]} (${i + 1})`,
       state,
-      error: state === "error" ? "No space left on the download drive." : null,
+      error: state === "error" ? "The download drive is full. Free up space, then resume." : null,
       total_bytes: total,
       progress_bytes: progress,
       uploaded_bytes: Math.floor(r() * total),
       down_bps: down,
       up_bps: state === "seeding" ? Math.floor(r() * 3_000_000) : 0,
-      peers_live: Math.floor(r() * 60),
+      peers_live: state === "downloading" || state === "seeding" ? Math.floor(r() * 60) : 0,
       eta_secs: down > 0 ? Math.floor((total - progress) / down) : null,
     };
   });
@@ -52,46 +65,131 @@ const fail = (code: string, message: string): never => {
   throw { code, message } satisfies ApiError;
 };
 
+const invalid = () => fail("invalid_input", "That isn't a valid magnet link or torrent file.");
+
+function filesFor(t: TorrentStats, selected: Set<number> | undefined): FileDetails[] {
+  const n = 3 + (parseInt(t.id.slice(-2), 16) % 4);
+  const weights = Array.from({ length: n }, (_, i) => 1 + ((parseInt(t.id.slice(-6), 16) >> (i * 3)) % 20));
+  const sum = weights.reduce((a, b) => a + b, 0);
+  return weights.map((w, i) => ({
+    index: i,
+    path: PATHS[i],
+    size: Math.floor((t.total_bytes * w) / sum),
+    progress_bytes: Math.floor((t.progress_bytes * w) / sum),
+    selected: selected ? selected.has(i) : true,
+  }));
+}
+
 export function createMockApi(count = 40): Api {
   let torrents = demo(count);
-  let settings: Settings = { schema: 1, download_dir: "C:\\Users\\you\\Downloads", theme: "system" };
-  const subs = new Set<(l: TorrentStats[]) => void>();
+  let settings: Settings = {
+    schema: 1,
+    download_dir: "C:\\Users\\you\\Downloads",
+    theme: "system",
+    limits_enabled: false,
+    down_limit_kib: 0,
+    up_limit_kib: 0,
+    close_to_tray: false,
+    start_minimized: false,
+    start_with_windows: false,
+    notify_on_complete: true,
+  };
+  const selection = new Map<string, Set<number>>();
+  let watched: string | null = null;
+  const snapSubs = new Set<(l: TorrentStats[]) => void>();
+  const detailSubs = new Set<(d: TorrentDetails) => void>();
+  const doneSubs = new Set<(c: Completed) => void>();
+  const openSubs = new Set<(p: OpenPayload) => void>();
   const snapshot = () => torrents.map((t) => ({ ...t }));
   const find = (id: string) => torrents.find((t) => t.id === id) ?? fail("not_found", "That torrent no longer exists.");
 
+  const details = (id: string): TorrentDetails => {
+    const t = find(id);
+    return {
+      stats: { ...t },
+      files: t.total_bytes ? filesFor(t, selection.get(id)) : [],
+      peers: Array.from({ length: Math.min(t.peers_live, 30) }, (_, i) => ({
+        addr: `203.0.113.${i + 1}:${51000 + i}`,
+        client: ["qBittorrent 5.1", "Transmission 4.0", "rqbit 9.0"][i % 3],
+        transport: i % 4 === 0 ? "utp" : "tcp",
+        downloaded_bytes: Math.floor(t.progress_bytes / (i + 2)),
+        uploaded_bytes: Math.floor(t.uploaded_bytes / (i + 3)),
+      })),
+      trackers: ["https://tracker.example.org/announce", "udp://open.example.net:1337/announce"],
+      save_path: settings.download_dir ?? "",
+    };
+  };
+
   setInterval(() => {
+    const finished: TorrentStats[] = [];
     torrents = torrents.map((t) => {
+      if (t.state === "checking" && t.total_bytes === 0) {
+        // A magnet that "found" its metadata.
+        const total = 1_500_000_000;
+        return { ...t, name: "metadata-fetched-demo.iso", total_bytes: total, state: "downloading", down_bps: 4_000_000, peers_live: 12 };
+      }
       if (t.state !== "downloading") return t;
       const progress = Math.min(t.total_bytes, t.progress_bytes + t.down_bps);
       const done = progress === t.total_bytes;
-      return {
+      const next: TorrentStats = {
         ...t,
         progress_bytes: progress,
         state: done ? "seeding" : "downloading",
         down_bps: done ? 0 : t.down_bps,
         eta_secs: done || !t.down_bps ? null : Math.floor((t.total_bytes - progress) / t.down_bps),
       };
+      if (done) finished.push(next);
+      return next;
     });
     const s = snapshot();
-    subs.forEach((cb) => cb(s));
+    snapSubs.forEach((cb) => cb(s));
+    finished.forEach((t) => doneSubs.forEach((cb) => cb({ id: t.id, name: t.name })));
   }, 1000);
+
+  setInterval(() => {
+    if (!watched || !torrents.some((t) => t.id === watched)) return;
+    const d = details(watched);
+    detailSubs.forEach((cb) => cb(d));
+  }, 500);
+
+  // Test hook: window.__driftOpen({magnets:[...], files:[...]}) behaves like a second launch.
+  (window as unknown as { __driftOpen: (p: OpenPayload) => void }).__driftOpen = (p) => openSubs.forEach((cb) => cb(p));
+
+  const pending: OpenPayload = { magnets: [], files: [] };
+  const open = new URLSearchParams(location.search).get("open");
+  if (open) pending.magnets.push(open);
+
+  const sub = <T>(set: Set<(v: T) => void>) => async (cb: (v: T) => void) => {
+    set.add(cb);
+    return () => void set.delete(cb);
+  };
 
   return {
     list: async () => snapshot(),
+    inspect: async (input) => {
+      if (input.kind !== "magnet") return invalid();
+      const m = /btih:([0-9a-fA-F]{40})/.exec(input.value);
+      if (!m) return invalid();
+      if (input.value.includes("slow")) return fail("timeout", "Couldn't fetch the torrent info. Check the link, or try again in a moment.");
+      await new Promise((r) => setTimeout(r, 700));
+      const files = PATHS.map((path, index) => ({ index, path, size: (index + 1) * 120_000_000 }));
+      return { id: m[1].toLowerCase(), name: "demo-distro-1.0-amd64", total_bytes: files.reduce((a, f) => a + f.size, 0), files } satisfies TorrentPreview;
+    },
     add: async (input) => {
       if (input.kind === "magnet") {
         const m = /btih:([0-9a-fA-F]{40})/.exec(input.value);
-        if (!m) return fail("invalid_input", "That isn't a valid magnet link or torrent file.");
+        if (!m) return invalid();
         const id = m[1].toLowerCase();
         if (!torrents.some((t) => t.id === id)) {
           torrents = [
             { id, name: id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null },
             ...torrents,
           ];
+          if (input.only_files) selection.set(id, new Set(input.only_files));
         }
         return id;
       }
-      return fail("invalid_input", "That isn't a valid magnet link or torrent file.");
+      return invalid();
     },
     pause: async (id) => {
       find(id);
@@ -100,19 +198,34 @@ export function createMockApi(count = 40): Api {
     resume: async (id) => {
       find(id);
       torrents = torrents.map((t) =>
-        t.id === id ? { ...t, state: t.progress_bytes >= t.total_bytes && t.total_bytes > 0 ? "seeding" : "downloading", down_bps: 3_000_000 } : t,
+        t.id === id
+          ? { ...t, error: null, state: t.progress_bytes >= t.total_bytes && t.total_bytes > 0 ? "seeding" : "downloading", down_bps: 3_000_000 }
+          : t,
       );
     },
     remove: async (id) => {
       find(id);
       torrents = torrents.filter((t) => t.id !== id);
+      if (watched === id) watched = null;
     },
+    setFiles: async (id, selected) => {
+      find(id);
+      selection.set(id, new Set(selected));
+    },
+    watchDetails: async (id) => {
+      watched = id;
+      return id ? details(id) : null;
+    },
+    onDetails: sub(detailSubs),
+    onCompleted: sub(doneSubs),
+    onOpenSources: sub(openSubs),
+    onShown: sub(new Set<() => void>()),
+    takePendingOpen: async () => ({ ...pending }),
+    setVisible: async () => {},
+    revealTorrent: async (id) => void find(id),
     getSettings: async () => ({ ...settings }),
     setSettings: async (s) => (settings = { ...s }),
-    onSnapshot: async (cb) => {
-      subs.add(cb);
-      return () => subs.delete(cb);
-    },
+    onSnapshot: sub(snapSubs),
     pickFolder: async () => "D:\\Torrents",
   };
 }

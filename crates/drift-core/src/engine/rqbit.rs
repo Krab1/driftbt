@@ -7,15 +7,18 @@ use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use librqbit::api::TorrentIdOrHash;
+use librqbit::http_api_types::PeerStatsFilter;
 use librqbit::{
     AddTorrent, AddTorrentOptions, AddTorrentResponse, ListenerOptions, ManagedTorrent, Session,
     SessionOptions, SessionPersistenceConfig, TorrentStatsState,
 };
 
 use super::{EngineError, Result, TorrentEngine};
+use crate::errors::plain_error;
 use crate::model::*;
 
 pub struct RqbitConfig {
@@ -73,6 +76,30 @@ fn backend(e: impl std::fmt::Display) -> EngineError {
     EngineError::Backend(format!("{e:#}"))
 }
 
+/// Reject garbage before it reaches librqbit so the UI gets `InvalidInput`, not a generic engine error.
+fn validate(source: &AddSource) -> Result<()> {
+    let bad = |what: &str| Err(EngineError::InvalidInput(what.into()));
+    match source {
+        AddSource::Magnet(m) => match librqbit::Magnet::parse(m).ok().and_then(|m| m.as_id20()) {
+            Some(_) => Ok(()),
+            None => bad("not a valid magnet link or info-hash"),
+        },
+        AddSource::FileBytes(b) => match librqbit::torrent_from_bytes(b) {
+            Ok(_) => Ok(()),
+            Err(_) => bad("not a valid .torrent file"),
+        },
+        AddSource::Url(u) if u.starts_with("http://") || u.starts_with("https://") => Ok(()),
+        AddSource::Url(_) => bad("only http(s) torrent URLs are supported"),
+    }
+}
+
+fn to_add(source: AddSource) -> AddTorrent<'static> {
+    match source {
+        AddSource::Magnet(s) | AddSource::Url(s) => AddTorrent::Url(Cow::Owned(s)),
+        AddSource::FileBytes(b) => AddTorrent::from_bytes(b),
+    }
+}
+
 fn id_of(h: &ManagedTorrent) -> TorrentId {
     TorrentId(h.info_hash().as_string())
 }
@@ -103,7 +130,7 @@ fn stats_of(h: &ManagedTorrent) -> TorrentStats {
         name: h.name().unwrap_or_else(|| id.0.clone()),
         id,
         state,
-        error: s.error,
+        error: plain_error(s.error.as_deref()),
         total_bytes: s.total_bytes,
         progress_bytes: s.progress_bytes,
         uploaded_bytes: s.uploaded_bytes,
@@ -117,20 +144,15 @@ fn stats_of(h: &ManagedTorrent) -> TorrentStats {
 #[async_trait]
 impl TorrentEngine for RqbitEngine {
     async fn add(&self, req: AddRequest) -> Result<TorrentId> {
+        validate(&req.source)?;
         // librqbit resolves magnet metadata before noticing a torrent is already managed; short-circuit.
         if let AddSource::Magnet(m) = &req.source {
-            let hash = librqbit::Magnet::parse(m)
-                .ok()
-                .and_then(|m| m.as_id20())
-                .ok_or_else(|| EngineError::InvalidInput("not a valid magnet link or info-hash".into()))?;
-            if let Some(h) = self.session.get(TorrentIdOrHash::Hash(hash)) {
+            let hash = librqbit::Magnet::parse(m).ok().and_then(|m| m.as_id20());
+            if let Some(h) = hash.and_then(|h| self.session.get(TorrentIdOrHash::Hash(h))) {
                 return Ok(id_of(&h));
             }
         }
-        let add = match req.source {
-            AddSource::Magnet(s) | AddSource::Url(s) => AddTorrent::Url(Cow::Owned(s)),
-            AddSource::FileBytes(b) => AddTorrent::from_bytes(b),
-        };
+        let add = to_add(req.source);
         let opts = AddTorrentOptions {
             paused: req.paused,
             only_files: req.only_files,
@@ -142,6 +164,32 @@ impl TorrentEngine for RqbitEngine {
             AddTorrentResponse::Added(_, h) | AddTorrentResponse::AlreadyManaged(_, h) => Ok(id_of(&h)),
             AddTorrentResponse::ListOnly(_) => Err(EngineError::Backend("unexpected list-only response".into())),
         }
+    }
+
+    async fn inspect(&self, source: AddSource) -> Result<TorrentPreview> {
+        validate(&source)?;
+        let opts = AddTorrentOptions { list_only: true, ..Default::default() };
+        let fut = self.session.add_torrent(to_add(source), Some(opts));
+        let resp = tokio::time::timeout(Duration::from_secs(30), fut)
+            .await
+            .map_err(|_| EngineError::Timeout)?
+            .map_err(backend)?;
+        let AddTorrentResponse::ListOnly(l) = resp else {
+            return Err(EngineError::Backend("unexpected response to a list-only add".into()));
+        };
+        let files: Vec<PreviewFile> = l
+            .info
+            .iter_file_details()
+            .enumerate()
+            .map(|(index, f)| PreviewFile { index, path: f.filename.to_pathbuf().to_string_lossy().into_owned(), size: f.len })
+            .collect();
+        let id = TorrentId(l.info_hash.as_string());
+        Ok(TorrentPreview {
+            name: l.info.name().map(|n| n.into_owned()).unwrap_or_else(|| id.0.clone()),
+            total_bytes: files.iter().map(|f| f.size).sum(),
+            id,
+            files,
+        })
     }
 
     async fn list(&self) -> Result<Vec<TorrentStats>> {
@@ -169,7 +217,26 @@ impl TorrentEngine for RqbitEngine {
                     .collect()
             })
             .unwrap_or_default();
-        Ok(TorrentDetails { stats, files })
+        let mut peers: Vec<PeerInfo> = h
+            .live()
+            .map(|live| {
+                live.per_peer_stats_snapshot(PeerStatsFilter::default())
+                    .peers
+                    .into_iter()
+                    .map(|(addr, p)| PeerInfo {
+                        addr,
+                        client: p.client_name,
+                        transport: p.conn_kind.map(|k| format!("{k:?}").to_lowercase()).unwrap_or_default(),
+                        downloaded_bytes: p.counters.fetched_bytes,
+                        uploaded_bytes: p.counters.uploaded_bytes,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        peers.sort_by_key(|p| std::cmp::Reverse(p.downloaded_bytes + p.uploaded_bytes));
+        let mut trackers: Vec<String> = h.shared().trackers.iter().map(|u| u.to_string()).collect();
+        trackers.sort();
+        Ok(TorrentDetails { stats, files, peers, trackers, save_path: h.output_folder().to_string_lossy().into_owned() })
     }
 
     async fn pause(&self, id: &TorrentId) -> Result<()> {
@@ -280,6 +347,118 @@ mod tests {
         engine.remove(&id, false).await.unwrap();
         assert!(engine.list().await.unwrap().is_empty());
 
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Multi-file torrent over loopback: download only one file, then widen the selection while running.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn file_selection_limits_then_widens_the_download() {
+        let root = std::env::temp_dir().join(format!("drift-select-test-{}", std::process::id()));
+        let (seed_dir, dl_dir) = (root.join("seed"), root.join("dl"));
+        let content = seed_dir.join("album");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::create_dir_all(&dl_dir).unwrap();
+        let (a, b) = (payload(), payload().into_iter().rev().collect::<Vec<u8>>());
+        std::fs::write(content.join("a.bin"), &a).unwrap();
+        std::fs::write(content.join("b.bin"), &b).unwrap();
+
+        let torrent = create_torrent(&content, CreateTorrentOptions::default(), &BlockingSpawner::new(1))
+            .await
+            .unwrap()
+            .as_bytes()
+            .unwrap();
+        let loopback: SocketAddr = ([127, 0, 0, 1], 0).into();
+        let seeder_opts = SessionOptions {
+            dht: None,
+            disable_local_service_discovery: true,
+            listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }),
+            ..Default::default()
+        };
+        let seeder = Session::new_with_opts(seed_dir.clone(), seeder_opts).await.unwrap();
+        seeder
+            .add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, ..Default::default() }))
+            .await
+            .unwrap();
+        let seeder_port = seeder.listen_addr().expect("seeder listens").port();
+
+        let engine = RqbitEngine::new(RqbitConfig { output_dir: dl_dir.clone(), listen: Some(loopback), dht: false, upnp: false, persistence_dir: None })
+            .await
+            .unwrap();
+        let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
+        req.peers = vec![SocketAddr::from(([127, 0, 0, 1], seeder_port))];
+        req.only_files = Some(vec![0]);
+        let id = engine.add(req).await.unwrap();
+
+        let wait_for = |what: &'static str, f: Box<dyn Fn(&TorrentDetails) -> bool + Send>| {
+            let engine = &engine;
+            let id = id.clone();
+            async move {
+                let deadline = Instant::now() + Duration::from_secs(60);
+                loop {
+                    let d = engine.details(&id).await.unwrap();
+                    if f(&d) {
+                        return d;
+                    }
+                    assert!(Instant::now() < deadline, "timed out waiting for: {what}");
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        };
+
+        // First: only file 0 is selected and gets downloaded; file 1 stays untouched.
+        let d = wait_for("file 0 complete", Box::new(|d| d.files.first().is_some_and(|f| f.progress_bytes == f.size && f.size > 0))).await;
+        assert_eq!(d.files.len(), 2);
+        assert!(d.files[0].selected && !d.files[1].selected, "selection should be [true, false]");
+        // A piece spanning the file boundary legitimately brings in a little of file 1, never all of it.
+        assert!(d.files[1].progress_bytes < d.files[1].size, "unselected file must not fully download");
+        assert!(!d.save_path.is_empty());
+
+        // Then widen the selection while the torrent is live.
+        engine.set_files(&id, vec![0, 1]).await.unwrap();
+        let d = wait_for("both files complete", Box::new(|d| d.files.iter().all(|f| f.progress_bytes == f.size))).await;
+        assert!(d.files.iter().all(|f| f.selected));
+        assert_eq!(d.stats.state, TorrentState::Seeding);
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Add-dialog preview and input validation, no network needed (the torrent file carries its metadata).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn inspect_reads_files_and_rejects_garbage() {
+        let root = std::env::temp_dir().join(format!("drift-inspect-test-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("inspect.bin");
+        std::fs::write(&file, payload()).unwrap();
+        let torrent = create_torrent(&file, CreateTorrentOptions::default(), &BlockingSpawner::new(1))
+            .await
+            .unwrap()
+            .as_bytes()
+            .unwrap();
+
+        let engine = RqbitEngine::new(RqbitConfig {
+            output_dir: root.clone(),
+            listen: Some(([127, 0, 0, 1], 0).into()),
+            dht: false,
+            upnp: false,
+            persistence_dir: None,
+        })
+        .await
+        .unwrap();
+
+        let p = engine.inspect(AddSource::FileBytes(torrent.to_vec())).await.unwrap();
+        assert_eq!(p.name, "inspect.bin");
+        assert_eq!(p.files.len(), 1);
+        assert_eq!(p.total_bytes, payload().len() as u64);
+        assert!(engine.list().await.unwrap().is_empty(), "inspect must not start the torrent");
+
+        for bad in [
+            AddSource::Magnet("definitely not a magnet".into()),
+            AddSource::FileBytes(b"not a torrent".to_vec()),
+            AddSource::Url("ftp://example.org/x.torrent".into()),
+        ] {
+            assert!(matches!(engine.inspect(bad.clone()).await, Err(EngineError::InvalidInput(_))));
+            assert!(matches!(engine.add(AddRequest::new(bad)).await, Err(EngineError::InvalidInput(_))));
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 

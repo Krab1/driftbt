@@ -1,4 +1,26 @@
-import { api, type Settings } from "../api";
+import { api, type Settings, type TorrentDetails } from "../api";
+
+function remembered<T extends string | number | boolean>(key: string, fallback: T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    if (typeof fallback === "number") return (Number(raw) || fallback) as T;
+    if (typeof fallback === "boolean") return (raw === "1") as T;
+    return raw as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function remember(key: string, value: string | number | boolean) {
+  try {
+    localStorage.setItem(key, typeof value === "boolean" ? (value ? "1" : "0") : String(value));
+  } catch {
+    /* private mode: just don't remember */
+  }
+}
+
+export type DetailTab = "overview" | "files" | "peers" | "trackers";
 
 export interface Toast {
   id: number;
@@ -25,6 +47,25 @@ class Ui {
   removeTarget = $state<{ id: string; name: string } | null>(null);
   settingsOpen = $state(false);
   menu = $state<{ x: number; y: number; id: string } | null>(null);
+
+  // Detail panel (remembered per viewer, not part of app settings).
+  detailOpen = $state(remembered<boolean>("drift.detailOpen", true));
+  detailHeight = $state(remembered<number>("drift.detailHeight", 260));
+  detailTab = $state<DetailTab>(remembered<string>("drift.detailTab", "overview") as DetailTab);
+  details = $state.raw<TorrentDetails | null>(null);
+
+  setDetailOpen(open: boolean) {
+    this.detailOpen = open;
+    remember("drift.detailOpen", open);
+  }
+  setDetailHeight(px: number) {
+    this.detailHeight = px;
+    remember("drift.detailHeight", px);
+  }
+  setDetailTab(tab: DetailTab) {
+    this.detailTab = tab;
+    remember("drift.detailTab", tab);
+  }
 
   toast(text: string, kind: Toast["kind"] = "info") {
     const id = nextToast++;

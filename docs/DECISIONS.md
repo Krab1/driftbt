@@ -27,4 +27,9 @@ Append-only. Format: `D-n · date · decision — why — consequence`.
 - **D-18 · 2026-10-14 · The frontend `api` has a mock transport used outside Tauri** — lets the UI be developed and measured in a plain browser with N fake torrents (`?n=1000`), and is the seam for the remote HTTP transport (M6-09). Selected at startup by `__TAURI_INTERNALS__`.
 - **D-19 · 2026-10-14 · Native window frame for now** — the custom title bar (M3-05) risks losing Windows 11 snap layouts; do it once the app is otherwise done.
 
+- **D-20 · 2026-10-14 · M2 dependencies (CLAUDE.md rule 7)** — `tauri-plugin-single-instance` (second launch forwards its arguments), `tauri-plugin-notification` (completion toast), Tauri's built-in `tray-icon` feature. All official and small. Notifications and the tray are used from Rust only, so no extra JS packages or capabilities.
+- **D-21 · 2026-10-14 · Autostart uses the `auto-launch` crate directly, not `tauri-plugin-autostart`** — the plugin writes the machine-wide Run key whenever the process is elevated and exposes no option; a per-user setting must stay per-user (found by testing from an elevated shell). The crate is already the plugin's own dependency.
+- **D-22 · 2026-10-14 · No in-app "register as magnet handler" button** — Windows protects the user's default-app choice and a registry write could overwrite another client's setting. The installer registers `magnet:` and `.torrent` (M3-04).
+- **D-23 · 2026-10-14 · The backend decides whether the window is visible** — WebView2 keeps `document.hidden == false` after the window is hidden to the tray, so the loops combine the native window state with the UI's report, and a `window-shown` event makes the UI catch up when it returns.
+
 Note: rqbit already ships its own Tauri desktop app (web UI wrapped). We are not forking it; our value is a purpose-built native-feeling UI plus queue/rules/streaming UX.

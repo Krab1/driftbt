@@ -1,31 +1,74 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod platform;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use drift_core::engine::fake::FakeEngine;
 use drift_core::engine::rqbit::{RqbitConfig, RqbitEngine};
 use drift_core::engine::TorrentEngine;
+use drift_core::events::completions;
+use drift_core::model::TorrentId;
 use drift_core::settings::{JsonFileStore, Settings, SettingsStore};
 use drift_core::ticker;
-use tauri::{Emitter, Manager, RunEvent};
+use serde::Serialize;
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
+use tauri_plugin_notification::NotificationExt;
+
+use platform::{autostart, OpenPayload};
 
 pub struct AppState {
     pub engine: Arc<dyn TorrentEngine>,
     pub store: Arc<dyn SettingsStore>,
     pub settings: Mutex<Settings>,
+    /// Reported by the UI (`document.hidden`); drives how often we poll and push.
+    pub visible: Arc<AtomicBool>,
+    /// Torrent whose details panel is open, if any.
+    pub watched: Arc<Mutex<Option<TorrentId>>>,
+    /// Magnets/files the app was launched with, until the UI takes them.
+    pub pending_open: Mutex<OpenPayload>,
     /// Kept to flush state on exit; `None` when running the fake demo engine.
     rqbit: Option<Arc<RqbitEngine>>,
 }
 
-/// The window is built here (config has `create: false`) so debug builds can open a DevTools-protocol
-/// port with `DRIFT_CDP_PORT=<port>` for driving the real UI in tests. Release builds never do.
-fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
+#[derive(Serialize, Clone)]
+struct Completed {
+    id: TorrentId,
+    name: String,
+}
+
+fn show_main(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+    // The loops slow down while hidden; tell the UI to catch up right away.
+    let _ = app.emit("window-shown", ());
+}
+
+/// Whether anyone can see the window. The webview keeps reporting `document.hidden == false` after the
+/// host window is hidden to the tray, so the backend decides from the native window state, and also
+/// honours the UI's own report (e.g. occluded or backgrounded).
+fn window_active(app: &AppHandle, ui_visible: &AtomicBool) -> bool {
+    let native = app
+        .get_webview_window("main")
+        .map(|w| w.is_visible().unwrap_or(true) && !w.is_minimized().unwrap_or(false))
+        .unwrap_or(true);
+    native && ui_visible.load(Ordering::Relaxed)
+}
+
+/// The window is built here (config has `create: false`) so we can start hidden, and so debug builds
+/// can open a DevTools-protocol port with `DRIFT_CDP_PORT=<port>` for driving the real UI in tests.
+fn create_main_window(app: &tauri::App, start_hidden: bool) -> tauri::Result<()> {
     let cfg = app.config().app.windows[0].clone();
     #[allow(unused_mut)]
-    let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &cfg)?;
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &cfg)?.visible(!start_hidden);
     #[cfg(debug_assertions)]
     if let Ok(port) = std::env::var("DRIFT_CDP_PORT") {
         // Replaces wry's default browser arguments, so repeat them.
@@ -37,10 +80,53 @@ fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
-// Composition root: engine, store and the ticker are wired here and nowhere else.
+fn create_tray(app: &tauri::App) -> tauri::Result<()> {
+    let show = MenuItem::with_id(app, "show", "Show Drift", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let mut tray = TrayIconBuilder::new()
+        .tooltip("Drift")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => show_main(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                show_main(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        tray = tray.icon(icon.clone());
+    }
+    tray.build(app)?;
+    Ok(())
+}
+
+// Composition root: engine, store, plugins and the background loops are wired here and nowhere else.
 fn main() {
     let app = tauri::Builder::default()
+        // Must be first: a second launch (e.g. clicking a magnet link) forwards its arguments here and exits.
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            show_main(app);
+            let payload = platform::open_payload(&argv[1.min(argv.len())..]);
+            if !payload.is_empty() {
+                let _ = app.emit("open-sources", payload);
+            }
+        }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
+        .on_window_event(|window, event| {
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                let close_to_tray = window.app_handle().state::<AppState>().settings.lock().unwrap().close_to_tray;
+                if close_to_tray {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let store: Arc<dyn SettingsStore> = Arc::new(JsonFileStore::new(data_dir.join("settings.json")));
@@ -79,22 +165,88 @@ fn main() {
                     (real.clone(), Some(real))
                 }
             };
+            tauri::async_runtime::block_on(engine.set_limits(settings.effective_limits()))?;
 
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(ticker::run(engine.clone(), Duration::from_secs(1), move |list| {
-                let _ = handle.emit("snapshot", &list);
-            }));
+            // Keep the OS autostart entry in step with the saved setting.
+            if autostart::is_enabled() != settings.start_with_windows {
+                let _ = autostart::set(settings.start_with_windows);
+            }
 
-            app.manage(AppState { engine, store, settings: Mutex::new(settings), rqbit });
-            create_main_window(app)?;
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            let start_hidden = args.iter().any(|a| a == autostart::FLAG) && settings.start_minimized;
+            let visible = Arc::new(AtomicBool::new(!start_hidden));
+            let watched: Arc<Mutex<Option<TorrentId>>> = Arc::new(Mutex::new(None));
+
+            // The state must be registered before any loop starts: they look it up on their first tick.
+            let pending = platform::open_payload(&args);
+            app.manage(AppState {
+                engine: engine.clone(),
+                store,
+                settings: Mutex::new(settings),
+                visible: visible.clone(),
+                watched: watched.clone(),
+                pending_open: Mutex::new(pending),
+                rqbit,
+            });
+
+            // Snapshot loop: 1 s while the window is visible, 5 s otherwise. Also detects completions.
+            {
+                let handle = app.handle().clone();
+                let vis = visible.clone();
+                let period_handle = app.handle().clone();
+                let mut prev = Vec::new();
+                tauri::async_runtime::spawn(ticker::run(
+                    engine.clone(),
+                    move || Duration::from_secs(if window_active(&period_handle, &vis) { 1 } else { 5 }),
+                    move |list| {
+                        let state = handle.state::<AppState>();
+                        let notify = state.settings.lock().unwrap().notify_on_complete;
+                        for t in completions(&prev, &list) {
+                            let _ = handle.emit("completed", Completed { id: t.id.clone(), name: t.name.clone() });
+                            let focused = handle.get_webview_window("main").and_then(|w| w.is_focused().ok()).unwrap_or(false);
+                            if notify && !focused {
+                                let _ = handle.notification().builder().title("Download complete").body(&t.name).show();
+                            }
+                        }
+                        let _ = handle.emit("snapshot", &list);
+                        prev = list;
+                    },
+                ));
+            }
+
+            // Details loop: 2 Hz, only for the watched torrent and only while the window is visible.
+            {
+                let handle = app.handle().clone();
+                let (vis, watch, eng) = (visible.clone(), watched.clone(), engine.clone());
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        let id = watch.lock().unwrap().clone();
+                        if let (true, Some(id)) = (window_active(&handle, &vis), id) {
+                            if let Ok(d) = eng.details(&id).await {
+                                let _ = handle.emit("details", d);
+                            }
+                        }
+                    }
+                });
+            }
+
+            create_main_window(app, start_hidden)?;
+            create_tray(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_torrents,
+            commands::inspect_torrent,
             commands::add_torrent,
             commands::pause_torrent,
             commands::resume_torrent,
             commands::remove_torrent,
+            commands::set_files,
+            commands::watch_details,
+            commands::set_visible,
+            commands::take_pending_open,
+            commands::reveal_torrent,
             commands::get_settings,
             commands::set_settings,
         ])

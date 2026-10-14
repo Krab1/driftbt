@@ -113,7 +113,7 @@
 
 <style>
   .list {
-    --cols: minmax(0, 1fr) 56px 76px 84px 64px 64px;
+    --cols: minmax(0, 1fr) 56px 76px 84px 64px 92px;
     display: flex;
     flex-direction: column;
     min-width: 0;

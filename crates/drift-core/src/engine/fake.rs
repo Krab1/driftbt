@@ -85,7 +85,8 @@ impl FakeEngine {
                     peers_live: (next() % 60) as u32,
                     eta_secs: (down > 0).then(|| (total - progress) / down),
                 };
-                g.torrents.insert(id, Entry { stats, files: Vec::new() });
+                let files = demo_files(total, progress, next());
+                g.torrents.insert(id, Entry { stats, files });
             }
         }
         e
@@ -117,6 +118,22 @@ impl FakeEngine {
         }
         Ok(())
     }
+}
+
+/// A small nested file list so the UI's file tree has something to show.
+fn demo_files(total: u64, progress: u64, seed: u64) -> Vec<FileDetails> {
+    const PATHS: [&str; 6] = ["README.txt", "images/boot.img", "images/live/filesystem.squashfs", "images/live/initrd", "docs/manual.pdf", "docs/licenses/GPL-3.txt"];
+    let n = 3 + (seed % 4) as usize;
+    let weights: Vec<u64> = (0..n).map(|i| 1 + (seed >> (i * 5)) % 40).collect();
+    let sum: u64 = weights.iter().sum();
+    weights
+        .iter()
+        .enumerate()
+        .map(|(i, w)| {
+            let size = total * w / sum;
+            FileDetails { index: i, path: PATHS[i].to_string(), size, progress_bytes: progress * w / sum, selected: true }
+        })
+        .collect()
 }
 
 /// Accepts `magnet:?xt=urn:btih:<40 hex>` or a bare 40-char hex hash.
@@ -161,7 +178,35 @@ impl TorrentEngine for FakeEngine {
     async fn details(&self, id: &TorrentId) -> Result<TorrentDetails> {
         let g = self.inner.lock().unwrap();
         let e = g.torrents.get(id).ok_or(EngineError::NotFound)?;
-        Ok(TorrentDetails { stats: e.stats.clone(), files: e.files.clone() })
+        let peers = (0..e.stats.peers_live.min(30))
+            .map(|i| PeerInfo {
+                addr: format!("203.0.113.{}:{}", i + 1, 51000 + i),
+                client: Some(["qBittorrent 5.1", "Transmission 4.0", "rqbit 9.0"][(i % 3) as usize].to_string()),
+                transport: if i % 4 == 0 { "utp" } else { "tcp" }.to_string(),
+                downloaded_bytes: e.stats.progress_bytes / (u64::from(i) + 2),
+                uploaded_bytes: e.stats.uploaded_bytes / (u64::from(i) + 3),
+            })
+            .collect();
+        Ok(TorrentDetails {
+            stats: e.stats.clone(),
+            files: e.files.clone(),
+            peers,
+            trackers: vec!["https://tracker.example.org/announce".into(), "udp://open.example.net:1337/announce".into()],
+            save_path: "C:\\Fake\\Downloads".into(),
+        })
+    }
+
+    async fn inspect(&self, source: AddSource) -> Result<TorrentPreview> {
+        let AddSource::Magnet(m) = source else {
+            return Err(EngineError::InvalidInput("fake engine only accepts magnets".into()));
+        };
+        let hash = parse_hash(&m).ok_or_else(|| EngineError::InvalidInput("bad magnet".into()))?;
+        Ok(TorrentPreview {
+            id: TorrentId(hash.clone()),
+            name: format!("fake-{}", &hash[..8]),
+            total_bytes: FAKE_TOTAL,
+            files: vec![PreviewFile { index: 0, path: "file.bin".into(), size: FAKE_TOTAL }],
+        })
     }
 
     async fn pause(&self, id: &TorrentId) -> Result<()> {

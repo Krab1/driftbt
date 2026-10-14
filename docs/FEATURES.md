@@ -6,7 +6,7 @@ Scope control: anything not here needs approval. "Engine" = comes from librqbit;
 | Feature | Source | Notes |
 |---|---|---|
 | Add by magnet, .torrent file, URL | Engine | Paste anywhere in the window, drag-drop, Add dialog |
-| Register as magnet / .torrent handler | Ours | Windows file association, single-instance forwarding |
+| Open magnet links and .torrent files with the app | Ours | Single-instance forwarding built (M2-03); the installer registers the `magnet:` scheme and `.torrent` association (M3-04) |
 | Pause / resume / remove (keep or delete data) | Engine | Remove asks once, remembers choice |
 | Torrent list with progress, speed, ETA, size | Ours | Virtualised, sortable, tabular numerals |
 | Filters: All / Downloading / Seeding / Paused / Error | Ours | Counts in the sidebar |

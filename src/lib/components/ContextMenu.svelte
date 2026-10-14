@@ -34,6 +34,22 @@
     }
   }
 
+  async function reveal() {
+    close();
+    if (t) await api.revealTorrent(t.id).catch((e) => ui.toast(errorText(e), "error"));
+  }
+
+  async function copyMagnet() {
+    close();
+    if (!t) return;
+    try {
+      await navigator.clipboard.writeText(`magnet:?xt=urn:btih:${t.id}&dn=${encodeURIComponent(t.name)}`);
+      ui.toast("Magnet link copied");
+    } catch {
+      ui.toast("Couldn't copy to the clipboard.", "error");
+    }
+  }
+
   function remove() {
     close();
     if (t) ui.removeTarget = { id: t.id, name: t.name };
@@ -54,6 +70,8 @@
   {#if canToggle}
     <button role="menuitem" onclick={toggle}><Icon name={t!.state === "paused" ? "play" : "pause"} />{t!.state === "paused" ? "Resume" : "Pause"}</button>
   {/if}
+  <button role="menuitem" onclick={reveal}><Icon name="folder" />Show in folder</button>
+  <button role="menuitem" onclick={copyMagnet}><Icon name="file" />Copy magnet link</button>
   <button role="menuitem" onclick={remove}><Icon name="trash" />Remove…</button>
 </div>
 

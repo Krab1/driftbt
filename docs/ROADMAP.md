@@ -31,14 +31,24 @@ Demo: add, watch, pause, remove a real torrent in the real UI.
 ## M2 — Daily-usable
 | ID | Task | Acceptance |
 |---|---|---|
-| [ ] M2-01 | Detail panel: overview, files (tree + checkboxes), peers, trackers | Live at 2 Hz, only for the selected torrent; file select changes the engine |
-| [ ] M2-02 | Speed limits + status bar toggles | Measured throttling within ±10% |
-| [ ] M2-03 | Single instance, magnet and .torrent handler registration, forward to running app | Click a magnet link in a browser; the app adds it |
-| [ ] M2-04 | Tray, close-to-tray, autostart option, snapshot throttling when hidden | Hidden idle CPU ≈ 0; RAM < 80 MB |
-| [ ] M2-05 | Completion notification + open folder; error surfacing in plain language | Disk-full and bad-path cases produce the copy in UI_SPEC |
-| [ ] M2-06 | All UI_SPEC states implemented (empty, loading metadata, checking, error…) | Screenshot per state attached |
+| [x] M2-01 | Detail panel: overview, files (tree + checkboxes), peers, trackers | Live at 2 Hz, only for the selected torrent; file select changes the engine |
+| [x] M2-02 | Speed limits + status bar toggles | Measured throttling within ±10% |
+| [~] M2-03 (forwarding done; OS registration of magnet: and .torrent moved to M3-04) | Single instance, magnet and .torrent handler registration, forward to running app | Click a magnet link in a browser; the app adds it |
+| [x] M2-04 | Tray, close-to-tray, autostart option, snapshot throttling when hidden | Hidden idle CPU ≈ 0; RAM < 80 MB |
+| [~] M2-05 (completion event, plain-language errors and Show in folder built; toast display and Explorer reveal not visually confirmed) | Completion notification + open folder; error surfacing in plain language | Disk-full and bad-path cases produce the copy in UI_SPEC |
+| [x] M2-06 | All UI_SPEC states implemented (empty, loading metadata, checking, error…) | Screenshot per state attached |
 
 Demo = **MVP**: replaces your current client for a week of normal use.
+
+**Verified 2026-10-14 (real Tauri window + Ubuntu 26.04.1 ISO unless noted):**
+- M2-01: details panel live for the selected torrent only (files, 27 peers with client names, trackers, save path); file-selection tree and Add-dialog preview (mock, plus real `inspect`); selection changes covered by an engine test (download one file, widen mid-download).
+- M2-02: 2048 KiB/s limit measured 1.87 MiB/s (about 6% under), lifted instantly (66 MiB/s unlimited); settings and status-bar switch.
+- M2-03: a second launch with a `magnet:` argument exits and the running instance shows its Add dialog prefilled and fetching info. `.torrent` path arguments are parsed and read but not exercised live.
+- M2-04: close-to-tray (real `WM_CLOSE` hides, process lives), second launch shows the window, start-minimised only on an `--autostart` launch, snapshots every 5 s while hidden vs 1 s visible, per-user autostart entry written and removed. Tray icon and menu are built but not visually checked.
+- M2-05: the `completed` event fired while hidden. **Not confirmed:** the Windows toast appearing (Windows may need an installed app identity for toasts, so re-check after M3-04) and the Explorer reveal.
+- M2-06: loading metadata, checking, looking for peers, error + Retry, empty, no matches (mock-verified; error text mapping unit-tested).
+
+Bugs found by the real-app run and fixed: ticker task spawned before the app state existed (list froze), `document.hidden` stays false when the window is hidden to the tray, the autostart plugin wrote the machine-wide key when elevated, a settings file saved with a UTF-8 BOM (Notepad, PowerShell 5) was treated as corrupt, and OS error 32 was mapped to the "folder missing" message.
 
 ## M3 — Polish pass
 | ID | Task | Acceptance |
@@ -47,7 +57,7 @@ Demo = **MVP**: replaces your current client for a week of normal use.
 | [ ] M3-02 | Design critique pass (`design:design-critique`, `web-design-guidelines`) | Findings fixed or logged |
 | [ ] M3-03 | Performance pass against ARCHITECTURE budgets | Numbers recorded in PERF.md |
 | [ ] M3-05 | Custom title bar integrated with the top bar (drag region, caption buttons) without losing Windows 11 snap layouts | Snap-layout flyout still appears on the maximize button; window drags and double-click maximizes |
-| [ ] M3-04 | Installer (MSI/NSIS), icon, app name decision | Install, upgrade, and uninstall tested on a clean user profile |
+| [ ] M3-04 | Installer (MSI/NSIS), icon, app name decision; register the `magnet:` scheme and `.torrent` association (bundle config) and re-check the completion toast with an installed app identity | Install, upgrade, and uninstall tested on a clean user profile |
 
 ## M4 — Power features
 | ID | Task | Acceptance |

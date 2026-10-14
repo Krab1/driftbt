@@ -22,11 +22,42 @@ pub struct Settings {
     /// `None` until the app resolves the OS Downloads folder on first run.
     pub download_dir: Option<PathBuf>,
     pub theme: Theme,
+    /// Global speed limits apply only while this is on, so the values survive being toggled off.
+    pub limits_enabled: bool,
+    /// KiB/s; 0 means unlimited for that direction.
+    pub down_limit_kib: u32,
+    pub up_limit_kib: u32,
+    /// Closing the window hides it to the tray instead of quitting.
+    pub close_to_tray: bool,
+    /// Launch hidden in the tray (used with start-with-Windows).
+    pub start_minimized: bool,
+    /// Mirrors the OS autostart entry; the app keeps the two in sync.
+    pub start_with_windows: bool,
+    pub notify_on_complete: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Self { schema: CURRENT_SCHEMA, download_dir: None, theme: Theme::System }
+        Self {
+            schema: CURRENT_SCHEMA,
+            download_dir: None,
+            theme: Theme::System,
+            limits_enabled: false,
+            down_limit_kib: 0,
+            up_limit_kib: 0,
+            close_to_tray: false,
+            start_minimized: false,
+            start_with_windows: false,
+            notify_on_complete: true,
+        }
+    }
+}
+
+impl Settings {
+    /// What the engine should enforce right now, in bytes per second.
+    pub fn effective_limits(&self) -> crate::model::Limits {
+        let bps = |kib: u32| (self.limits_enabled && kib > 0).then(|| kib.saturating_mul(1024));
+        crate::model::Limits { down_bps: bps(self.down_limit_kib), up_bps: bps(self.up_limit_kib) }
     }
 }
 
@@ -63,6 +94,8 @@ fn migrate(mut v: serde_json::Value) -> serde_json::Value {
 }
 
 fn parse(bytes: &[u8]) -> Option<Settings> {
+    // Notepad and PowerShell 5 save UTF-8 files with a BOM; serde_json rejects it.
+    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
     let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     serde_json::from_value(migrate(v)).ok()
 }
@@ -115,6 +148,26 @@ mod tests {
     }
 
     #[test]
+    fn limits_apply_only_when_enabled_and_nonzero() {
+        let mut s = Settings { down_limit_kib: 500, up_limit_kib: 0, ..Settings::default() };
+        assert_eq!(s.effective_limits(), crate::model::Limits::default());
+        s.limits_enabled = true;
+        assert_eq!(s.effective_limits(), crate::model::Limits { down_bps: Some(500 * 1024), up_bps: None });
+    }
+
+    #[test]
+    fn older_files_without_new_fields_still_load() {
+        let dir = tmp("old");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, br#"{"schema":1,"download_dir":"D:/x","theme":"dark"}"#).unwrap();
+        let s = JsonFileStore::new(&path).load();
+        assert_eq!(s.theme, Theme::Dark);
+        assert!(s.notify_on_complete && !s.limits_enabled);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn migrates_v0_and_ignores_unknown_fields() {
         let dir = tmp("mig");
         std::fs::create_dir_all(&dir).unwrap();
@@ -124,6 +177,20 @@ mod tests {
         assert_eq!(s.schema, CURRENT_SCHEMA);
         assert_eq!(s.download_dir, Some("E:/old".into()));
         assert_eq!(s.theme, Theme::Light);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_utf8_bom_from_notepad_is_accepted() {
+        let dir = tmp("bom");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        let mut bytes = vec![0xEF, 0xBB, 0xBF];
+        bytes.extend_from_slice(br#"{"schema":1,"theme":"dark"}"#);
+        std::fs::write(&path, bytes).unwrap();
+        let s = JsonFileStore::new(&path).load();
+        assert_eq!(s.theme, Theme::Dark);
+        assert!(!bad_path(&path).exists(), "a BOM must not be treated as corruption");
         let _ = std::fs::remove_dir_all(dir);
     }
 

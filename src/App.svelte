@@ -10,6 +10,8 @@
   import Toasts from "./lib/components/Toasts.svelte";
   import TopBar from "./lib/components/TopBar.svelte";
   import TorrentList from "./lib/components/TorrentList.svelte";
+  import { api, type OpenPayload } from "./lib/api";
+  import DetailPanel from "./lib/components/DetailPanel.svelte";
   import { torrents } from "./lib/stores/torrents.svelte";
   import { ui, errorText } from "./lib/stores/ui.svelte";
 
@@ -17,11 +19,32 @@
   let dragging = $state(false);
   let dragDepth = 0;
 
+  function openSources(p: OpenPayload) {
+    if (p.magnets.length || p.files.length) ui.openAdd(p.magnets.join("\n"), p.files);
+  }
+
   onMount(() => {
-    let stop: (() => void) | undefined;
-    torrents.start().then((un) => (stop = un)).catch((e) => ui.toast(errorText(e), "error"));
+    const stops: (() => void)[] = [];
+    const keep = (p: Promise<() => void>) => p.then((un) => stops.push(un)).catch((e) => ui.toast(errorText(e), "error"));
+    keep(torrents.start());
+    keep(api.onDetails((d) => (ui.details = d)));
+    keep(api.onCompleted((c) => ui.toast(`${c.name} finished downloading`)));
+    keep(api.onOpenSources(openSources));
+    keep(api.onShown(() => torrents.refresh().catch(() => {})));
     ui.loadSettings().catch((e) => ui.toast(errorText(e), "error"));
-    return () => stop?.();
+    api.takePendingOpen().then(openSources).catch(() => {});
+
+    // Tell the backend when we're hidden so it can poll less; catch up as soon as we're shown again.
+    const onVisibility = () => {
+      api.setVisible(!document.hidden).catch(() => {});
+      if (!document.hidden) torrents.refresh().catch(() => {});
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    onVisibility();
+    return () => {
+      stops.forEach((s) => s());
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   });
 
   // Theme: "system" removes the attribute so the OS setting applies.
@@ -81,7 +104,10 @@
   <TopBar bind:this={topbar} />
   <div class="main">
     <Rail />
-    <TorrentList />
+    <div class="content">
+      <div class="listwrap"><TorrentList /></div>
+      <DetailPanel />
+    </div>
   </div>
   <StatusBar />
 </div>
@@ -106,6 +132,17 @@
     display: grid;
     grid-template-columns: 168px minmax(0, 1fr);
     min-height: 0;
+  }
+  .content {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+  .listwrap {
+    flex: 1;
+    min-height: 120px;
+    display: grid;
   }
   .drop {
     position: fixed;

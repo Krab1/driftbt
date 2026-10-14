@@ -73,10 +73,41 @@ pub struct FileDetails {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PeerInfo {
+    pub addr: String,
+    pub client: Option<String>,
+    /// "tcp", "utp" or "socks".
+    pub transport: String,
+    pub downloaded_bytes: u64,
+    pub uploaded_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TorrentDetails {
     pub stats: TorrentStats,
     /// Empty until metadata is known (magnets).
     pub files: Vec<FileDetails>,
+    /// Connected peers, busiest first. Empty while paused.
+    pub peers: Vec<PeerInfo>,
+    pub trackers: Vec<String>,
+    /// Folder the torrent is saved in.
+    pub save_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PreviewFile {
+    pub index: usize,
+    pub path: String,
+    pub size: u64,
+}
+
+/// What a torrent contains, read without starting it (for the Add dialog).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TorrentPreview {
+    pub id: TorrentId,
+    pub name: String,
+    pub total_bytes: u64,
+    pub files: Vec<PreviewFile>,
 }
 
 /// Bytes per second; `None` means unlimited.

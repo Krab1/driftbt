@@ -3,7 +3,7 @@
 
 use async_trait::async_trait;
 
-use crate::model::{AddRequest, Limits, TorrentDetails, TorrentId, TorrentStats};
+use crate::model::{AddRequest, AddSource, Limits, TorrentDetails, TorrentId, TorrentPreview, TorrentStats};
 
 pub mod fake;
 pub mod rqbit;
@@ -14,6 +14,9 @@ pub enum EngineError {
     NotFound,
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// Metadata could not be fetched in time (no peers, bad magnet, offline).
+    #[error("timed out fetching torrent info")]
+    Timeout,
     #[error("engine error: {0}")]
     Backend(String),
 }
@@ -24,6 +27,9 @@ pub type Result<T> = std::result::Result<T, EngineError>;
 pub trait TorrentEngine: Send + Sync {
     /// Adding a torrent that is already managed returns its existing id.
     async fn add(&self, req: AddRequest) -> Result<TorrentId>;
+    /// Read a torrent's name and file list without starting it. Magnets are resolved from peers and
+    /// may return `Timeout`.
+    async fn inspect(&self, source: AddSource) -> Result<TorrentPreview>;
     /// Cheap; called every tick.
     async fn list(&self) -> Result<Vec<TorrentStats>>;
     async fn details(&self, id: &TorrentId) -> Result<TorrentDetails>;
