@@ -8,49 +8,18 @@ use drift_core::guard::Adapter;
 use drift_core::manager::{GuardStatus, LimitsStatus};
 use drift_core::netctl::FilterStatus;
 use drift_core::playlist;
-use drift_core::model::{AddRequest, AddSource, TorrentDetails, TorrentId, TorrentPreview, TorrentView};
+use drift_core::service::AddInput;
+use drift_core::model::{TorrentDetails, TorrentId, TorrentPreview, TorrentView};
 use drift_core::queue::Move;
 use drift_core::rules::Goal;
 use drift_core::search::SearchReport;
 use drift_core::settings::Settings;
-use serde::Deserialize;
 use tauri::State;
 
 use crate::platform::{self, OpenPayload};
 use crate::AppState;
 
 type ApiResult<T> = Result<T, ApiError>;
-
-#[derive(Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AddInput {
-    Magnet {
-        value: String,
-        #[serde(default)]
-        only_files: Option<Vec<usize>>,
-    },
-    /// A link to a .torrent file (search results from sources without magnets).
-    Url {
-        value: String,
-        #[serde(default)]
-        only_files: Option<Vec<usize>>,
-    },
-    File {
-        bytes: Vec<u8>,
-        #[serde(default)]
-        only_files: Option<Vec<usize>>,
-    },
-}
-
-impl AddInput {
-    fn into_parts(self) -> (AddSource, Option<Vec<usize>>) {
-        match self {
-            AddInput::Magnet { value, only_files } => (AddSource::Magnet(value.trim().to_string()), only_files),
-            AddInput::Url { value, only_files } => (AddSource::Url(value.trim().to_string()), only_files),
-            AddInput::File { bytes, only_files } => (AddSource::FileBytes(bytes), only_files),
-        }
-    }
-}
 
 #[tauri::command]
 pub async fn list_torrents(state: State<'_, AppState>) -> ApiResult<Vec<TorrentView>> {
@@ -59,16 +28,12 @@ pub async fn list_torrents(state: State<'_, AppState>) -> ApiResult<Vec<TorrentV
 
 #[tauri::command]
 pub async fn inspect_torrent(state: State<'_, AppState>, input: AddInput) -> ApiResult<TorrentPreview> {
-    Ok(state.engine.inspect(input.into_parts().0).await?)
+    state.svc.inspect(input).await
 }
 
 #[tauri::command]
 pub async fn add_torrent(state: State<'_, AppState>, input: AddInput, category: Option<String>) -> ApiResult<TorrentId> {
-    let (source, only_files) = input.into_parts();
-    let mut req = AddRequest::new(source);
-    req.only_files = only_files;
-    // The manager picks the save folder (category, else the default) and the queue slot.
-    Ok(state.manager.add(req, category, Vec::new()).await?)
+    state.svc.add(input, category).await
 }
 
 #[tauri::command]

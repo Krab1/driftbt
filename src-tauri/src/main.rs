@@ -153,6 +153,13 @@ fn main() {
         })
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
+            // The headless server uses the same kind of folder; never both on one session.
+            match drift_core::lock::DataDirLock::acquire(&data_dir)? {
+                Some(lock) => {
+                    app.manage(lock);
+                }
+                None => return Err("Another Drift (the app or the headless server) is already using this data folder.".into()),
+            }
             let store: Arc<dyn SettingsStore> = Arc::new(JsonFileStore::new(data_dir.join("settings.json")));
             let mut settings = store.load();
             if settings.download_dir.is_none() {

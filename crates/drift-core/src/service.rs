@@ -8,7 +8,7 @@ use crate::background::unix_now;
 use crate::engine::{EngineError, TorrentEngine};
 use crate::errors::ApiError;
 use crate::manager::{Manager, SharedSettings};
-use crate::model::TorrentId;
+use crate::model::{AddRequest, AddSource, TorrentId, TorrentPreview};
 use crate::netctl::{NetControl, Refresh};
 use crate::playlist;
 use crate::search::{self, config::Secrets, SearchQuery, SearchReport};
@@ -24,7 +24,52 @@ pub struct Service {
     pub data_dir: PathBuf,
 }
 
+/// What the user wants to add. `only_files` limits the download to those file indices.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AddInput {
+    Magnet {
+        value: String,
+        #[serde(default)]
+        only_files: Option<Vec<usize>>,
+    },
+    /// A link to a .torrent file (search results from sources without magnets).
+    Url {
+        value: String,
+        #[serde(default)]
+        only_files: Option<Vec<usize>>,
+    },
+    File {
+        bytes: Vec<u8>,
+        #[serde(default)]
+        only_files: Option<Vec<usize>>,
+    },
+}
+
+impl AddInput {
+    fn into_parts(self) -> (AddSource, Option<Vec<usize>>) {
+        match self {
+            AddInput::Magnet { value, only_files } => (AddSource::Magnet(value.trim().to_string()), only_files),
+            AddInput::Url { value, only_files } => (AddSource::Url(value.trim().to_string()), only_files),
+            AddInput::File { bytes, only_files } => (AddSource::FileBytes(bytes), only_files),
+        }
+    }
+}
+
 impl Service {
+    /// Reads a torrent's files without starting it.
+    pub async fn inspect(&self, input: AddInput) -> Result<TorrentPreview, ApiError> {
+        Ok(self.engine.inspect(input.into_parts().0).await?)
+    }
+
+    /// The manager picks the save folder (category, else the default) and the queue slot.
+    pub async fn add(&self, input: AddInput, category: Option<String>) -> Result<TorrentId, ApiError> {
+        let (source, only_files) = input.into_parts();
+        let mut req = AddRequest::new(source);
+        req.only_files = only_files;
+        Ok(self.manager.add(req, category, Vec::new()).await?)
+    }
+
     /// Saves and applies new settings. Returns the settings that were in force before, so the caller can react to
     /// what changed (the desktop app syncs its autostart entry). A failed network change puts everything back.
     pub async fn apply_settings(&self, new: Settings) -> Result<Settings, ApiError> {

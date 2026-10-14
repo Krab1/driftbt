@@ -8,6 +8,7 @@ pub mod guard;
 pub mod ipfilter;
 pub mod ipfilter_source;
 pub mod jsonfile;
+pub mod lock;
 pub mod library;
 pub mod manager;
 pub mod model;

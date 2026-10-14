@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { api, type Theme } from "../api";
+  import { api, remote, type Theme } from "../api";
+  import { auth } from "../stores/auth.svelte";
   import { ui } from "../stores/ui.svelte";
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
@@ -188,6 +189,7 @@
   {/if}
 
   {#snippet footer()}
+    {#if remote}<button class="btn" onclick={() => ((ui.settingsOpen = false), auth.logout())}>Sign out</button>{/if}
     <button class="btn" onclick={() => (ui.settingsOpen = false)}>Done</button>
   {/snippet}
 </Dialog>
