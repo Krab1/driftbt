@@ -20,6 +20,23 @@ pub struct AppState {
     rqbit: Option<Arc<RqbitEngine>>,
 }
 
+/// The window is built here (config has `create: false`) so debug builds can open a DevTools-protocol
+/// port with `DRIFT_CDP_PORT=<port>` for driving the real UI in tests. Release builds never do.
+fn create_main_window(app: &tauri::App) -> tauri::Result<()> {
+    let cfg = app.config().app.windows[0].clone();
+    #[allow(unused_mut)]
+    let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &cfg)?;
+    #[cfg(debug_assertions)]
+    if let Ok(port) = std::env::var("DRIFT_CDP_PORT") {
+        // Replaces wry's default browser arguments, so repeat them.
+        builder = builder.additional_browser_args(&format!(
+            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}"
+        ));
+    }
+    builder.build()?;
+    Ok(())
+}
+
 // Composition root: engine, store and the ticker are wired here and nowhere else.
 fn main() {
     let app = tauri::Builder::default()
@@ -69,6 +86,7 @@ fn main() {
             }));
 
             app.manage(AppState { engine, store, settings: Mutex::new(settings), rqbit });
+            create_main_window(app)?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

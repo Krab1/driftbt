@@ -38,8 +38,14 @@ Consequences for the plan:
 - Re-adding a magnet for a managed torrent makes librqbit try to resolve metadata first; the adapter checks the info-hash itself.
 - Loopback test (a real librqbit seeder session vs. our adapter, 127.0.0.1, no DHT/trackers) downloads 3 MiB in about 0.25 s.
 
-## S2 — encryption and uTP peer-count spike (M0-03)
-Not run yet.
+## S2 — encryption and uTP peer-count spike (M0-03) · PARTIAL, 2026-10-14
+Measured with the real app on Ubuntu 26.04.1 desktop (6.0 GB, public swarm, DHT on, **TCP only: uTP off, no MSE**):
+- Peers grew 18 → 64 within 60 s; speed 41–69 MB/s (about 330–550 Mbit/s); no reference-client run for comparison.
+- Conclusion for well-seeded public swarms: missing MSE encryption and uTP did **not** limit throughput. The risk remains for obscure or private swarms and for ISPs that throttle plain BitTorrent. Re-test against a reference client on a poorly seeded torrent before closing R1.
+- End-game: the last 512 KiB piece took about 50 s after the burst finished (progress stuck at 6481885184 of 6482409472 bytes). Cosmetic for now; check for an end-game mode if it becomes common.
 
-## S3 — Windows I/O spike (M0-04)
-Not run yet.
+## S3 — Windows I/O spike (M0-04) · PARTIAL, 2026-10-14
+- 6.0 GB written to an NVMe/SSD-class E: drive with Defender on and no stalls; at 60 MB/s the disk was never the bottleneck. CPU was not recorded.
+- Re-reading the finished ISO for SHA-256 took 5 s.
+- Windows file sharing: while seeding, the app holds the file open for writing, so tools that open it with `FileShare.Read` (for example `Get-FileHash`) fail with "in use". Opening with `FileShare.ReadWrite` works. Matters for "open file" and media-player actions; use share-friendly opens in our own code.
+- Crash safety: after a hard kill at ~76%, the restarted app resumed at 4.9 GB (fast resume) and the final file matched the published SHA-256.

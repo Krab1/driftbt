@@ -38,5 +38,14 @@ Read this file first, then the doc for your task. Do not skim.
 - Test torrents: only legal ones (Linux distro ISOs). Never commit downloaded data.
 - Commits: small, one task ID each (`M2-04: …`). Update the task status in `docs/ROADMAP.md` in the same commit.
 
+## Driving the real app in tests
+Debug builds open a DevTools-protocol port on the webview when `DRIFT_CDP_PORT` is set (`src-tauri/src/main.rs`, compiled out of release). With the Vite dev server running (`npm run dev`) and `cargo build -p drift`:
+```powershell
+$env:DRIFT_CDP_PORT='9222'; Start-Process target\debug\drift.exe
+node scripts/cdp.mjs eval "window.__TAURI_INTERNALS__.invoke('list_torrents')"   # real IPC
+node scripts/cdp.mjs shot out.png                                               # screenshot of the real window
+```
+`eval` runs JS in the page (wrap `await` in an async IIFE). Use a throwaway download folder (set it with `set_settings`) and restore the user's setting afterwards. Pure-UI work can use the browser mock instead: open the Vite URL with `?n=1000`.
+
 ## Definition of done (every task)
 Acceptance criteria met · tests pass · `cargo clippy -D warnings` and `npm run check` clean · docs updated · UI checked in the running app · task ticked in ROADMAP.

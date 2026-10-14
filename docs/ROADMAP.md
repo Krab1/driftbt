@@ -8,8 +8,8 @@ Order matters inside a milestone; milestones are sequential. Each milestone ends
 |---|---|---|
 | [x] M0-01 | Scaffold Tauri v2 + Svelte 5 + TS + Vite as a Cargo workspace (`crates/drift-core`, `crates/drift-server` stub, `src-tauri`); lint/format/clippy/vitest wired | `npm run tauri dev` opens a window; `cargo clippy --workspace -D warnings` and `npm run check` pass; `drift-core` has no tauri/axum dependency |
 | [x] M0-02 | **S1** Read `librqbit` API (docs.rs + source) and fill the open questions in FEATURES.md: file re-selection, recheck, force-announce, bind interface, **IP filter hook (can we reject inbound and outbound peers by address before the handshake?)**, session persistence, stream URL | Table in `docs/SPIKES.md` with yes/no/how per item; FEATURES.md rows marked or struck |
-| [ ] M0-03 | **S2** Encryption/uTP spike: download a popular distro ISO, record peer count and speed; compare with a reference client on the same machine | Numbers in SPIKES.md; decision in DECISIONS.md |
-| [ ] M0-04 | **S3** Windows I/O spike: 6 GB ISO to a normal drive, with Defender on; note hash-check time and CPU | Numbers in SPIKES.md |
+| [~] M0-03 (partial, see SPIKES S2) | **S2** Encryption/uTP spike: download a popular distro ISO, record peer count and speed; compare with a reference client on the same machine | Numbers in SPIKES.md; decision in DECISIONS.md |
+| [~] M0-04 (partial, see SPIKES S3) | **S3** Windows I/O spike: 6 GB ISO to a normal drive, with Defender on; note hash-check time and CPU | Numbers in SPIKES.md |
 | [x] M0-05 | Define `TorrentEngine`, models, `FakeEngine` | Compiles; `core` has zero imports of tauri/librqbit (grep check in CI script) |
 | [x] M0-06 | `rqbit.rs` adapter: add (magnet/file), list, pause/resume/remove | Integration test adds a loopback test torrent and completes it |
 
@@ -21,10 +21,10 @@ Demo: terminal-level proof the engine works through our trait.
 | [x] M1-01 | Ticker + `snapshot` event + `src/lib/api` typed wrapper | Frontend logs a live list from the fake engine at 1 Hz |
 | [x] M1-02 | Design tokens, themes, layout shell (rail, list, status bar). **Custom title bar deferred to M3-05** (keeps native Windows 11 snap layouts for now) | Both themes measured (text contrast 5.7:1); layout checked at 1100×700 and 480 px wide. Narrow widths below the 900 px window minimum are not supported until the remote UI (M6-09) |
 | [x] M1-03 | Virtualised torrent list, row component, sort, filter rail with counts, search | 1,000 fake torrents scroll at 60 fps; keyboard navigation works |
-| [~] M1-04 | Add flow: paste magnet, drop file, Add dialog (source, save folder). **Name/size/file tree in the dialog needs an engine `inspect` (list-only) call: moved to M2-01** | Verified in the mock: invalid magnet shows a plain-language error and keeps the dialog; valid magnet adds, closes, toasts. **Still open: a real ISO adds and downloads end to end in the Tauri window** (do with spikes S2/S3) |
-| [~] M1-05 | Pause/resume/remove with confirm; row hover actions; context menu | Verified in the mock: pause, remove dialog (delete-files off by default, choice remembered), context menu with keyboard navigation. **Still open: same actions on a real torrent in the Tauri window** |
+| [x] M1-04 | Add flow: paste magnet, drop file, Add dialog (source, save folder). **Name/size/file tree in the dialog needs an engine `inspect` (list-only) call: moved to M2-01** | Verified in the mock (invalid magnet error, valid magnet) **and in the real Tauri window 2026-10-14**: dropped the Ubuntu 26.04.1 desktop `.torrent`, 6.0 GB downloaded at 41–69 MB/s with 18–64 peers, SHA-256 matched Ubuntu's published checksum |
+| [x] M1-05 | Pause/resume/remove with confirm; row hover actions; context menu | Verified on the real torrent 2026-10-14: pause held progress at 3354 MB, resume continued at 63 MB/s, remove with "also delete files" deleted the 6 GB file and showed the empty state. Context menu and keyboard navigation verified in the mock |
 | [x] M1-06 | Settings store (JSON, versioned), download folder, theme setting | Survives restart; migration test |
-| [x] M1-07 | Session persistence | Kill the process mid-download; list and progress restored |
+| [x] M1-07 (also proven with a hard kill at ~76% of a real 6 GB download: restart resumed at 4.9 GB, not zero) | Session persistence | Kill the process mid-download; list and progress restored |
 
 Demo: add, watch, pause, remove a real torrent in the real UI.
 
