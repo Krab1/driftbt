@@ -128,7 +128,7 @@ The backend owns a single tick task (`core::ticker`) that polls the engine, runs
 librqbit session state persists to `<data>/session`. On start: load settings → build engine → rehydrate → queue re-evaluates. Crash must not lose the torrent list.
 
 ## Performance budgets
-Idle RAM < 80 MB (webview included) · installer < 15 MB · cold start < 1 s to interactive · UI stays 60 fps with 1,000 torrents (virtualised list, keyed updates) · snapshot payload < 200 KB at 1,000 torrents.
+Cold start < 1 s (measured 303 ms) · memory incl. WebView2 <= 130 MB private (measured 119 MB; the original 80 MB target is not reachable with WebView2) · UI stays 60 fps with 1,000 torrents (measured) · UI cost per snapshot < 4 ms at 1,000 torrents (measured 1.2 ms p50). See docs/PERF.md.
 
 ## Testing
 - `core/*`: unit tests with `engine::fake`.

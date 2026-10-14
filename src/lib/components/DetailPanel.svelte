@@ -119,7 +119,9 @@
   </div>
 
   {#if ui.detailOpen}
-    <div class="pane" id="pane" role="tabpanel" aria-labelledby="tab-{ui.detailTab}">
+    <!-- Scrollable, so it must be reachable by keyboard. -->
+    <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+    <div class="pane" id="pane" role="tabpanel" aria-labelledby="tab-{ui.detailTab}" tabindex="0">
       {#if !stats}
         <p class="hint">Select a torrent to see its details.</p>
       {:else if ui.detailTab === "overview"}

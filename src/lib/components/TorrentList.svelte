@@ -71,9 +71,11 @@
 <div class="list" role="grid" aria-label="Torrents" aria-rowcount={items.length + 1} aria-activedescendant={torrents.selectedId ? `row-${torrents.selectedId}` : undefined} tabindex="0" {onkeydown}>
   <div class="head" role="row" aria-rowindex="1">
     {#each heads as h (h.key)}
-      <button class="th" class:r={h.right} role="columnheader" aria-sort={torrents.sortKey === h.key ? (torrents.sortDir === 1 ? "ascending" : "descending") : "none"} onclick={() => torrents.sortBy(h.key)}>
-        {h.label}{#if torrents.sortKey === h.key}<span class="arrow" aria-hidden="true">{torrents.sortDir === 1 ? "▲" : "▼"}</span>{/if}
-      </button>
+      <div class="hcell c-{h.key}" class:r={h.right} role="columnheader" aria-sort={torrents.sortKey === h.key ? (torrents.sortDir === 1 ? "ascending" : "descending") : "none"}>
+        <button class="th" onclick={() => torrents.sortBy(h.key)}>
+          {h.label}{#if torrents.sortKey === h.key}<span class="arrow" aria-hidden="true">{torrents.sortDir === 1 ? "▲" : "▼"}</span>{/if}
+        </button>
+      </div>
     {/each}
     <span></span>
   </div>
@@ -131,16 +133,29 @@
     color: var(--text-muted);
     font-size: 11px;
   }
+  .hcell {
+    min-width: 0;
+  }
+  /* Compact layout (narrow window, or remote UI on a small screen): keep name, speed and actions. */
+  @media (max-width: 760px) {
+    .list {
+      --cols: minmax(0, 1fr) 84px 92px;
+    }
+    .list :global(.c-progress),
+    .list :global(.c-size),
+    .list :global(.c-eta) {
+      display: none;
+    }
+  }
+  .hcell.r {
+    text-align: right;
+  }
   .th {
     background: none;
     border: 0;
     padding: 0;
-    text-align: left;
     color: inherit;
     font-size: inherit;
-  }
-  .th.r {
-    text-align: right;
   }
   .th:hover {
     color: var(--text-primary);

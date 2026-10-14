@@ -73,10 +73,10 @@
       </div>
     </div>
   </div>
-  <div class="num r" role="gridcell">{t.state === "error" ? "" : `${pct}%`}</div>
-  <div class="num r" role="gridcell">{t.total_bytes ? formatBytes(t.total_bytes) : "—"}</div>
+  <div class="num r c-progress" role="gridcell">{t.state === "error" ? "" : `${pct}%`}</div>
+  <div class="num r c-size" role="gridcell">{t.total_bytes ? formatBytes(t.total_bytes) : "—"}</div>
   <div class="num r" role="gridcell">{formatSpeed(speed)}</div>
-  <div class="num r" role="gridcell">{t.state === "downloading" ? formatEta(t.eta_secs) : "—"}</div>
+  <div class="num r c-eta" role="gridcell">{t.state === "downloading" ? formatEta(t.eta_secs) : "—"}</div>
   <div class="actions" role="gridcell">
     {#if t.state === "error"}
       <button class="btn ghost retry" onclick={(e) => { e.stopPropagation(); ontoggle(); }}>Retry</button>
@@ -160,12 +160,12 @@
     color: var(--text-muted);
   }
   .cap.bad {
-    color: var(--danger);
+    color: var(--danger-fg);
   }
   .retry {
     height: 24px;
     padding: 0 8px;
-    color: var(--accent);
+    color: var(--accent-fg);
   }
   .bar {
     height: 3px;
@@ -186,8 +186,10 @@
   .bar i.checking {
     background: var(--accent);
   }
+  /* Finished torrents are done news: keep their bar quiet so active transfers stand out. */
   .bar i.seeding {
     background: var(--success);
+    opacity: 0.45;
   }
   .bar i.error {
     background: var(--danger);

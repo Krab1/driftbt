@@ -19,8 +19,10 @@
     el.querySelector<HTMLButtonElement>("button")?.focus();
   });
 
+  /** Closing returns focus to the torrent list so keyboard users keep their place. */
   function close() {
     ui.menu = null;
+    document.querySelector<HTMLElement>('[role="grid"]')?.focus();
   }
 
   async function toggle() {

@@ -146,7 +146,7 @@
   }
   .seg button.on {
     background: var(--selected);
-    color: var(--accent);
+    color: var(--accent-fg);
     font-weight: 500;
   }
 </style>

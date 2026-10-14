@@ -70,11 +70,21 @@ fn create_main_window(app: &tauri::App, start_hidden: bool) -> tauri::Result<()>
     #[allow(unused_mut)]
     let mut builder = tauri::WebviewWindowBuilder::from_config(app.handle(), &cfg)?.visible(!start_hidden);
     #[cfg(debug_assertions)]
-    if let Ok(port) = std::env::var("DRIFT_CDP_PORT") {
-        // Replaces wry's default browser arguments, so repeat them.
-        builder = builder.additional_browser_args(&format!(
-            "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port={port}"
-        ));
+    {
+        // Debug-only knobs. Setting browser arguments replaces wry's defaults, so repeat them.
+        let mut args = String::from("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection");
+        let port = std::env::var("DRIFT_CDP_PORT").ok();
+        let extra = std::env::var("DRIFT_WV_ARGS").ok();
+        if let Some(p) = &port {
+            args.push_str(&format!(" --remote-debugging-port={p}"));
+        }
+        if let Some(e) = &extra {
+            args.push(' ');
+            args.push_str(e);
+        }
+        if port.is_some() || extra.is_some() {
+            builder = builder.additional_browser_args(&args);
+        }
     }
     builder.build()?;
     Ok(())

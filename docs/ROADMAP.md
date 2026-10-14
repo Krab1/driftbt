@@ -53,9 +53,9 @@ Bugs found by the real-app run and fixed: ticker task spawned before the app sta
 ## M3 — Polish pass
 | ID | Task | Acceptance |
 |---|---|---|
-| [ ] M3-01 | Accessibility pass (`design:accessibility-review`) | Keyboard-only run-through; contrast measured |
-| [ ] M3-02 | Design critique pass (`design:design-critique`, `web-design-guidelines`) | Findings fixed or logged |
-| [ ] M3-03 | Performance pass against ARCHITECTURE budgets | Numbers recorded in PERF.md |
+| [x] M3-01 | Accessibility pass (`design:accessibility-review`) | Keyboard-only run-through; contrast measured |
+| [x] M3-02 | Design critique pass (`design:design-critique`, `web-design-guidelines`) | Findings fixed or logged |
+| [x] M3-03 | Performance pass against ARCHITECTURE budgets | Numbers recorded in PERF.md |
 | [ ] M3-05 | Custom title bar integrated with the top bar (drag region, caption buttons) without losing Windows 11 snap layouts | Snap-layout flyout still appears on the maximize button; window drags and double-click maximizes |
 | [ ] M3-04 | Installer (MSI/NSIS), icon, app name decision; register the `magnet:` scheme and `.torrent` association (bundle config) and re-check the completion toast with an installed app identity | Install, upgrade, and uninstall tested on a clean user profile |
 

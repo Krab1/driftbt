@@ -8,14 +8,18 @@
   --selected: rgba(43, 108, 240, 0.1);
   --text-primary: #14171f;
   --text-secondary: #555b6b;
-  --text-muted: #6f7686;
+  --text-muted: #666d7d;
   --border: rgba(20, 23, 31, 0.1);
   --border-strong: rgba(20, 23, 31, 0.2);
   --accent: #2b6cf0;
+  /* Accent for text: the fill colour is too light to read on tinted backgrounds. */
+  --accent-fg: #1d58cf;
   --on-accent: #ffffff;
   --success: #17824f;
-  --warning: #a96a0f;
+  --warning: #8f5a0c;
   --danger: #cc3333;
+  /* Red for text; the fill colour is too light on tinted backgrounds. */
+  --danger-fg: #b82e2e;
   --neutral: #8a90a0;
   --track: rgba(20, 23, 31, 0.1);
   --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.08);
@@ -41,10 +45,12 @@
   --border: rgba(255, 255, 255, 0.09);
   --border-strong: rgba(255, 255, 255, 0.2);
   --accent: #5e94ff;
+  --accent-fg: #7aa6ff;
   --on-accent: #0b1020;
   --success: #3fbf86;
   --warning: #e0a13d;
   --danger: #ff6b6b;
+  --danger-fg: #ff6b6b;
   --neutral: #7c8394;
   --track: rgba(255, 255, 255, 0.12);
   --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
@@ -62,12 +68,13 @@
     --text-secondary: #a6adbd;
     --text-muted: #8a91a2;
     --border: rgba(255, 255, 255, 0.09);
-    --border-strong: rgba(255, 255, 255, 0.2);
     --accent: #5e94ff;
+    --accent-fg: #7aa6ff;
     --on-accent: #0b1020;
     --success: #3fbf86;
     --warning: #e0a13d;
     --danger: #ff6b6b;
+    --danger-fg: #ff6b6b;
     --neutral: #7c8394;
     --track: rgba(255, 255, 255, 0.12);
     --shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);

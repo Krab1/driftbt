@@ -104,10 +104,12 @@
   <TopBar bind:this={topbar} />
   <div class="main">
     <Rail />
-    <div class="content">
+    <main class="content">
+      <h1 class="sr-only">Drift</h1>
       <div class="listwrap"><TorrentList /></div>
       <DetailPanel />
-    </div>
+      {#if ui.menu}<ContextMenu />{/if}
+    </main>
   </div>
   <StatusBar />
 </div>
@@ -115,7 +117,6 @@
 {#if ui.addOpen}<AddDialog />{/if}
 {#if ui.removeTarget}<RemoveDialog />{/if}
 {#if ui.settingsOpen}<SettingsDialog />{/if}
-{#if ui.menu}<ContextMenu />{/if}
 <Toasts />
 
 {#if dragging}
@@ -132,6 +133,11 @@
     display: grid;
     grid-template-columns: 168px minmax(0, 1fr);
     min-height: 0;
+  }
+  @media (max-width: 760px) {
+    .main {
+      grid-template-columns: 48px minmax(0, 1fr);
+    }
   }
   .content {
     display: flex;
@@ -155,7 +161,7 @@
     border: 2px dashed var(--accent);
     border-radius: var(--radius-lg);
     background: color-mix(in srgb, var(--bg) 85%, transparent);
-    color: var(--accent);
+    color: var(--accent-fg);
     font-size: 15px;
     pointer-events: none;
   }

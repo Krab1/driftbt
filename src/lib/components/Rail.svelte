@@ -13,7 +13,7 @@
 
 <nav aria-label="Filters">
   {#each items as it (it.key)}
-    <button class="item" class:on={torrents.filter === it.key} aria-current={torrents.filter === it.key ? "page" : undefined} onclick={() => (torrents.filter = it.key)}>
+    <button class="item" title="{it.label} ({torrents.counts[it.key]})" class:on={torrents.filter === it.key} aria-current={torrents.filter === it.key ? "page" : undefined} onclick={() => (torrents.filter = it.key)}>
       <Icon name={it.icon} />
       <span class="label">{it.label}</span>
       <span class="count num">{torrents.counts[it.key]}</span>
@@ -47,7 +47,7 @@
   }
   .item.on {
     background: var(--selected);
-    color: var(--accent);
+    color: var(--accent-fg);
   }
   .label {
     flex: 1;
@@ -58,5 +58,21 @@
   }
   .on .count {
     color: inherit;
+  }
+  /* Icon-only rail when narrow; labels stay available to screen readers. */
+  @media (max-width: 760px) {
+    .label,
+    .count {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
+    }
+    .item {
+      justify-content: center;
+      padding: 0;
+    }
   }
 </style>

@@ -67,7 +67,7 @@
     border: 1px solid var(--neutral);
   }
   .lim.on {
-    color: var(--accent);
+    color: var(--accent-fg);
   }
   .lim.on .dot {
     background: var(--accent);
