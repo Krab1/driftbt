@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Api, ApiError, Completed, GuardStatus, OpenPayload, Torrent, TorrentDetails } from "./types";
 
@@ -17,6 +18,15 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 const on = <T>(event: string) => (cb: (p: T) => void) => listen<T>(event, (e) => cb(e.payload));
 
 export const tauriApi: Api = {
+  chrome: {
+    minimize: () => getCurrentWindow().minimize(),
+    toggleMaximize: () => getCurrentWindow().toggleMaximize(),
+    close: () => getCurrentWindow().close(),
+    isMaximized: () => getCurrentWindow().isMaximized(),
+    onMaximizedChange: (cb) => getCurrentWindow().onResized(() => void getCurrentWindow().isMaximized().then(cb)),
+    onMaxHover: on<boolean>("caption-hover"),
+    setMaxButtonRect: (rect) => call("set_caption_rect", { rect }),
+  },
   list: () => call("list_torrents"),
   inspect: (input) => call("inspect_torrent", { input }),
   add: (input, category = null) => call("add_torrent", { input, category }),

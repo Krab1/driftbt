@@ -1,7 +1,9 @@
 <script lang="ts">
   import { torrents } from "../stores/torrents.svelte";
   import { ui } from "../stores/ui.svelte";
+  import { api } from "../api";
   import Icon from "./Icon.svelte";
+  import WindowControls from "./WindowControls.svelte";
 
   let input = $state<HTMLInputElement>();
 
@@ -11,8 +13,8 @@
   }
 </script>
 
-<header>
-  <div class="logo" aria-hidden="true">
+<header data-tauri-drag-region>
+  <div class="logo" aria-hidden="true" data-tauri-drag-region>
     <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="var(--accent)" stroke-width="3" /><circle cx="12" cy="12" r="2.6" fill="var(--accent)" /></svg>
   </div>
   <label class="search">
@@ -30,6 +32,7 @@
   <button class="btn" onclick={() => (ui.searchOpen = true)} title="Search for torrents (Ctrl+Shift+F)"><Icon name="search" />Find online</button>
   <button class="btn primary" onclick={() => ui.openAdd()}><Icon name="plus" />Add torrent</button>
   <button class="btn ghost icon" aria-label="Settings" onclick={() => (ui.settingsOpen = true)}><Icon name="sliders" size={18} /></button>
+  {#if api.chrome}<WindowControls />{/if}
 </header>
 
 <style>
@@ -74,6 +77,7 @@
   input::placeholder {
     color: var(--text-muted);
   }
+  /* The gap around the search box is part of the drag region (the header itself). */
   .search {
     margin-right: auto;
   }

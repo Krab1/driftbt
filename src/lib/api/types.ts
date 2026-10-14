@@ -254,8 +254,23 @@ export interface ApiError {
   message: string;
 }
 
+/** The frameless desktop window's own title-bar controls. Absent in the browser, where the browser draws its frame. */
+export interface WindowChrome {
+  minimize(): Promise<void>;
+  toggleMaximize(): Promise<void>;
+  close(): Promise<void>;
+  isMaximized(): Promise<boolean>;
+  /** Fires when the window is maximized or restored. */
+  onMaximizedChange(cb: (maximized: boolean) => void): Promise<() => void>;
+  /** The pointer is over the maximize button (Windows reports it to us, the page can't see it). */
+  onMaxHover(cb: (over: boolean) => void): Promise<() => void>;
+  /** Where the maximize button is, in physical window pixels, so Windows can show snap layouts over it. */
+  setMaxButtonRect(rect: [number, number, number, number] | null): Promise<void>;
+}
+
 /** The only door between the UI and the backend. Two transports: Tauri IPC and an in-browser mock. */
 export interface Api {
+  chrome?: WindowChrome;
   list(): Promise<Torrent[]>;
   /** Reads a torrent's files without starting it. Magnets can take a while and may time out. */
   inspect(input: AddInput): Promise<TorrentPreview>;

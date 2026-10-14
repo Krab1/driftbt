@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod caption;
 mod commands;
 mod platform;
 
@@ -39,6 +40,8 @@ pub struct AppState {
     pub engine: Arc<dyn TorrentEngine>,
     /// Operations shared with the headless server (settings, search, IP lists).
     pub svc: Arc<drift_core::service::Service>,
+    /// Where the page's maximize button is, so Windows can show snap layouts over it.
+    pub caption_rect: caption::ButtonRect,
     pub settings: SharedSettings,
     /// Reported by the UI (`document.hidden`); drives how often we poll and push.
     pub visible: Arc<AtomicBool>,
@@ -100,7 +103,9 @@ fn create_main_window(app: &tauri::App, start_hidden: bool) -> tauri::Result<()>
             builder = builder.additional_browser_args(&args);
         }
     }
-    builder.build()?;
+    let window = builder.build()?;
+    let rect = app.state::<AppState>().caption_rect.clone();
+    caption::install(&window, rect, app.handle().clone());
     Ok(())
 }
 
@@ -239,6 +244,7 @@ fn main() {
                 stream: tokio::sync::OnceCell::new(),
                 engine: engine.clone(),
                 svc,
+                caption_rect: Default::default(),
                 settings,
                 visible: visible.clone(),
                 watched: watched.clone(),
@@ -350,6 +356,7 @@ fn main() {
             commands::search_torrents,
             commands::search_keys_set,
             commands::set_search_key,
+            commands::set_caption_rect,
             commands::get_settings,
             commands::set_settings,
         ])

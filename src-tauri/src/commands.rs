@@ -206,6 +206,12 @@ pub fn set_search_key(state: State<'_, AppState>, id: String, key: String) -> Ap
     state.svc.set_search_key(&id, &key)
 }
 
+/// The maximize button's rectangle in physical window pixels (left, top, right, bottom); `None` hides it.
+#[tauri::command]
+pub fn set_caption_rect(state: State<'_, AppState>, rect: Option<[i32; 4]>) {
+    *state.caption_rect.lock().unwrap() = rect;
+}
+
 #[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
