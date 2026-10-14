@@ -54,6 +54,7 @@ pub struct Settings {
     /// `.torrent` files dropped here are added automatically.
     pub watch_dir: Option<PathBuf>,
     pub vpn_guard: crate::guard::VpnGuard,
+    pub search: crate::search::config::SearchSettings,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -106,6 +107,7 @@ impl Default for Settings {
             schedule: crate::schedule::Schedule::default(),
             watch_dir: None,
             vpn_guard: crate::guard::VpnGuard::default(),
+            search: Default::default(),
         }
     }
 }

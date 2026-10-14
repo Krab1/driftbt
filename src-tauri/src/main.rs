@@ -38,6 +38,7 @@ pub struct AppState {
     /// Direct engine access, only for what the manager has no opinion on (details, inspect, file selection).
     pub engine: Arc<dyn TorrentEngine>,
     pub store: Arc<dyn SettingsStore>,
+    pub secrets: drift_core::search::config::Secrets,
     pub settings: SharedSettings,
     /// Reported by the UI (`document.hidden`); drives how often we poll and push.
     pub visible: Arc<AtomicBool>,
@@ -221,6 +222,7 @@ fn main() {
                 stream: tokio::sync::OnceCell::new(),
                 engine: engine.clone(),
                 store,
+                secrets: drift_core::search::config::Secrets::open(data_dir.join("secrets.json")),
                 settings,
                 visible: visible.clone(),
                 watched: watched.clone(),
@@ -378,6 +380,9 @@ fn main() {
             commands::guard_status,
             commands::filter_status,
             commands::update_ip_lists,
+            commands::search_torrents,
+            commands::search_keys_set,
+            commands::set_search_key,
             commands::get_settings,
             commands::set_settings,
         ])

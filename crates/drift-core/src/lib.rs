@@ -16,6 +16,7 @@ pub mod playlist;
 pub mod queue;
 pub mod rules;
 pub mod schedule;
+pub mod search;
 pub mod settings;
 pub mod stream;
 pub mod ticker;

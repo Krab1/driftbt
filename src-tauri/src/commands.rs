@@ -12,6 +12,7 @@ use drift_core::playlist;
 use drift_core::model::{AddRequest, AddSource, TorrentDetails, TorrentId, TorrentPreview, TorrentView};
 use drift_core::queue::Move;
 use drift_core::rules::Goal;
+use drift_core::search::{SearchQuery, SearchReport};
 use drift_core::settings::Settings;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -59,6 +60,12 @@ pub enum AddInput {
         #[serde(default)]
         only_files: Option<Vec<usize>>,
     },
+    /// A link to a .torrent file (search results from sources without magnets).
+    Url {
+        value: String,
+        #[serde(default)]
+        only_files: Option<Vec<usize>>,
+    },
     File {
         bytes: Vec<u8>,
         #[serde(default)]
@@ -70,6 +77,7 @@ impl AddInput {
     fn into_parts(self) -> (AddSource, Option<Vec<usize>>) {
         match self {
             AddInput::Magnet { value, only_files } => (AddSource::Magnet(value.trim().to_string()), only_files),
+            AddInput::Url { value, only_files } => (AddSource::Url(value.trim().to_string()), only_files),
             AddInput::File { bytes, only_files } => (AddSource::FileBytes(bytes), only_files),
         }
     }
@@ -269,6 +277,38 @@ pub async fn update_ip_lists(state: State<'_, AppState>) -> ApiResult<FilterStat
 }
 
 #[tauri::command]
+pub async fn search_torrents(state: State<'_, AppState>, text: String) -> ApiResult<SearchReport> {
+    let providers = {
+        let s = state.settings.lock().unwrap();
+        drift_core::search::config::build_providers(&s.search, &state.secrets)
+    };
+    if providers.is_empty() {
+        return Err(ApiError { code: "no_sources", message: "No search sources are turned on. Add one in Settings.".into() });
+    }
+    let q = SearchQuery { text: text.trim().chars().take(200).collect(), limit: 50 };
+    Ok(drift_core::search::search_all(&providers, &q, drift_core::search::DEFAULT_TIMEOUT).await)
+}
+
+/// Ids of sources that have a key saved. The keys themselves never leave the backend.
+#[tauri::command]
+pub fn search_keys_set(state: State<'_, AppState>) -> Vec<String> {
+    let s = state.settings.lock().unwrap();
+    s.search.torznab.iter().filter(|t| state.secrets.has(&t.id)).map(|t| t.id.clone()).collect()
+}
+
+#[tauri::command]
+pub fn set_search_key(state: State<'_, AppState>, id: String, key: String) -> ApiResult<()> {
+    let known = state.settings.lock().unwrap().search.torznab.iter().any(|t| t.id == id);
+    if !known {
+        return Err(ApiError { code: "search", message: "Save the source first, then add its key.".into() });
+    }
+    state.secrets.set(&id, key.trim()).map_err(|e| {
+        eprintln!("saving a search key failed: {e}");
+        ApiError { code: "settings", message: "Couldn't save the key. Check that the app data folder is writable.".into() }
+    })
+}
+
+#[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
 }
@@ -302,6 +342,10 @@ pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> Api
             };
             return Err(ApiError { code: "network", message: why.into() });
         }
+    }
+    if before.search != settings.search {
+        let ids: Vec<&str> = settings.search.torznab.iter().map(|t| t.id.as_str()).collect();
+        let _ = state.secrets.retain(&ids);
     }
     if before.start_with_windows != settings.start_with_windows {
         platform::autostart::set(settings.start_with_windows).map_err(|e| fail("autostart change failed", &e))?;
