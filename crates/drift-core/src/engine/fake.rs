@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 
-use super::{EngineError, Result, TorrentEngine};
+use super::{EngineError, OpenFile, Result, TorrentEngine};
 use crate::model::*;
 
 #[derive(Default)]
@@ -187,6 +187,18 @@ impl TorrentEngine for FakeEngine {
         Ok(id)
     }
 
+    /// Deterministic bytes (`byte[i] = i*7 + file`), only for files up to 16 MiB.
+    async fn open_file(&self, id: &TorrentId, file: usize) -> Result<OpenFile> {
+        let g = self.inner.lock().unwrap();
+        let e = g.torrents.get(id).ok_or(EngineError::NotFound)?;
+        let size = e.files.get(file).ok_or(EngineError::NotFound)?.size;
+        if size > 16 << 20 {
+            return Err(EngineError::InvalidInput("fake files over 16 MiB cannot be opened".into()));
+        }
+        let bytes: Vec<u8> = (0..size).map(|i| (i.wrapping_mul(7) as u8).wrapping_add(file as u8)).collect();
+        Ok(OpenFile { len: size, reader: Box::new(std::io::Cursor::new(bytes)) })
+    }
+
     async fn list(&self) -> Result<Vec<TorrentStats>> {
         Ok(self.inner.lock().unwrap().torrents.values().map(|e| e.stats.clone()).collect())
     }
@@ -232,13 +244,11 @@ impl TorrentEngine for FakeEngine {
     async fn resume(&self, id: &TorrentId) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         let e = g.torrents.get_mut(id).ok_or(EngineError::NotFound)?;
-        if e.stats.state == TorrentState::Paused {
-            e.stats.state = if e.stats.progress_bytes == e.stats.total_bytes {
-                TorrentState::Seeding
-            } else {
-                TorrentState::Downloading
-            };
+        // Like the real engine: resuming something that is already running is an error, so callers must check.
+        if e.stats.state != TorrentState::Paused {
+            return Err(EngineError::Backend("torrent is not paused".into()));
         }
+        e.stats.state = if e.stats.progress_bytes == e.stats.total_bytes { TorrentState::Seeding } else { TorrentState::Downloading };
         Ok(())
     }
 

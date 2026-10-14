@@ -120,6 +120,23 @@ impl Manager {
         self.tick().await.map(|_| ())
     }
 
+    /// Makes sure a torrent is running and, if it is still downloading, first in line: what "Play" needs.
+    pub async fn prioritize(&self, id: &TorrentId) -> Result<()> {
+        let list = self.engine.list().await?;
+        let t = list.iter().find(|t| &t.id == id).ok_or(crate::engine::EngineError::NotFound)?;
+        let incomplete = !complete(t);
+        // Resuming a torrent that is already running is an error in the engine, so only wake paused ones.
+        if t.state == TorrentState::Paused {
+            self.engine.resume(id).await?;
+        }
+        self.with_meta(id, |m| m.user_paused = false);
+        if incomplete {
+            self.move_in_queue(id, Move::Top).await
+        } else {
+            self.tick().await.map(|_| ())
+        }
+    }
+
     pub async fn remove(&self, id: &TorrentId, delete_files: bool) -> Result<()> {
         self.engine.remove(id, delete_files).await?;
         let mut st = self.state.lock().unwrap();
@@ -344,6 +361,23 @@ mod tests {
         let v = m.tick().await.unwrap();
         assert_eq!(states(&v), [(9, Paused)]);
         assert_eq!(m.tick().await.unwrap()[0].stats.state, Paused);
+    }
+
+    #[tokio::test]
+    async fn prioritize_wakes_a_waiting_torrent_and_is_harmless_on_a_running_one() {
+        use TorrentState::*;
+        let (_, m, _) = setup(1);
+        for n in 1..=3 {
+            m.add(mag(n), None, vec![]).await.unwrap();
+        }
+        m.tick().await.unwrap();
+        // already running: must not fail
+        m.prioritize(&id(1)).await.unwrap();
+        // a queued torrent jumps the queue and takes the slot
+        m.prioritize(&id(3)).await.unwrap();
+        let v = m.tick().await.unwrap();
+        assert_eq!(states(&v), [(1, Queued), (2, Queued), (3, Downloading)]);
+        assert!(matches!(m.prioritize(&id(99)).await, Err(crate::engine::EngineError::NotFound)));
     }
 
     #[tokio::test]

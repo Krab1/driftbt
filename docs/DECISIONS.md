@@ -35,4 +35,7 @@ Append-only. Format: `D-n · date · decision — why — consequence`.
 - **D-24 · 2026-10-14 · `core::manager` sits between the app and the engine** — queue order, categories, tags, goals and the seeding clock are not engine concepts. The manager is the only thing the UI mutates through; it uses pure planners (`queue`, `rules`) that are unit-tested against the fake engine. The engine gains no new methods for any of it; queueing is just pause/resume. Per-torrent bookkeeping lives in `library.json`, separate from `settings.json`.
 - **D-25 · 2026-10-14 · A torrent first seen already paused is treated as user-paused** — so adopting torrents from older versions never auto-resumes something the user stopped.
 
+- **D-26 · 2026-10-14 · Play-while-downloading is a loopback HTTP range server in `drift-core`, fed by the engine's seekable `open_file`** — players need HTTP with Range requests; the engine's file stream prioritises the pieces being read. 127.0.0.1 only, random per-run token in the URL, `Host` must be loopback (DNS-rebinding guard), `GET`/`HEAD` only. The player is launched with a one-line `.m3u` holding the URL, opened with the default app for that type.
+- **D-27 · 2026-10-14 · The fake engine mirrors the real engine's strictness** (resuming a running torrent is an error) so manager bugs of that kind fail in unit tests; found when real-app Play failed on a running torrent.
+
 Note: rqbit already ships its own Tauri desktop app (web UI wrapped). We are not forking it; our value is a purpose-built native-feeling UI plus queue/rules/streaming UX.

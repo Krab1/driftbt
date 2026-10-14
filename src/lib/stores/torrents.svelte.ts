@@ -12,6 +12,8 @@ class TorrentStore {
   sortKey = $state<SortKey>("name");
   sortDir = $state<1 | -1>(1);
   selectedId = $state<string | null>(null);
+  /** Total speeds, one sample per snapshot, newest last (about two minutes). */
+  history = $state.raw<{ d: number; u: number }[]>([]);
 
   visible = $derived(visibleTorrents(this.all, this.filter, this.query, this.sortKey, this.sortDir, this.category));
   counts = $derived({
@@ -43,7 +45,12 @@ class TorrentStore {
   /** Pulls the list once and then follows pushed snapshots. Returns the unsubscribe function. */
   async start(): Promise<() => void> {
     this.all = await api.list();
-    return api.onSnapshot((list) => (this.all = list));
+    return api.onSnapshot((list) => {
+      this.all = list;
+      const d = list.reduce((s, t) => s + t.down_bps, 0);
+      const u = list.reduce((s, t) => s + t.up_bps, 0);
+      this.history = [...this.history.slice(-119), { d, u }];
+    });
   }
 
   async refresh() {

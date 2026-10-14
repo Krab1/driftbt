@@ -4,6 +4,8 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use drift_core::engine::EngineError;
+use drift_core::engine::TorrentEngine;
+use drift_core::playlist;
 use drift_core::model::{AddRequest, AddSource, TorrentDetails, TorrentId, TorrentPreview, TorrentView};
 use drift_core::queue::Move;
 use drift_core::rules::Goal;
@@ -146,6 +148,68 @@ pub fn set_visible(state: State<'_, AppState>, visible: bool) {
 #[tauri::command]
 pub fn take_pending_open(state: State<'_, AppState>) -> OpenPayload {
     std::mem::take(&mut *state.pending_open.lock().unwrap())
+}
+
+/// Writes `<save folder>/<name>.m3u8` for a multi-file torrent. Returns the path, or `None` when the
+/// torrent has fewer than two video/audio files.
+pub async fn write_playlist(engine: &dyn TorrentEngine, id: &TorrentId) -> Result<Option<std::path::PathBuf>, EngineError> {
+    let d = engine.details(id).await?;
+    let paths: Vec<String> = d.files.iter().map(|f| f.path.clone()).collect();
+    let Some(text) = playlist::m3u8(&paths) else { return Ok(None) };
+    let safe: String = d.stats.name.chars().map(|c| if r#"\/:*?"<>|"#.contains(c) { '_' } else { c }).collect();
+    let name = if safe.trim().is_empty() { "playlist".to_string() } else { safe };
+    let path = Path::new(&d.save_path).join(format!("{name}.m3u8"));
+    std::fs::write(&path, text).map_err(|e| EngineError::Backend(format!("playlist write failed: {e}")))?;
+    Ok(Some(path))
+}
+
+#[tauri::command]
+pub async fn create_playlist(state: State<'_, AppState>, id: TorrentId) -> ApiResult<String> {
+    match write_playlist(state.engine.as_ref(), &id).await? {
+        Some(p) => Ok(p.display().to_string()),
+        None => Err(ApiError { code: "no_playlist", message: "A playlist needs at least two video or audio files.".into() }),
+    }
+}
+
+/// Plays a file in the default media player while it downloads: the torrent is resumed and moved to the
+/// front of the queue, and the player is pointed at the loopback stream server through a one-line playlist.
+#[tauri::command]
+pub async fn play_torrent(state: State<'_, AppState>, id: TorrentId, file: Option<usize>) -> ApiResult<()> {
+    let no_media = || ApiError { code: "no_media", message: "This torrent has no video or audio files to play.".into() };
+    let d = state.engine.details(&id).await?;
+    let chosen = match file {
+        Some(i) => d.files.iter().find(|f| f.index == i),
+        None => d.files.iter().filter(|f| playlist::is_media(&f.path)).max_by_key(|f| f.size),
+    }
+    .ok_or_else(no_media)?;
+    if !playlist::is_media(&chosen.path) {
+        return Err(no_media());
+    }
+    state.manager.prioritize(&id).await?;
+
+    let engine = state.engine.clone();
+    let server = state
+        .stream
+        .get_or_try_init(|| drift_core::stream::StreamServer::start(engine))
+        .await
+        .map_err(|e| {
+            eprintln!("stream server failed to start: {e}");
+            ApiError { code: "stream", message: "Couldn't start playback. Try again.".into() }
+        })?;
+    let name = chosen.path.rsplit(['/', '\\']).next().unwrap_or("video");
+    let url = server.url(&id, chosen.index, name);
+    let dir = state.data_dir.join("streams");
+    let list = dir.join(format!("{}.m3u", &id.0[..id.0.len().min(16)]));
+    std::fs::create_dir_all(&dir)
+        .and_then(|()| std::fs::write(&list, format!("#EXTM3U
+{url}
+")))
+        .map_err(|e| {
+            eprintln!("stream playlist write failed: {e}");
+            ApiError { code: "stream", message: "Couldn't start playback. Try again.".into() }
+        })?;
+    platform::open_default(&list);
+    Ok(())
 }
 
 #[tauri::command]

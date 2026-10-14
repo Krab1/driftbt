@@ -44,6 +44,28 @@
     }
   }
 
+  async function play() {
+    close();
+    if (!t) return;
+    try {
+      await api.play(t.id);
+      await torrents.refresh();
+    } catch (e) {
+      ui.toast(errorText(e), "error");
+    }
+  }
+
+  async function playlist() {
+    close();
+    if (!t) return;
+    try {
+      const path = await api.createPlaylist(t.id);
+      ui.toast(`Playlist saved: ${path}`);
+    } catch (e) {
+      ui.toast(errorText(e), "error");
+    }
+  }
+
   async function reveal() {
     close();
     if (t) await api.revealTorrent(t.id).catch((e) => ui.toast(errorText(e), "error"));
@@ -104,10 +126,14 @@
 <svelte:window onclick={close} onblur={close} onresize={close} {onkeydown} />
 
 <div class="menu" role="menu" tabindex="-1" bind:this={el} style="left: {pos.x}px; top: {pos.y}px" oncontextmenu={(e) => e.preventDefault()}>
+  {#if t && t.state !== "error"}
+    <button role="menuitem" onclick={play}><Icon name="play" />Play</button>
+  {/if}
   {#if canToggle}
     <button role="menuitem" onclick={toggle}><Icon name={t!.state === "paused" ? "play" : "pause"} />{t!.state === "paused" ? "Resume" : "Pause"}</button>
   {/if}
   <button role="menuitem" onclick={reveal}><Icon name="folder" />Show in folder</button>
+  <button role="menuitem" onclick={playlist}><Icon name="list" />Create playlist</button>
   <button role="menuitem" onclick={copyMagnet}><Icon name="file" />Copy magnet link</button>
   {#if inQueue}
     <hr />

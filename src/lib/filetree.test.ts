@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { buildTree, checkState, toggleNode } from "./filetree";
+import { buildTree, checkState, isMedia, toggleNode } from "./filetree";
 
 const files = [
   { index: 0, path: "docs/manual.pdf", size: 10, progress_bytes: 5 },
@@ -35,4 +35,12 @@ test("tri-state and toggling", () => {
   expect([...toggleNode(docs, new Set([0, 2, 3]))]).toEqual([3]); // all -> none, others untouched
   expect([...toggleNode(docs, new Set([0])).values()].sort()).toEqual([0, 2]); // some -> all
   expect([...toggleNode(docs, new Set()).values()].sort()).toEqual([0, 2]); // none -> all
+});
+
+test("isMedia is extension-based and case-insensitive", () => {
+  expect(isMedia("Show/E01.MKV")).toBe(true);
+  expect(isMedia("a.flac")).toBe(true);
+  expect(isMedia("readme.txt")).toBe(false);
+  expect(isMedia("noext")).toBe(false);
+  expect(isMedia("archive.mkv.part")).toBe(false);
 });

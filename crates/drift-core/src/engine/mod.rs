@@ -2,11 +2,22 @@
 //! No third-party engine types may appear here.
 
 use async_trait::async_trait;
+use tokio::io::{AsyncRead, AsyncSeek};
 
 use crate::model::{AddRequest, AddSource, Limits, TorrentDetails, TorrentId, TorrentPreview, TorrentStats};
 
 pub mod fake;
 pub mod rqbit;
+
+/// A seekable byte source for one file of a torrent. Reads wait for the pieces they need, which also
+/// makes the engine fetch them next.
+pub trait ReadSeek: AsyncRead + AsyncSeek + Unpin + Send {}
+impl<T: AsyncRead + AsyncSeek + Unpin + Send> ReadSeek for T {}
+
+pub struct OpenFile {
+    pub reader: Box<dyn ReadSeek>,
+    pub len: u64,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
@@ -30,6 +41,9 @@ pub trait TorrentEngine: Send + Sync {
     /// Read a torrent's name and file list without starting it. Magnets are resolved from peers and
     /// may return `Timeout`.
     async fn inspect(&self, source: AddSource) -> Result<TorrentPreview>;
+    /// Opens one file for reading while it is still downloading (used for play-while-downloading).
+    /// Fails with `Backend` while the torrent is not running yet; callers may retry briefly.
+    async fn open_file(&self, id: &TorrentId, file: usize) -> Result<OpenFile>;
     /// Cheap; called every tick.
     async fn list(&self) -> Result<Vec<TorrentStats>>;
     async fn details(&self, id: &TorrentId) -> Result<TorrentDetails>;

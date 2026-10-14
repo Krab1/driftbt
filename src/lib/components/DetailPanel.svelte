@@ -67,6 +67,16 @@
     }
   }
 
+  async function play(file: number | null = null) {
+    if (!sel) return;
+    try {
+      await api.play(sel.id, file);
+      await torrents.refresh();
+    } catch (e) {
+      ui.toast(errorText(e), "error");
+    }
+  }
+
   async function reveal() {
     if (sel) await api.revealTorrent(sel.id).catch((e) => ui.toast(errorText(e), "error"));
   }
@@ -153,7 +163,7 @@
         {:else if d.files.length === 0}
           <p class="hint">The file list appears once the torrent info has been fetched.</p>
         {:else}
-          <FileTree files={d.files} {selected} onchange={changeFiles} showProgress />
+          <FileTree files={d.files} {selected} onchange={changeFiles} showProgress onplay={(i) => play(i)} />
         {/if}
       {:else if ui.detailTab === "peers"}
         {#if !d || d.peers.length === 0}

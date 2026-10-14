@@ -41,6 +41,8 @@ pub struct Settings {
     /// Nothing stops seeding before this many minutes, whatever the ratio.
     pub min_seed_minutes: u32,
     pub categories: Vec<Category>,
+    /// Write an .m3u8 next to a finished multi-file torrent that has several video or audio files.
+    pub playlist_on_complete: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,6 +69,7 @@ impl Default for Settings {
             default_goal: crate::rules::Goal::default(),
             min_seed_minutes: 0,
             categories: Vec::new(),
+            playlist_on_complete: true,
         }
     }
 }

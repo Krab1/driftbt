@@ -36,6 +36,8 @@ export const tauriApi: Api = {
   takePendingOpen: () => call("take_pending_open"),
   setVisible: (visible) => call("set_visible", { visible }),
   revealTorrent: (id) => call("reveal_torrent", { id }),
+  play: (id, file = null) => call("play_torrent", { id, file }),
+  createPlaylist: (id) => call("create_playlist", { id }),
   getSettings: () => call("get_settings"),
   setSettings: (settings) => call("set_settings", { settings }),
   onSnapshot: on<Torrent[]>("snapshot"),

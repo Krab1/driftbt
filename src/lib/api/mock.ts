@@ -24,7 +24,7 @@ const NAMES = [
   "alpine-standard-3.22.iso",
   "nixos-minimal-26.05.iso",
 ];
-const PATHS = ["README.txt", "images/boot.img", "images/live/filesystem.squashfs", "images/live/initrd", "docs/manual.pdf", "docs/licenses/GPL-3.txt"];
+const PATHS = ["README.txt", "video/episode-02.mkv", "video/episode-10.mkv", "images/live/filesystem.squashfs", "docs/manual.pdf", "docs/licenses/GPL-3.txt"];
 
 function rng(seed: number) {
   let x = seed >>> 0 || 1;
@@ -102,6 +102,7 @@ export function createMockApi(count = 40): Api {
     max_active_downloads: 3,
     default_goal: { ratio: null, minutes: null },
     min_seed_minutes: 0,
+    playlist_on_complete: true,
     categories: [
       { name: "Linux", save_path: "D:\Torrents\Linux" },
       { name: "Docs", save_path: null },
@@ -285,6 +286,14 @@ export function createMockApi(count = 40): Api {
     takePendingOpen: async () => ({ ...pending }),
     setVisible: async () => {},
     revealTorrent: async (id) => void find(id),
+    play: async (id) => {
+      find(id);
+      (window as unknown as { __played?: string[] }).__played = [...((window as unknown as { __played?: string[] }).__played ?? []), id];
+    },
+    createPlaylist: async (id) => {
+      find(id);
+      return `${settings.download_dir}\\playlist.m3u8`;
+    },
     getSettings: async () => ({ ...settings }),
     setSettings: async (s) => (settings = { ...s }),
     onSnapshot: sub(snapSubs),

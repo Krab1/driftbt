@@ -84,6 +84,24 @@ pub mod autostart {
     }
 }
 
+/// Opens a file with whatever the user has set as its default app.
+pub fn open_default(path: &Path) {
+    // Tests set this to read the generated file instead of launching the user's media player.
+    #[cfg(debug_assertions)]
+    if std::env::var_os("DRIFT_NO_OPEN").is_some() {
+        return;
+    }
+    #[cfg(windows)]
+    {
+        // rundll32 hands the path to ShellExecute without going through cmd.exe quoting rules.
+        let _ = std::process::Command::new("rundll32.exe").arg("url.dll,FileProtocolHandler").arg(path).spawn();
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+    }
+}
+
 /// Selects `path` in Explorer; falls back to opening its folder when the file doesn't exist yet.
 pub fn reveal(path: &Path, fallback_dir: &Path) {
     #[cfg(windows)]

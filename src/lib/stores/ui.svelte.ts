@@ -47,6 +47,8 @@ class Ui {
   removeTarget = $state<{ id: string; name: string } | null>(null);
   settingsOpen = $state(false);
   goalTarget = $state<{ id: string; name: string } | null>(null);
+  paletteOpen = $state(false);
+  ratioOpen = $state(false);
   menu = $state<{ x: number; y: number; id: string } | null>(null);
 
   // Detail panel (remembered per viewer, not part of app settings).

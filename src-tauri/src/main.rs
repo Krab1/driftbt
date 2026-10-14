@@ -27,6 +27,9 @@ use platform::{autostart, OpenPayload};
 pub struct AppState {
     /// Everything the UI does to torrents goes through the manager (queue, categories, goals).
     pub manager: Arc<TorrentManager>,
+    pub data_dir: std::path::PathBuf,
+    /// Started the first time something is played.
+    pub stream: tokio::sync::OnceCell<drift_core::stream::StreamServer>,
     /// Direct engine access, only for what the manager has no opinion on (details, inspect, file selection).
     pub engine: Arc<dyn TorrentEngine>,
     pub store: Arc<dyn SettingsStore>,
@@ -202,6 +205,8 @@ fn main() {
             ));
             app.manage(AppState {
                 manager: manager.clone(),
+                data_dir: data_dir.clone(),
+                stream: tokio::sync::OnceCell::new(),
                 engine: engine.clone(),
                 store,
                 settings,
@@ -222,10 +227,20 @@ fn main() {
                     move || Duration::from_secs(if window_active(&period_handle, &vis) { 1 } else { 5 }),
                     move |list| {
                         let state = handle.state::<AppState>();
-                        let notify = state.settings.lock().unwrap().notify_on_complete;
+                        let (notify, playlists) = {
+                            let s = state.settings.lock().unwrap();
+                            (s.notify_on_complete, s.playlist_on_complete)
+                        };
                         let stats: Vec<_> = list.iter().map(|v| v.stats.clone()).collect();
                         for t in completions(&prev, &stats) {
                             let _ = handle.emit("completed", Completed { id: t.id.clone(), name: t.name.clone() });
+                            if playlists {
+                                let (engine, id) = (state.engine.clone(), t.id.clone());
+                                tauri::async_runtime::spawn(async move {
+                                    // Quietly does nothing for torrents without several media files.
+                                    let _ = commands::write_playlist(engine.as_ref(), &id).await;
+                                });
+                            }
                             let focused = handle.get_webview_window("main").and_then(|w| w.is_focused().ok()).unwrap_or(false);
                             if notify && !focused {
                                 let _ = handle.notification().builder().title("Download complete").body(&t.name).show();
@@ -274,6 +289,8 @@ fn main() {
             commands::set_visible,
             commands::take_pending_open,
             commands::reveal_torrent,
+            commands::create_playlist,
+            commands::play_torrent,
             commands::get_settings,
             commands::set_settings,
         ])

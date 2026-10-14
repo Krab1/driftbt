@@ -3,6 +3,7 @@
   import { torrents } from "../stores/torrents.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
+  import Sparkline from "./Sparkline.svelte";
 
   const queued = $derived(torrents.all.filter((t) => t.state === "queued").length);
   const s = $derived(ui.settings);
@@ -24,9 +25,11 @@
 <footer>
   <span class="num" title="Total download speed"><Icon name="down" size={13} /> {formatSpeed(torrents.totals.down)}</span>
   <span class="num" title="Total upload speed"><Icon name="up" size={13} /> {formatSpeed(torrents.totals.up)}</span>
+  <Sparkline down={torrents.history.map((h) => h.d)} up={torrents.history.map((h) => h.u)} label="Transfer speed over the last two minutes: download in blue, upload in green" />
   <button class="lim" class:on={s?.limits_enabled} role="switch" aria-checked={s?.limits_enabled ?? false} aria-label="Speed limit" onclick={toggleLimit}>
     <span class="dot" aria-hidden="true"></span>{label}
   </button>
+  <button class="lim" onclick={() => (ui.ratioOpen = true)}>Ratios</button>
   <span class="end num">{torrents.counts.all} {torrents.counts.all === 1 ? "torrent" : "torrents"} · {torrents.counts.downloading - queued} active{#if queued}{" · "}{queued} queued{/if}</span>
 </footer>
 

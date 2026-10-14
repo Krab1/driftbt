@@ -12,6 +12,8 @@
   import TorrentList from "./lib/components/TorrentList.svelte";
   import { api, type OpenPayload } from "./lib/api";
   import GoalDialog from "./lib/components/GoalDialog.svelte";
+  import Palette from "./lib/components/Palette.svelte";
+  import RatioDialog from "./lib/components/RatioDialog.svelte";
   import DetailPanel from "./lib/components/DetailPanel.svelte";
   import { torrents } from "./lib/stores/torrents.svelte";
   import { ui, errorText } from "./lib/stores/ui.svelte";
@@ -28,6 +30,8 @@
     const stops: (() => void)[] = [];
     const keep = (p: Promise<() => void>) => p.then((un) => stops.push(un)).catch((e) => ui.toast(errorText(e), "error"));
     keep(torrents.start());
+    const focusSearch = () => topbar?.focusSearch();
+    window.addEventListener("drift:focus-search", focusSearch);
     keep(api.onDetails((d) => (ui.details = d)));
     keep(api.onCompleted((c) => ui.toast(`${c.name} finished downloading`)));
     keep(api.onOpenSources(openSources));
@@ -45,6 +49,7 @@
     return () => {
       stops.forEach((s) => s());
       document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("drift:focus-search", focusSearch);
     };
   });
 
@@ -70,7 +75,10 @@
   }
 
   function onkeydown(e: KeyboardEvent) {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
+    if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "k" || (e.shiftKey && e.key.toLowerCase() === "p"))) {
+      e.preventDefault();
+      ui.paletteOpen = true;
+    } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
       e.preventDefault();
       topbar?.focusSearch();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "n") {
@@ -119,6 +127,8 @@
 {#if ui.removeTarget}<RemoveDialog />{/if}
 {#if ui.settingsOpen}<SettingsDialog />{/if}
 {#if ui.goalTarget}<GoalDialog />{/if}
+{#if ui.paletteOpen}<Palette />{/if}
+{#if ui.ratioOpen}<RatioDialog />{/if}
 <Toasts />
 
 {#if dragging}

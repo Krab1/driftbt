@@ -115,6 +115,8 @@ export interface Settings {
   /** Nothing stops seeding before this many minutes. */
   min_seed_minutes: number;
   categories: Category[];
+  /** Write an .m3u8 next to finished torrents with several video/audio files. */
+  playlist_on_complete: boolean;
 }
 
 /** Already plain-language; show `message` as is. */
@@ -147,6 +149,10 @@ export interface Api {
   /** Tell the backend whether the window is visible so it can slow down when hidden. */
   setVisible(visible: boolean): Promise<void>;
   revealTorrent(id: string): Promise<void>;
+  /** Plays a file in the default player while it downloads (the largest media file when `file` is omitted). */
+  play(id: string, file?: number | null): Promise<void>;
+  /** Writes an .m3u8 next to the files; resolves to its path. */
+  createPlaylist(id: string): Promise<string>;
   pause(id: string): Promise<void>;
   resume(id: string): Promise<void>;
   remove(id: string, deleteFiles: boolean): Promise<void>;

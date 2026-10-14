@@ -19,6 +19,14 @@ export interface TreeNode {
   isFile: boolean;
 }
 
+const MEDIA = new Set(["mkv", "mp4", "m4v", "avi", "mov", "webm", "wmv", "ts", "mpg", "mpeg", "flv", "mp3", "flac", "ogg", "opus", "wav", "m4a", "aac", "wma"]);
+
+/** Same list as the backend's `playlist::is_media`. */
+export function isMedia(path: string): boolean {
+  const dot = path.lastIndexOf(".");
+  return dot >= 0 && MEDIA.has(path.slice(dot + 1).toLowerCase());
+}
+
 export type CheckState = "all" | "none" | "some";
 
 const byName = (a: TreeNode, b: TreeNode) =>

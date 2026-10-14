@@ -12,6 +12,7 @@ pub mod playlist;
 pub mod queue;
 pub mod rules;
 pub mod settings;
+pub mod stream;
 pub mod ticker;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");

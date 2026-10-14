@@ -1,6 +1,6 @@
 <script lang="ts">
   import { formatBytes, percent } from "../../format";
-  import { buildTree, checkState, toggleNode, type FileLike, type TreeNode } from "../filetree";
+  import { buildTree, checkState, isMedia, toggleNode, type FileLike, type TreeNode } from "../filetree";
   import Icon from "./Icon.svelte";
 
   let {
@@ -8,12 +8,15 @@
     selected,
     onchange,
     showProgress = false,
+    onplay,
   }: {
     files: FileLike[];
     selected: ReadonlySet<number>;
     /** Called with the new full selection whenever a box is toggled. */
     onchange: (next: Set<number>) => void;
     showProgress?: boolean;
+    /** Shows a Play button on video/audio files. */
+    onplay?: (fileIndex: number) => void;
   } = $props();
 
   const tree = $derived(buildTree(files));
@@ -41,6 +44,11 @@
     <span class="nm" title={n.key}>{n.name}</span>
     {#if showProgress}<span class="pc num">{percent(n.progress, n.size)}%</span>{/if}
     <span class="sz num">{formatBytes(n.size)}</span>
+    {#if onplay && n.isFile && isMedia(n.key)}
+      <button class="play" aria-label="Play {n.name}" title="Play while downloading" onclick={() => onplay(n.indices[0])}><Icon name="play" size={13} /></button>
+    {:else if onplay}
+      <span class="play-gap"></span>
+    {/if}
   </div>
   {#if !n.isFile && !collapsed.has(n.key)}
     {#each n.children as c (c.key)}{@render row(c, depth + 1)}{/each}
@@ -104,6 +112,24 @@
   }
   .sz {
     width: 70px;
+  }
+  .play {
+    flex: none;
+    width: 24px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--accent-fg);
+  }
+  .play:hover {
+    background: var(--selected);
+  }
+  .play-gap {
+    flex: none;
+    width: 24px;
   }
   .pc {
     width: 40px;

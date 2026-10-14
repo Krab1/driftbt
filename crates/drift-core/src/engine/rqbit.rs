@@ -17,7 +17,7 @@ use librqbit::{
     SessionOptions, SessionPersistenceConfig, TorrentStatsState,
 };
 
-use super::{EngineError, Result, TorrentEngine};
+use super::{EngineError, OpenFile, Result, TorrentEngine};
 use crate::errors::plain_error;
 use crate::model::*;
 
@@ -191,6 +191,13 @@ impl TorrentEngine for RqbitEngine {
             id,
             files,
         })
+    }
+
+    async fn open_file(&self, id: &TorrentId, file: usize) -> Result<OpenFile> {
+        let h = self.handle(id)?;
+        let stream = h.stream(file).await.map_err(backend)?;
+        let len = stream.len();
+        Ok(OpenFile { len, reader: Box::new(Box::pin(stream)) })
     }
 
     async fn list(&self) -> Result<Vec<TorrentStats>> {
@@ -419,6 +426,19 @@ mod tests {
         let d = wait_for("both files complete", Box::new(|d| d.files.iter().all(|f| f.progress_bytes == f.size))).await;
         assert!(d.files.iter().all(|f| f.selected));
         assert_eq!(d.stats.state, TorrentState::Seeding);
+        // Playlists and "Show in folder" rely on save_path + file path being the real file on disk.
+        for f in &d.files {
+            let on_disk = std::path::Path::new(&d.save_path).join(&f.path);
+            assert!(on_disk.exists(), "{} is not where details say it is", on_disk.display());
+        }
+        // The stream reader returns the real bytes, seekable.
+        use tokio::io::{AsyncReadExt, AsyncSeekExt};
+        let mut open = engine.open_file(&id, 1).await.unwrap();
+        assert_eq!(open.len, b.len() as u64);
+        open.reader.seek(std::io::SeekFrom::Start(1000)).await.unwrap();
+        let mut buf = vec![0u8; 64];
+        open.reader.read_exact(&mut buf).await.unwrap();
+        assert_eq!(buf, &b[1000..1064]);
 
         let _ = std::fs::remove_dir_all(&root);
     }

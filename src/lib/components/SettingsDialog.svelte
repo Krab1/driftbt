@@ -112,6 +112,7 @@
       <label class="check"><input type="checkbox" checked={s.close_to_tray} onchange={(e) => ui.saveSettings({ close_to_tray: e.currentTarget.checked })} /> Keep running in the tray when the window is closed</label>
       <label class="check"><input type="checkbox" checked={s.start_with_windows} onchange={(e) => ui.saveSettings({ start_with_windows: e.currentTarget.checked })} /> Start Drift when Windows starts</label>
       <label class="check sub"><input type="checkbox" checked={s.start_minimized} onchange={(e) => ui.saveSettings({ start_minimized: e.currentTarget.checked })} /> Start minimized to the tray</label>
+      <label class="check"><input type="checkbox" checked={s.playlist_on_complete} onchange={(e) => ui.saveSettings({ playlist_on_complete: e.currentTarget.checked })} /> Create a playlist when a multi-file download finishes</label>
       <label class="check"><input type="checkbox" checked={s.notify_on_complete} onchange={(e) => ui.saveSettings({ notify_on_complete: e.currentTarget.checked })} /> Notify me when a download finishes</label>
     </div>
 
