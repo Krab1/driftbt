@@ -23,6 +23,35 @@ pub fn plain_error(raw: Option<&str>) -> Option<String> {
     Some(msg.to_string())
 }
 
+/// What every front end (desktop IPC, HTTP) shows when a call fails: already plain language.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ApiError {
+    pub code: &'static str,
+    pub message: String,
+}
+
+impl ApiError {
+    pub fn new(code: &'static str, message: &str) -> Self {
+        Self { code, message: message.to_string() }
+    }
+}
+
+impl From<crate::engine::EngineError> for ApiError {
+    fn from(e: crate::engine::EngineError) -> Self {
+        use crate::engine::EngineError as E;
+        match e {
+            E::NotFound => Self::new("not_found", "That torrent no longer exists."),
+            E::InvalidInput(_) => Self::new("invalid_input", "That isn't a valid magnet link or torrent file."),
+            E::Blocked => Self::new("blocked", "The VPN guard is holding torrents because your VPN isn't connected."),
+            E::Timeout => Self::new("timeout", "Couldn't fetch the torrent info. Check the link, or try again in a moment."),
+            E::Backend(raw) => {
+                eprintln!("engine error: {raw}");
+                Self::new("engine", "The torrent engine hit a problem. Try again.")
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::plain_error;

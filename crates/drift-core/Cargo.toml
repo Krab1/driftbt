@@ -19,3 +19,6 @@ tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "sync", "
 zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 quick-xml = "0.42.0"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Foundation", "Win32_NetworkManagement_Ndis"] }

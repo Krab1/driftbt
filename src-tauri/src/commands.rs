@@ -3,52 +3,21 @@
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
-use drift_core::engine::EngineError;
-use drift_core::engine::TorrentEngine;
+use drift_core::errors::ApiError;
 use drift_core::guard::Adapter;
 use drift_core::manager::{GuardStatus, LimitsStatus};
-use drift_core::netctl::{FilterStatus, Refresh};
+use drift_core::netctl::FilterStatus;
 use drift_core::playlist;
 use drift_core::model::{AddRequest, AddSource, TorrentDetails, TorrentId, TorrentPreview, TorrentView};
 use drift_core::queue::Move;
 use drift_core::rules::Goal;
-use drift_core::search::{SearchQuery, SearchReport};
+use drift_core::search::SearchReport;
 use drift_core::settings::Settings;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tauri::State;
 
 use crate::platform::{self, OpenPayload};
 use crate::AppState;
-
-#[derive(Serialize)]
-pub struct ApiError {
-    code: &'static str,
-    message: String,
-}
-
-impl From<EngineError> for ApiError {
-    fn from(e: EngineError) -> Self {
-        match e {
-            EngineError::NotFound => ApiError { code: "not_found", message: "That torrent no longer exists.".into() },
-            EngineError::InvalidInput(_) => ApiError {
-                code: "invalid_input",
-                message: "That isn't a valid magnet link or torrent file.".into(),
-            },
-            EngineError::Blocked => ApiError {
-                code: "blocked",
-                message: "The VPN guard is holding torrents because your VPN isn't connected.".into(),
-            },
-            EngineError::Timeout => ApiError {
-                code: "timeout",
-                message: "Couldn't fetch the torrent info. Check the link, or try again in a moment.".into(),
-            },
-            EngineError::Backend(raw) => {
-                eprintln!("engine error: {raw}");
-                ApiError { code: "engine", message: "The torrent engine hit a problem. Try again.".into() }
-            }
-        }
-    }
-}
 
 type ApiResult<T> = Result<T, ApiError>;
 
@@ -165,18 +134,7 @@ pub fn take_pending_open(state: State<'_, AppState>) -> OpenPayload {
     std::mem::take(&mut *state.pending_open.lock().unwrap())
 }
 
-/// Writes `<save folder>/<name>.m3u8` for a multi-file torrent. Returns the path, or `None` when the
-/// torrent has fewer than two video/audio files.
-pub async fn write_playlist(engine: &dyn TorrentEngine, id: &TorrentId) -> Result<Option<std::path::PathBuf>, EngineError> {
-    let d = engine.details(id).await?;
-    let paths: Vec<String> = d.files.iter().map(|f| f.path.clone()).collect();
-    let Some(text) = playlist::m3u8(&paths) else { return Ok(None) };
-    let safe: String = d.stats.name.chars().map(|c| if r#"\/:*?"<>|"#.contains(c) { '_' } else { c }).collect();
-    let name = if safe.trim().is_empty() { "playlist".to_string() } else { safe };
-    let path = Path::new(&d.save_path).join(format!("{name}.m3u8"));
-    std::fs::write(&path, text).map_err(|e| EngineError::Backend(format!("playlist write failed: {e}")))?;
-    Ok(Some(path))
-}
+pub use drift_core::service::write_playlist;
 
 #[tauri::command]
 pub async fn create_playlist(state: State<'_, AppState>, id: TorrentId) -> ApiResult<String> {
@@ -238,7 +196,7 @@ pub async fn reveal_torrent(state: State<'_, AppState>, id: TorrentId) -> ApiRes
 
 #[tauri::command]
 pub fn list_adapters() -> Vec<Adapter> {
-    platform::adapters()
+    drift_core::guard::adapters()
 }
 
 #[tauri::command]
@@ -262,50 +220,25 @@ pub fn filter_status(state: State<'_, AppState>) -> FilterStatus {
     state.net.filter_status(&s)
 }
 
-fn unix_now() -> u64 {
-    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
-}
-
 /// Downloads every enabled IP list again now and restarts the engine's session if the merged list changed.
 #[tauri::command]
 pub async fn update_ip_lists(state: State<'_, AppState>) -> ApiResult<FilterStatus> {
-    let s = state.settings.lock().unwrap().clone();
-    state.net.apply(&s, Refresh::Force, unix_now()).await.map_err(|e| {
-        eprintln!("ip list update failed: {e}");
-        ApiError { code: "network", message: "Couldn't apply the IP filter. Your previous network settings are still in use.".into() }
-    })
+    state.svc.update_ip_lists().await
 }
 
 #[tauri::command]
 pub async fn search_torrents(state: State<'_, AppState>, text: String) -> ApiResult<SearchReport> {
-    let providers = {
-        let s = state.settings.lock().unwrap();
-        drift_core::search::config::build_providers(&s.search, &state.secrets)
-    };
-    if providers.is_empty() {
-        return Err(ApiError { code: "no_sources", message: "No search sources are turned on. Add one in Settings.".into() });
-    }
-    let q = SearchQuery { text: text.trim().chars().take(200).collect(), limit: 50 };
-    Ok(drift_core::search::search_all(&providers, &q, drift_core::search::DEFAULT_TIMEOUT).await)
+    state.svc.search(&text).await
 }
 
-/// Ids of sources that have a key saved. The keys themselves never leave the backend.
 #[tauri::command]
 pub fn search_keys_set(state: State<'_, AppState>) -> Vec<String> {
-    let s = state.settings.lock().unwrap();
-    s.search.torznab.iter().filter(|t| state.secrets.has(&t.id)).map(|t| t.id.clone()).collect()
+    state.svc.search_keys_set()
 }
 
 #[tauri::command]
 pub fn set_search_key(state: State<'_, AppState>, id: String, key: String) -> ApiResult<()> {
-    let known = state.settings.lock().unwrap().search.torznab.iter().any(|t| t.id == id);
-    if !known {
-        return Err(ApiError { code: "search", message: "Save the source first, then add its key.".into() });
-    }
-    state.secrets.set(&id, key.trim()).map_err(|e| {
-        eprintln!("saving a search key failed: {e}");
-        ApiError { code: "settings", message: "Couldn't save the key. Check that the app data folder is writable.".into() }
-    })
+    state.svc.set_search_key(&id, &key)
 }
 
 #[tauri::command]
@@ -315,40 +248,12 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 
 #[tauri::command]
 pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> ApiResult<Settings> {
-    let fail = |what: &str, e: &dyn std::fmt::Display| {
-        eprintln!("{what}: {e}");
-        ApiError { code: "settings", message: "Couldn't save your settings. Check that the app data folder is writable.".into() }
-    };
-    state.store.save(&settings).map_err(|e| fail("settings save failed", &e))?;
-    let before = std::mem::replace(&mut *state.settings.lock().unwrap(), settings.clone());
-
-    state.manager.sync_limits().await?;
-
-    let network_changed = before.listen_port != settings.listen_port
-        || before.upnp != settings.upnp
-        || before.dht != settings.dht
-        || before.proxy != settings.proxy
-        || before.ip_filter != settings.ip_filter;
-    if network_changed {
-        if let Err(e) = state.net.apply(&settings, Refresh::IfDue, unix_now()).await {
-            eprintln!("network settings failed: {e}");
-            // Put everything back so the saved settings always match what is actually running.
-            let _ = state.store.save(&before);
-            *state.settings.lock().unwrap() = before.clone();
-            let _ = state.net.apply(&before, Refresh::No, unix_now()).await;
-            let why = match e {
-                EngineError::InvalidInput(_) => "That proxy address isn't valid. Use the form socks5://host:port.",
-                _ => "Couldn't apply the network settings. Is the port already in use? Your previous settings are still running.",
-            };
-            return Err(ApiError { code: "network", message: why.into() });
-        }
-    }
-    if before.search != settings.search {
-        let ids: Vec<&str> = settings.search.torznab.iter().map(|t| t.id.as_str()).collect();
-        let _ = state.secrets.retain(&ids);
-    }
+    let before = state.svc.apply_settings(settings.clone()).await?;
     if before.start_with_windows != settings.start_with_windows {
-        platform::autostart::set(settings.start_with_windows).map_err(|e| fail("autostart change failed", &e))?;
+        platform::autostart::set(settings.start_with_windows).map_err(|e| {
+            eprintln!("autostart change failed: {e}");
+            ApiError { code: "settings", message: "Couldn't save your settings. Check that the app data folder is writable.".into() }
+        })?;
     }
     Ok(settings)
 }

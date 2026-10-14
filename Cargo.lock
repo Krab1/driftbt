@@ -1214,7 +1214,6 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
  "tokio",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1232,6 +1231,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.21",
  "tokio",
+ "windows-sys 0.61.2",
  "zip",
 ]
 

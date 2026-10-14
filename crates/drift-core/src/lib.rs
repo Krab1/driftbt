@@ -1,5 +1,6 @@
 //! Engine-agnostic domain logic for Drift. No UI, no Tauri, no HTTP server.
 
+pub mod background;
 pub mod engine;
 pub mod errors;
 pub mod events;
@@ -17,6 +18,7 @@ pub mod queue;
 pub mod rules;
 pub mod schedule;
 pub mod search;
+pub mod service;
 pub mod settings;
 pub mod stream;
 pub mod ticker;
