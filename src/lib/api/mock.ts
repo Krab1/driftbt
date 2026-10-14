@@ -111,6 +111,7 @@ export function createMockApi(count = 40): Api {
     schedule: { enabled: false, slots: [] },
     watch_dir: null,
     vpn_guard: { enabled: false, adapter: null, auto_resume: true },
+    search: { archive_org: true, torznab: [] },
     categories: [
       { name: "Linux", save_path: "D:\Torrents\Linux" },
       { name: "Docs", save_path: null },
@@ -235,10 +236,13 @@ export function createMockApi(count = 40): Api {
     return () => void set.delete(cb);
   };
 
+  let keys: string[] = [];
+
   return {
     list: async () => snapshot(),
     inspect: async (input) => {
-      if (input.kind !== "magnet") return invalid();
+      if (input.kind === "file") return invalid();
+      if (input.kind === "url") return fail("timeout", "Couldn't fetch the torrent info. Check the link, or try again in a moment.");
       const m = /btih:([0-9a-fA-F]{40})/.exec(input.value);
       if (!m) return invalid();
       if (input.value.includes("slow")) return fail("timeout", "Couldn't fetch the torrent info. Check the link, or try again in a moment.");
@@ -247,6 +251,13 @@ export function createMockApi(count = 40): Api {
       return { id: m[1].toLowerCase(), name: "demo-distro-1.0-amd64", total_bytes: files.reduce((a, f) => a + f.size, 0), files } satisfies TorrentPreview;
     },
     add: async (input, category = null) => {
+      if (input.kind === "url") {
+        const id = [...input.value].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(16).padStart(8, "0").repeat(5);
+        if (!torrents.some((t) => t.id === id)) {
+          torrents = [{ id, name: input.value.split("/").pop() ?? id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null }, ...torrents];
+        }
+        return id;
+      }
       if (input.kind === "magnet") {
         const m = /btih:([0-9a-fA-F]{40})/.exec(input.value);
         if (!m) return invalid();
@@ -337,6 +348,35 @@ export function createMockApi(count = 40): Api {
     createPlaylist: async (id) => {
       find(id);
       return `${settings.download_dir}\\playlist.m3u8`;
+    },
+    search: async (text) => {
+      await new Promise((r) => setTimeout(r, 400));
+      const q = text.trim().toLowerCase();
+      if (!q) return { results: [], sources: [] };
+      const mk = (i: number, src: string, magnet: boolean): import("./types").SearchResult => ({
+        title: `${text} (demo result ${i + 1})`,
+        sources: [src],
+        info_hash: null,
+        magnet: magnet ? `magnet:?xt=urn:btih:${String(i + 1).repeat(40).slice(0, 40)}` : null,
+        torrent_url: magnet ? null : `https://archive.org/download/demo${i}/demo${i}_archive.torrent`,
+        size: (i + 1) * 310_000_000,
+        seeders: magnet ? 400 - i * 37 : null,
+        leechers: magnet ? 20 + i : null,
+        published: 1_760_000_000 - i * 86_400 * 30,
+        category: magnet ? "Linux" : "movies",
+      });
+      const slow = q.includes("slow");
+      return {
+        results: [...Array.from({ length: 6 }, (_, i) => mk(i, "My indexer", true)), ...Array.from({ length: 4 }, (_, i) => mk(i + 6, "Internet Archive", false))],
+        sources: [
+          { id: "archive_org", name: "Internet Archive", outcome: "ok", count: 4, message: null },
+          { id: "idx", name: "My indexer", outcome: slow ? "timed_out" : "ok", count: 6, message: slow ? "Took too long to answer." : null },
+        ],
+      };
+    },
+    searchKeysSet: async () => keys,
+    setSearchKey: async (id, key) => {
+      keys = key ? [...new Set([...keys, id])] : keys.filter((k) => k !== id);
     },
     getSettings: async () => ({ ...settings }),
     setSettings: async (s) => (settings = { ...s }),

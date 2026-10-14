@@ -15,6 +15,7 @@
   import GuardBanner from "./lib/components/GuardBanner.svelte";
   import Palette from "./lib/components/Palette.svelte";
   import RatioDialog from "./lib/components/RatioDialog.svelte";
+  import SearchDialog from "./lib/components/SearchDialog.svelte";
   import DetailPanel from "./lib/components/DetailPanel.svelte";
   import { torrents } from "./lib/stores/torrents.svelte";
   import { ui, errorText } from "./lib/stores/ui.svelte";
@@ -85,6 +86,9 @@
     if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "k" || (e.shiftKey && e.key.toLowerCase() === "p"))) {
       e.preventDefault();
       ui.paletteOpen = true;
+    } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      ui.searchOpen = true;
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "f") {
       e.preventDefault();
       topbar?.focusSearch();
@@ -137,6 +141,7 @@
 {#if ui.goalTarget}<GoalDialog />{/if}
 {#if ui.paletteOpen}<Palette />{/if}
 {#if ui.ratioOpen}<RatioDialog />{/if}
+{#if ui.searchOpen}<SearchDialog />{/if}
 <Toasts />
 
 {#if dragging}

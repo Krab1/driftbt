@@ -17,6 +17,8 @@
   const savePath = $derived(categories.find((c) => c.name === category)?.save_path ?? ui.settings?.download_dir ?? "…");
 
   const magnetLines = $derived(magnets.split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
+  const lineInput = (l: string, only_files?: number[]): AddInput =>
+    /^https?:\/\//i.test(l) ? { kind: "url", value: l, only_files } : { kind: "magnet", value: l, only_files };
   const count = $derived(magnetLines.length + files.length);
 
   // Preview: only when exactly one source is present; stale answers are dropped.
@@ -26,7 +28,7 @@
   let selected = $state(new Set<number>());
 
   const single = $derived<AddInput | null>(
-    count !== 1 ? null : magnetLines.length ? { kind: "magnet", value: magnetLines[0] } : { kind: "file", bytes: files[0].bytes },
+    count !== 1 ? null : magnetLines.length ? lineInput(magnetLines[0]) : { kind: "file", bytes: files[0].bytes },
   );
 
   $effect(() => {
@@ -94,7 +96,7 @@
     let firstError = "";
     for (const m of magnetLines) {
       try {
-        await api.add({ kind: "magnet", value: m, only_files: only }, category || null);
+        await api.add(lineInput(m, only), category || null);
         added++;
       } catch (e) {
         failedMagnets.push(m);
@@ -127,7 +129,7 @@
 
 <Dialog title="Add torrent" onclose={() => (ui.addOpen = false)}>
   <label class="field">
-    <span>Magnet links, one per line</span>
+    <span>Magnet links or .torrent addresses, one per line</span>
     <textarea rows="3" placeholder="magnet:?xt=urn:btih:…" bind:value={magnets} oninput={() => (error = "")}></textarea>
   </label>
 

@@ -27,6 +27,7 @@
       onkeydown={(e) => e.key === "Escape" && ((torrents.query = ""), e.currentTarget.blur())}
     />
   </label>
+  <button class="btn" onclick={() => (ui.searchOpen = true)} title="Search for torrents (Ctrl+Shift+F)"><Icon name="search" />Find online</button>
   <button class="btn primary" onclick={() => ui.openAdd()}><Icon name="plus" />Add torrent</button>
   <button class="btn ghost icon" aria-label="Settings" onclick={() => (ui.settingsOpen = true)}><Icon name="sliders" size={18} /></button>
 </header>
@@ -73,7 +74,7 @@
   input::placeholder {
     color: var(--text-muted);
   }
-  header :global(.btn.primary) {
-    margin-left: auto;
+  .search {
+    margin-right: auto;
   }
 </style>

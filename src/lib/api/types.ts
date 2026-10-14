@@ -82,7 +82,49 @@ export interface TorrentPreview {
 /** `only_files` limits the download to those file indices; omit for everything. */
 export type AddInput =
   | { kind: "magnet"; value: string; only_files?: number[] }
+  | { kind: "url"; value: string; only_files?: number[] }
   | { kind: "file"; bytes: number[]; only_files?: number[] };
+
+export interface SearchResult {
+  title: string;
+  /** Names of the sources that returned it. */
+  sources: string[];
+  info_hash: string | null;
+  magnet: string | null;
+  torrent_url: string | null;
+  size: number | null;
+  seeders: number | null;
+  leechers: number | null;
+  /** Unix seconds. */
+  published: number | null;
+  category: string | null;
+}
+
+export interface SourceStatus {
+  id: string;
+  name: string;
+  outcome: "ok" | "failed" | "timed_out";
+  count: number;
+  /** Plain language, only when it didn't work. */
+  message: string | null;
+}
+
+export interface SearchReport {
+  results: SearchResult[];
+  sources: SourceStatus[];
+}
+
+export interface TorznabConfig {
+  id: string;
+  name: string;
+  url: string;
+  enabled: boolean;
+}
+
+export interface SearchSettings {
+  archive_org: boolean;
+  torznab: TorznabConfig[];
+}
 
 export interface OpenPayload {
   magnets: string[];
@@ -203,6 +245,7 @@ export interface Settings {
   /** .torrent files dropped here are added automatically. */
   watch_dir: string | null;
   vpn_guard: VpnGuardSettings;
+  search: SearchSettings;
 }
 
 /** Already plain-language; show `message` as is. */
@@ -254,6 +297,11 @@ export interface Api {
   pause(id: string): Promise<void>;
   resume(id: string): Promise<void>;
   remove(id: string, deleteFiles: boolean): Promise<void>;
+  search(text: string): Promise<SearchReport>;
+  /** Ids of search sources that have an API key saved. The keys themselves never reach the UI. */
+  searchKeysSet(): Promise<string[]>;
+  /** An empty key removes it. The source must already be saved in settings. */
+  setSearchKey(id: string, key: string): Promise<void>;
   getSettings(): Promise<Settings>;
   setSettings(s: Settings): Promise<Settings>;
   /** Returns an unsubscribe function. */

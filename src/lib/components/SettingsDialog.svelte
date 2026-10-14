@@ -4,14 +4,16 @@
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
   import NetworkPane from "./NetworkPane.svelte";
+  import SearchPane from "./SearchPane.svelte";
   import SchedulePane from "./SchedulePane.svelte";
 
-  type Tab = "general" | "speed" | "queue" | "network";
+  type Tab = "general" | "speed" | "queue" | "network" | "search";
   const tabs: { key: Tab; label: string }[] = [
     { key: "general", label: "General" },
     { key: "speed", label: "Speed" },
     { key: "queue", label: "Queue and seeding" },
     { key: "network", label: "Network" },
+    { key: "search", label: "Search" },
   ];
 
   const stored = () => {
@@ -177,6 +179,8 @@
           {#if catError}<small class="bad" role="alert">{catError}</small>{/if}
           <small>A category can send its torrents to their own folder. Assign one in the Add dialog or from a torrent's right-click menu.</small>
         </div>
+      {:else if tab === "search"}
+        <SearchPane />
       {:else}
         <NetworkPane />
       {/if}

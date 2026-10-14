@@ -62,6 +62,7 @@ export function buildCommands(): Command[] {
   add(g, "add", "Add torrent…", () => ui.openAdd(), "Ctrl+N");
   add(g, "search", "Search torrents", () => void window.dispatchEvent(new CustomEvent("drift:focus-search")), "Ctrl+F");
   add(g, "settings", "Open settings", () => void (ui.settingsOpen = true));
+  add(g, "find-online", "Find torrents online…", () => void (ui.searchOpen = true), "Ctrl+Shift+F");
   add(g, "ratio", "Show ratios per tracker", () => void (ui.ratioOpen = true));
   add(g, "details", ui.detailOpen ? "Hide details panel" : "Show details panel", () => ui.setDetailOpen(!ui.detailOpen));
   add(g, "pause-all", "Pause all torrents", () =>
