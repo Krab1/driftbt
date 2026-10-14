@@ -9,6 +9,10 @@
   const s = $derived(ui.settings);
   const hasValues = $derived(!!s && (s.down_limit_kib > 0 || s.up_limit_kib > 0));
   const label = $derived.by(() => {
+    if (ui.limits.scheduled) {
+      const part = (bps: number | null, arrow: string) => (bps ? `${arrow} ${formatBytes(bps)}/s` : "");
+      return `Scheduled limit ${[part(ui.limits.down_bps, "↓"), part(ui.limits.up_bps, "↑")].filter(Boolean).join(" ") || "none"}`;
+    }
     if (!s?.limits_enabled) return "Speed limit off";
     const part = (kib: number, arrow: string) => (kib > 0 ? `${arrow} ${formatBytes(kib * 1024)}/s` : "");
     return `Limit ${[part(s.down_limit_kib, "↓"), part(s.up_limit_kib, "↑")].filter(Boolean).join(" ")}`;
@@ -16,6 +20,8 @@
 
   function toggleLimit() {
     if (!s) return;
+    // A scheduled slot is in charge right now; the switch would change nothing visible, so show where it is set.
+    if (ui.limits.scheduled) return void (ui.settingsOpen = true);
     // Turning limits on without any value would do nothing; send the user to set one.
     if (!s.limits_enabled && !hasValues) ui.settingsOpen = true;
     else ui.saveSettings({ limits_enabled: !s.limits_enabled });
@@ -26,7 +32,7 @@
   <span class="num" title="Total download speed"><Icon name="down" size={13} /> {formatSpeed(torrents.totals.down)}</span>
   <span class="num" title="Total upload speed"><Icon name="up" size={13} /> {formatSpeed(torrents.totals.up)}</span>
   <Sparkline down={torrents.history.map((h) => h.d)} up={torrents.history.map((h) => h.u)} label="Transfer speed over the last two minutes: download in blue, upload in green" />
-  <button class="lim" class:on={s?.limits_enabled} role="switch" aria-checked={s?.limits_enabled ?? false} aria-label="Speed limit" onclick={toggleLimit}>
+  <button class="lim" class:on={s?.limits_enabled || ui.limits.scheduled} role="switch" aria-checked={(s?.limits_enabled || ui.limits.scheduled) ?? false} aria-label="Speed limit" onclick={toggleLimit}>
     <span class="dot" aria-hidden="true"></span>{label}
   </button>
   <button class="lim" onclick={() => (ui.ratioOpen = true)}>Ratios</button>

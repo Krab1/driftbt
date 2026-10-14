@@ -3,11 +3,14 @@
 
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+
+use serde::Serialize;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::engine::{Result, TorrentEngine};
+use crate::engine::{EngineError, Result, TorrentEngine};
+use crate::guard::{self, Adapter, Guard, Verdict};
 use crate::library::{Library, MetaStore, TorrentMeta};
-use crate::model::{AddRequest, TorrentId, TorrentState, TorrentStats, TorrentView};
+use crate::model::{AddRequest, Limits, TorrentId, TorrentState, TorrentStats, TorrentView};
 use crate::queue::{self, Move};
 use crate::rules::{self, Goal};
 use crate::settings::Settings;
@@ -18,8 +21,33 @@ pub type SharedSettings = Arc<Mutex<Settings>>;
 const SAVE_EVERY_SECS: u64 = 30;
 const SEED_GOAL_NOTE: &str = "Seeding goal reached";
 
+/// Local time as (weekday 0 = Monday, minutes after midnight); injectable so schedules can be tested.
+pub type Clock = Arc<dyn Fn() -> (u8, u16) + Send + Sync>;
+
+fn local_clock() -> (u8, u16) {
+    use chrono::{Datelike, Timelike};
+    let now = chrono::Local::now();
+    (now.weekday().num_days_from_monday() as u8, (now.hour() * 60 + now.minute()) as u16)
+}
+
+/// Which speed limits are in force and why.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct LimitsStatus {
+    pub scheduled: bool,
+    pub down_bps: Option<u32>,
+    pub up_bps: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct GuardStatus {
+    pub state: Verdict,
+    /// Torrents the guard is holding.
+    pub paused: usize,
+}
+
 struct State {
     lib: Library,
+    applied_limits: Option<Limits>,
     /// Torrents the last tick left waiting for a slot.
     queued: HashSet<TorrentId>,
     last_tick: Option<Instant>,
@@ -31,6 +59,8 @@ pub struct Manager {
     engine: Arc<dyn TorrentEngine>,
     store: Arc<dyn MetaStore>,
     settings: SharedSettings,
+    clock: Clock,
+    guard: Mutex<Guard>,
     state: Mutex<State>,
 }
 
@@ -48,9 +78,64 @@ fn next_position(lib: &Library) -> u64 {
 
 impl Manager {
     pub fn new(engine: Arc<dyn TorrentEngine>, store: Arc<dyn MetaStore>, settings: SharedSettings) -> Self {
+        Self::with_clock(engine, store, settings, Arc::new(local_clock))
+    }
+
+    pub fn with_clock(engine: Arc<dyn TorrentEngine>, store: Arc<dyn MetaStore>, settings: SharedSettings, clock: Clock) -> Self {
         let lib = store.load();
-        let state = State { lib, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false };
-        Self { engine, store, settings, state: Mutex::new(state) }
+        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false };
+        Self { engine, store, settings, clock, guard: Mutex::new(Guard::default()), state: Mutex::new(state) }
+    }
+
+    fn guard_tripped(&self) -> bool {
+        self.guard.lock().unwrap().tripped()
+    }
+
+    /// Speed limits for the current local time (a schedule slot wins over the global limits).
+    pub fn limits_status(&self) -> LimitsStatus {
+        let (weekday, minute) = (self.clock)();
+        let (l, scheduled) = self.settings().limits_at(weekday, minute);
+        LimitsStatus { scheduled, down_bps: l.down_bps, up_bps: l.up_bps }
+    }
+
+    /// Pushes the limits for right now to the engine when they differ from what it has.
+    pub async fn sync_limits(&self) -> Result<()> {
+        let (weekday, minute) = (self.clock)();
+        let (want, _) = self.settings().limits_at(weekday, minute);
+        if self.state.lock().unwrap().applied_limits == Some(want) {
+            return Ok(());
+        }
+        self.engine.set_limits(want).await?;
+        self.state.lock().unwrap().applied_limits = Some(want);
+        Ok(())
+    }
+
+    /// Torrents doing network work right now.
+    async fn running_ids(&self) -> Result<Vec<TorrentId>> {
+        Ok(self
+            .engine
+            .list()
+            .await?
+            .into_iter()
+            .filter(|t| matches!(t.state, TorrentState::Downloading | TorrentState::Seeding | TorrentState::Checking))
+            .map(|t| t.id)
+            .collect())
+    }
+
+    /// One VPN-guard check: pauses everything while the chosen adapter is missing, and (optionally)
+    /// resumes exactly what it paused when the adapter returns.
+    pub async fn guard_check(&self, adapters: &[Adapter]) -> Result<GuardStatus> {
+        let cfg = self.settings().vpn_guard;
+        let v = guard::verdict(&cfg, adapters);
+        let running = if v == Verdict::Unprotected { self.running_ids().await? } else { Vec::new() };
+        let action = self.guard.lock().unwrap().step(v, cfg.auto_resume, &running);
+        for id in &action.pause {
+            let _ = self.pause(id).await;
+        }
+        for id in &action.resume {
+            let _ = self.resume(id).await;
+        }
+        Ok(GuardStatus { state: v, paused: self.guard.lock().unwrap().paused_count() })
     }
 
     fn settings(&self) -> Settings {
@@ -83,6 +168,9 @@ impl Manager {
             .and_then(|c| c.save_path.clone());
         req.output_dir = category_dir.or(req.output_dir).or(s.download_dir.clone());
 
+        if self.guard_tripped() {
+            req.paused = true;
+        }
         let max = s.max_active_downloads as usize;
         if max > 0 {
             let busy = self
@@ -114,6 +202,10 @@ impl Manager {
     }
 
     pub async fn resume(&self, id: &TorrentId) -> Result<()> {
+        // The guard's own resume goes through here too, after it has cleared its tripped flag.
+        if self.guard_tripped() {
+            return Err(EngineError::Blocked);
+        }
         self.engine.resume(id).await?;
         self.with_meta(id, |m| m.user_paused = false);
         // If every slot is busy this immediately pushes the lowest-priority torrent back into the queue.
@@ -122,6 +214,9 @@ impl Manager {
 
     /// Makes sure a torrent is running and, if it is still downloading, first in line: what "Play" needs.
     pub async fn prioritize(&self, id: &TorrentId) -> Result<()> {
+        if self.guard_tripped() {
+            return Err(EngineError::Blocked);
+        }
         let list = self.engine.list().await?;
         let t = list.iter().find(|t| &t.id == id).ok_or(crate::engine::EngineError::NotFound)?;
         let incomplete = !complete(t);
@@ -225,6 +320,8 @@ impl Manager {
     /// One scheduling round: track seeding time, stop torrents whose goal is reached, fill free download
     /// slots, and return the list to show. Called by the ticker, and after any action that changes the plan.
     pub async fn tick(&self) -> Result<Vec<TorrentView>> {
+        // A failed limit update must not stop the scheduler; it is retried next tick.
+        let _ = self.sync_limits().await;
         let list = self.engine.list().await?;
         let s = self.settings();
         let min_seed = u64::from(s.min_seed_minutes) * 60;
@@ -279,12 +376,15 @@ impl Manager {
         for id in goal_stopped.iter().chain(plan.pause.iter()) {
             let _ = self.engine.pause(id).await;
         }
-        for id in &plan.resume {
-            let _ = self.engine.resume(id).await;
+        let held = self.guard_tripped();
+        if !held {
+            for id in &plan.resume {
+                let _ = self.engine.resume(id).await;
+            }
         }
 
         let st = self.state.lock().unwrap();
-        let resumed: HashSet<TorrentId> = plan.resume.into_iter().collect();
+        let resumed: HashSet<TorrentId> = if held { HashSet::new() } else { plan.resume.into_iter().collect() };
         Ok(Self::views(list, &st, &resumed, &goal_stopped))
     }
 }
@@ -462,6 +562,96 @@ mod tests {
 
         m.remove(&a, false).await.unwrap();
         assert_eq!(m.snapshot().await.unwrap().len(), 1);
+    }
+
+
+    fn clock_at(weekday: u8, minute: u16) -> (Clock, Arc<std::sync::atomic::AtomicU32>) {
+        let cell = Arc::new(std::sync::atomic::AtomicU32::new(u32::from(weekday) * 10_000 + u32::from(minute)));
+        let c = cell.clone();
+        (Arc::new(move || { let v = c.load(std::sync::atomic::Ordering::Relaxed); ((v / 10_000) as u8, (v % 10_000) as u16) }), cell)
+    }
+
+    #[tokio::test]
+    async fn a_schedule_slot_replaces_the_global_limits_and_hands_them_back_afterwards() {
+        use crate::schedule::{Schedule, Slot, MON};
+        let engine = Arc::new(FakeEngine::new());
+        let settings = Arc::new(Mutex::new(Settings {
+            limits_enabled: true,
+            down_limit_kib: 5000,
+            up_limit_kib: 0,
+            schedule: Schedule { enabled: true, slots: vec![Slot { days: MON, from_min: 9 * 60, to_min: 17 * 60, down_kib: 100, up_kib: 50 }] },
+            ..Settings::default()
+        }));
+        let (clock, now) = clock_at(0, 8 * 60);
+        let m = Manager::with_clock(engine.clone(), Arc::new(MemoryMetaStore::default()), settings, clock);
+
+        m.tick().await.unwrap();
+        assert_eq!(engine.limits(), Limits { down_bps: Some(5000 * 1024), up_bps: None }, "before the slot: global limits");
+        assert!(!m.limits_status().scheduled);
+
+        now.store(10 * 60, std::sync::atomic::Ordering::Relaxed); // Monday 10:00
+        m.tick().await.unwrap();
+        assert_eq!(engine.limits(), Limits { down_bps: Some(100 * 1024), up_bps: Some(50 * 1024) });
+        assert!(m.limits_status().scheduled);
+
+        now.store(17 * 60, std::sync::atomic::Ordering::Relaxed); // slot ended
+        m.tick().await.unwrap();
+        assert_eq!(engine.limits(), Limits { down_bps: Some(5000 * 1024), up_bps: None });
+    }
+
+    fn vpn(name: &str, up: bool) -> Vec<Adapter> {
+        vec![Adapter { name: name.into(), description: String::new(), up, has_ipv4: true }]
+    }
+
+    fn guarded(adapter: &str) -> (Arc<FakeEngine>, Manager) {
+        let (engine, m, settings) = setup(5);
+        settings.lock().unwrap().vpn_guard = guard::VpnGuard { enabled: true, adapter: Some(adapter.into()), auto_resume: true };
+        (engine, m)
+    }
+
+    #[tokio::test]
+    async fn the_vpn_guard_pauses_everything_holds_the_queue_and_resumes_only_its_own() {
+        use TorrentState::*;
+        let (engine, m) = guarded("proton");
+        for n in 1..=3 {
+            m.add(mag(n), None, vec![]).await.unwrap();
+        }
+        m.pause(&id(3)).await.unwrap(); // the user paused this one themselves
+
+        let up = m.guard_check(&vpn("ProtonVPN", true)).await.unwrap();
+        assert_eq!((up.state, up.paused), (Verdict::Protected, 0));
+        assert_eq!(states(&m.tick().await.unwrap()), [(1, Downloading), (2, Downloading), (3, Paused)]);
+
+        let down = m.guard_check(&vpn("ProtonVPN", false)).await.unwrap();
+        assert_eq!((down.state, down.paused), (Verdict::Unprotected, 2));
+        assert_eq!(states(&m.tick().await.unwrap()), [(1, Paused), (2, Paused), (3, Paused)]);
+
+        // while held: a new torrent starts paused, resume is refused, and the queue doesn't leak anything out
+        m.add(mag(4), None, vec![]).await.unwrap();
+        assert!(matches!(m.resume(&id(1)).await, Err(EngineError::Blocked)));
+        assert!(matches!(m.prioritize(&id(1)).await, Err(EngineError::Blocked)));
+        let v = m.tick().await.unwrap();
+        assert!(v.iter().all(|t| t.stats.state != Downloading), "{:?}", states(&v));
+        assert!(engine.list().await.unwrap().iter().all(|t| t.state != Downloading));
+
+        // the adapter returns: the guard's own torrents resume, the user's paused one stays paused
+        m.guard_check(&vpn("ProtonVPN", true)).await.unwrap();
+        let v = m.tick().await.unwrap();
+        assert_eq!(states(&v)[..2], [(1, Downloading), (2, Downloading)]);
+        assert_eq!(states(&v)[2], (3, Paused));
+    }
+
+    #[tokio::test]
+    async fn an_unchosen_adapter_counts_as_unprotected_and_off_is_hands_off() {
+        let (_, m) = guarded("");
+        m.add(mag(1), None, vec![]).await.unwrap();
+        assert_eq!(m.guard_check(&[]).await.unwrap().state, Verdict::Unprotected);
+        assert_eq!(m.tick().await.unwrap()[0].stats.state, TorrentState::Paused);
+
+        let (_, m, _) = setup(5);
+        m.add(mag(1), None, vec![]).await.unwrap();
+        assert_eq!(m.guard_check(&[]).await.unwrap().state, Verdict::Off);
+        assert_eq!(m.tick().await.unwrap()[0].stats.state, TorrentState::Downloading);
     }
 
     #[tokio::test]

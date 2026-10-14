@@ -2,18 +2,18 @@
 
 use std::borrow::Cow;
 use std::collections::HashSet;
-use std::net::SocketAddr;
+use std::net::{Ipv6Addr, SocketAddr};
 use std::num::NonZeroU32;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use librqbit::api::TorrentIdOrHash;
 use librqbit::http_api_types::PeerStatsFilter;
 use librqbit::{
-    AddTorrent, AddTorrentOptions, AddTorrentResponse, ListenerOptions, ManagedTorrent, Session,
+    AddTorrent, AddTorrentOptions, AddTorrentResponse, ConnectionOptions, ListenerOptions, ManagedTorrent, Session,
     SessionOptions, SessionPersistenceConfig, TorrentStatsState,
 };
 
@@ -21,6 +21,7 @@ use super::{EngineError, OpenFile, Result, TorrentEngine};
 use crate::errors::plain_error;
 use crate::model::*;
 
+#[derive(Clone)]
 pub struct RqbitConfig {
     /// Default download folder.
     pub output_dir: PathBuf,
@@ -30,45 +31,100 @@ pub struct RqbitConfig {
     pub upnp: bool,
     /// Where the torrent list is saved so it survives restarts; `None` disables persistence.
     pub persistence_dir: Option<PathBuf>,
+    /// `socks5://[user:pass@]host:port`.
+    pub proxy: Option<String>,
+    /// Normalised IP filter list (`name:start-end` lines).
+    pub blocklist_file: Option<PathBuf>,
+}
+
+impl Default for RqbitConfig {
+    fn default() -> Self {
+        Self { output_dir: PathBuf::new(), listen: None, dht: true, upnp: false, persistence_dir: None, proxy: None, blocklist_file: None }
+    }
+}
+
+impl RqbitConfig {
+    /// Only the settings that need a new session when they change.
+    fn network_key(&self) -> (Option<SocketAddr>, bool, bool, &Option<String>, &Option<PathBuf>) {
+        (self.listen, self.dht, self.upnp, &self.proxy, &self.blocklist_file)
+    }
 }
 
 pub struct RqbitEngine {
-    session: Arc<Session>,
+    session: RwLock<Arc<Session>>,
+    cfg: Mutex<RqbitConfig>,
+    limits: Mutex<Limits>,
+    /// Serialises session rebuilds.
+    rebuild: tokio::sync::Mutex<()>,
 }
 
-impl RqbitEngine {
-    pub async fn new(cfg: RqbitConfig) -> Result<Self> {
-        let mut opts = SessionOptions::default();
-        if !cfg.dht {
-            opts.dht = None;
-        }
+/// `file:///C:/dir/a%20b.txt`, which is how the engine takes a list from disk.
+fn file_url(p: &Path) -> String {
+    let path = p.display().to_string().replace('\\', "/").replace('%', "%25").replace(' ', "%20");
+    format!("file:///{}", path.trim_start_matches('/'))
+}
+
+async fn build_session(cfg: &RqbitConfig) -> Result<Arc<Session>> {
+    let mut opts = SessionOptions::default();
+    let proxied = cfg.proxy.is_some();
+    // Behind a proxy only outgoing TCP can be proxied: DHT (UDP) and listening would expose the real address.
+    if !cfg.dht || proxied {
+        opts.dht = None;
+    }
+    if !proxied {
         let mut listen = ListenerOptions::default();
         if let Some(addr) = cfg.listen {
             listen.listen_addr = addr;
         }
         listen.enable_upnp_port_forwarding = cfg.upnp;
         opts.listen = Some(listen);
-        if let Some(dir) = cfg.persistence_dir {
-            opts.persistence = Some(SessionPersistenceConfig::Json { folder: Some(dir) });
-            opts.fastresume = true;
-        }
-        let session = Session::new_with_opts(cfg.output_dir, opts).await.map_err(backend)?;
-        Ok(Self { session })
+    }
+    if let Some(url) = &cfg.proxy {
+        opts.connect = Some(ConnectionOptions { proxy_url: Some(url.clone()), ..Default::default() });
+    }
+    if let Some(file) = &cfg.blocklist_file {
+        opts.blocklist_url = Some(file_url(file));
+    }
+    if let Some(dir) = &cfg.persistence_dir {
+        opts.persistence = Some(SessionPersistenceConfig::Json { folder: Some(dir.clone()) });
+        opts.fastresume = true;
+    }
+    Session::new_with_opts(cfg.output_dir.clone(), opts).await.map_err(backend)
+}
+
+impl RqbitEngine {
+    pub async fn new(cfg: RqbitConfig) -> Result<Self> {
+        let session = build_session(&cfg).await?;
+        Ok(Self {
+            session: RwLock::new(session),
+            cfg: Mutex::new(cfg),
+            limits: Mutex::new(Limits::default()),
+            rebuild: tokio::sync::Mutex::new(()),
+        })
+    }
+
+    fn session(&self) -> Arc<Session> {
+        self.session.read().unwrap().clone()
     }
 
     /// Stop all networking and flush state; call before dropping if the list must be restored next run.
     pub async fn shutdown(&self) {
-        self.session.stop().await;
+        self.session().stop().await;
     }
 
     /// Address the engine actually listens on (useful for tests and the port-check UI).
     pub fn listen_addr(&self) -> Option<SocketAddr> {
-        self.session.listen_addr()
+        self.session().listen_addr()
     }
 
     fn handle(&self, id: &TorrentId) -> Result<Arc<ManagedTorrent>> {
         let hash = librqbit::dht::Id20::from_str(&id.0).map_err(|_| EngineError::NotFound)?;
-        self.session.get(TorrentIdOrHash::Hash(hash)).ok_or(EngineError::NotFound)
+        self.session().get(TorrentIdOrHash::Hash(hash)).ok_or(EngineError::NotFound)
+    }
+
+    fn apply_limits(session: &Session, l: Limits) {
+        session.ratelimits.set_download_bps(l.down_bps.and_then(NonZeroU32::new));
+        session.ratelimits.set_upload_bps(l.up_bps.and_then(NonZeroU32::new));
     }
 }
 
@@ -149,7 +205,7 @@ impl TorrentEngine for RqbitEngine {
         // librqbit resolves magnet metadata before noticing a torrent is already managed; short-circuit.
         if let AddSource::Magnet(m) = &req.source {
             let hash = librqbit::Magnet::parse(m).ok().and_then(|m| m.as_id20());
-            if let Some(h) = hash.and_then(|h| self.session.get(TorrentIdOrHash::Hash(h))) {
+            if let Some(h) = hash.and_then(|h| self.session().get(TorrentIdOrHash::Hash(h))) {
                 return Ok(id_of(&h));
             }
         }
@@ -161,7 +217,7 @@ impl TorrentEngine for RqbitEngine {
             initial_peers: (!req.peers.is_empty()).then_some(req.peers),
             ..Default::default()
         };
-        match self.session.add_torrent(add, Some(opts)).await.map_err(backend)? {
+        match self.session().add_torrent(add, Some(opts)).await.map_err(backend)? {
             AddTorrentResponse::Added(_, h) | AddTorrentResponse::AlreadyManaged(_, h) => Ok(id_of(&h)),
             AddTorrentResponse::ListOnly(_) => Err(EngineError::Backend("unexpected list-only response".into())),
         }
@@ -170,7 +226,8 @@ impl TorrentEngine for RqbitEngine {
     async fn inspect(&self, source: AddSource) -> Result<TorrentPreview> {
         validate(&source)?;
         let opts = AddTorrentOptions { list_only: true, ..Default::default() };
-        let fut = self.session.add_torrent(to_add(source), Some(opts));
+        let session = self.session();
+        let fut = session.add_torrent(to_add(source), Some(opts));
         let resp = tokio::time::timeout(Duration::from_secs(30), fut)
             .await
             .map_err(|_| EngineError::Timeout)?
@@ -201,7 +258,7 @@ impl TorrentEngine for RqbitEngine {
     }
 
     async fn list(&self) -> Result<Vec<TorrentStats>> {
-        Ok(self.session.with_torrents(|it| it.map(|(_, h)| stats_of(h)).collect()))
+        Ok(self.session().with_torrents(|it| it.map(|(_, h)| stats_of(h)).collect()))
     }
 
     async fn details(&self, id: &TorrentId) -> Result<TorrentDetails> {
@@ -249,17 +306,17 @@ impl TorrentEngine for RqbitEngine {
 
     async fn pause(&self, id: &TorrentId) -> Result<()> {
         let h = self.handle(id)?;
-        self.session.pause(&h).await.map_err(backend)
+        self.session().pause(&h).await.map_err(backend)
     }
 
     async fn resume(&self, id: &TorrentId) -> Result<()> {
         let h = self.handle(id)?;
-        self.session.unpause(&h).await.map_err(backend)
+        self.session().unpause(&h).await.map_err(backend)
     }
 
     async fn remove(&self, id: &TorrentId, delete_files: bool) -> Result<()> {
         let h = self.handle(id)?;
-        self.session
+        self.session()
             .delete(TorrentIdOrHash::Hash(h.info_hash()), delete_files)
             .await
             .map_err(backend)
@@ -268,13 +325,54 @@ impl TorrentEngine for RqbitEngine {
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()> {
         let h = self.handle(id)?;
         let set: HashSet<usize> = selected.into_iter().collect();
-        self.session.update_only_files(&h, &set).await.map_err(backend)
+        self.session().update_only_files(&h, &set).await.map_err(backend)
     }
 
     async fn set_limits(&self, limits: Limits) -> Result<()> {
-        self.session.ratelimits.set_download_bps(limits.down_bps.and_then(NonZeroU32::new));
-        self.session.ratelimits.set_upload_bps(limits.up_bps.and_then(NonZeroU32::new));
+        *self.limits.lock().unwrap() = limits;
+        Self::apply_limits(&self.session(), limits);
         Ok(())
+    }
+
+    async fn set_network(&self, n: NetworkConfig) -> Result<()> {
+        let _only_one_rebuild_at_a_time = self.rebuild.lock().await;
+        let old_cfg = self.cfg.lock().unwrap().clone();
+        let mut new_cfg = old_cfg.clone();
+        new_cfg.listen = n.listen_port.map(|p| SocketAddr::from((Ipv6Addr::UNSPECIFIED, p)));
+        new_cfg.dht = n.dht;
+        new_cfg.upnp = n.upnp;
+        new_cfg.proxy = n.proxy.filter(|p| !p.trim().is_empty());
+        new_cfg.blocklist_file = n.blocklist_file;
+        if new_cfg.network_key() == old_cfg.network_key() {
+            return Ok(());
+        }
+        if let Some(p) = &new_cfg.proxy {
+            let ok = reqwest::Url::parse(p).is_ok_and(|u| u.scheme() == "socks5" && u.host_str().is_some() && u.port().is_some());
+            if !ok {
+                return Err(EngineError::InvalidInput("not a valid socks5://host:port proxy address".into()));
+            }
+        }
+
+        // The old session must release its port and state files before a new one can take them over.
+        self.session().stop().await;
+        let session = match build_session(&new_cfg).await {
+            Ok(s) => s,
+            Err(e) => {
+                // Put the previous settings back so the app isn't left without an engine.
+                let restored = build_session(&old_cfg).await?;
+                Self::apply_limits(&restored, *self.limits.lock().unwrap());
+                *self.session.write().unwrap() = restored;
+                return Err(e);
+            }
+        };
+        Self::apply_limits(&session, *self.limits.lock().unwrap());
+        *self.session.write().unwrap() = session;
+        *self.cfg.lock().unwrap() = new_cfg;
+        Ok(())
+    }
+
+    async fn network_status(&self) -> Result<NetworkStatus> {
+        Ok(NetworkStatus { listen_port: self.session().listen_addr().map(|a| a.port()) })
     }
 }
 
@@ -326,6 +424,7 @@ mod tests {
             dht: false,
             upnp: false,
             persistence_dir: None,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -389,7 +488,7 @@ mod tests {
             .unwrap();
         let seeder_port = seeder.listen_addr().expect("seeder listens").port();
 
-        let engine = RqbitEngine::new(RqbitConfig { output_dir: dl_dir.clone(), listen: Some(loopback), dht: false, upnp: false, persistence_dir: None })
+        let engine = RqbitEngine::new(RqbitConfig { output_dir: dl_dir.clone(), listen: Some(loopback), dht: false, upnp: false, persistence_dir: None, ..Default::default() })
             .await
             .unwrap();
         let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
@@ -443,6 +542,175 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+
+    // ---- M5: IP filter and network settings -------------------------------------------------------
+
+    struct Seeder {
+        _session: Arc<Session>,
+        torrent: Vec<u8>,
+        addr: SocketAddr,
+    }
+
+    /// A real seeding session on loopback; `blocklist` makes it refuse the listed addresses.
+    async fn seeder(dir: &Path, blocklist: Option<&Path>) -> Seeder {
+        let file = dir.join("seedme.bin");
+        std::fs::write(&file, payload()).unwrap();
+        let torrent = create_torrent(&file, CreateTorrentOptions::default(), &BlockingSpawner::new(1))
+            .await
+            .unwrap()
+            .as_bytes()
+            .unwrap();
+        let loopback: SocketAddr = ([127, 0, 0, 1], 0).into();
+        let opts = SessionOptions {
+            dht: None,
+            disable_local_service_discovery: true,
+            listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }),
+            blocklist_url: blocklist.map(file_url),
+            ..Default::default()
+        };
+        let session = Session::new_with_opts(dir.to_path_buf(), opts).await.unwrap();
+        session
+            .add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, ..Default::default() }))
+            .await
+            .unwrap();
+        let port = session.listen_addr().expect("seeder listens").port();
+        Seeder { _session: session, torrent: torrent.to_vec(), addr: SocketAddr::from(([127, 0, 0, 1], port)) }
+    }
+
+    fn scratch(name: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("drift-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn engine_cfg(dl: &Path, blocklist: Option<&Path>) -> RqbitConfig {
+        RqbitConfig {
+            output_dir: dl.to_path_buf(),
+            listen: Some(([127, 0, 0, 1], 0).into()),
+            dht: false,
+            blocklist_file: blocklist.map(Path::to_path_buf),
+            ..Default::default()
+        }
+    }
+
+    async fn download_from(engine: &RqbitEngine, s: &Seeder) -> TorrentId {
+        let mut req = AddRequest::new(AddSource::FileBytes(s.torrent.clone()));
+        req.peers = vec![s.addr];
+        engine.add(req).await.unwrap()
+    }
+
+    async fn state_after(engine: &RqbitEngine, id: &TorrentId, secs: u64) -> (TorrentState, u64) {
+        let deadline = Instant::now() + Duration::from_secs(secs);
+        loop {
+            let t = engine.list().await.unwrap().into_iter().find(|t| &t.id == id).unwrap();
+            if t.state == TorrentState::Seeding || Instant::now() >= deadline {
+                return (t.state, t.progress_bytes);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    #[test]
+    fn file_urls_survive_spaces_and_percent_signs() {
+        let u = file_url(Path::new("C:\\Users\\a b\\100%\\list.txt"));
+        assert_eq!(u, "file:///C:/Users/a%20b/100%25/list.txt");
+        let parsed = reqwest::Url::parse(&u).unwrap();
+        assert_eq!(parsed.to_file_path().unwrap(), PathBuf::from("C:\\Users\\a b\\100%\\list.txt"));
+    }
+
+    /// M5-05, outgoing: a peer inside a blocked range is never talked to. The unblocked control proves the
+    /// seeder was reachable, so the block (and nothing else) is what stopped the transfer.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_blocked_range_stops_outgoing_connections_and_an_unblocked_peer_works() {
+        let root = scratch("ipf-out");
+        let seed_dir = root.join("seed");
+        std::fs::create_dir_all(&seed_dir).unwrap();
+        let sd = seeder(&seed_dir, None).await;
+
+        let list = root.join("block.txt");
+        std::fs::write(&list, "x:127.0.0.1-127.0.0.1\n").unwrap();
+        let blocked = RqbitEngine::new(engine_cfg(&root.join("dl-blocked"), Some(&list))).await.unwrap();
+        let id = download_from(&blocked, &sd).await;
+        let (state, progress) = state_after(&blocked, &id, 4).await;
+        assert_ne!(state, TorrentState::Seeding);
+        assert_eq!(progress, 0, "nothing may arrive from a blocked address");
+        assert_eq!(blocked.details(&id).await.unwrap().peers.len(), 0);
+
+        let open = RqbitEngine::new(engine_cfg(&root.join("dl-open"), None)).await.unwrap();
+        let id = download_from(&open, &sd).await;
+        assert_eq!(state_after(&open, &id, 30).await.0, TorrentState::Seeding, "control: the same seeder is reachable");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// M5-05, incoming: the seeder's own filter refuses a connection that comes from a blocked address.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_blocked_range_refuses_incoming_connections() {
+        let root = scratch("ipf-in");
+        let seed_dir = root.join("seed");
+        std::fs::create_dir_all(&seed_dir).unwrap();
+        let list = root.join("block.txt");
+        std::fs::write(&list, "x:127.0.0.0-127.255.255.255\n").unwrap();
+        let sd = seeder(&seed_dir, Some(&list)).await;
+
+        let dl = RqbitEngine::new(engine_cfg(&root.join("dl"), None)).await.unwrap();
+        let id = download_from(&dl, &sd).await;
+        let (state, progress) = state_after(&dl, &id, 4).await;
+        assert_ne!(state, TorrentState::Seeding);
+        assert_eq!(progress, 0, "the seeder must refuse a downloader inside its blocked range");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Changing network settings restarts the session; the torrent list and the speed limits come back,
+    /// and a bad setting leaves a working engine behind.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn network_changes_rebuild_the_session_and_keep_torrents_and_limits() {
+        let root = scratch("net");
+        let seed_dir = root.join("seed");
+        std::fs::create_dir_all(&seed_dir).unwrap();
+        let sd = seeder(&seed_dir, None).await;
+        let mut cfg = engine_cfg(&root.join("dl"), None);
+        cfg.persistence_dir = Some(root.join("state"));
+        let engine = RqbitEngine::new(cfg).await.unwrap();
+
+        let mut req = AddRequest::new(AddSource::FileBytes(sd.torrent.clone()));
+        req.paused = true;
+        let id = engine.add(req).await.unwrap();
+        engine.set_limits(Limits { down_bps: Some(500_000), up_bps: Some(100_000) }).await.unwrap();
+
+        // a fixed port, found by binding and releasing one
+        let port = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+        let base = NetworkConfig { listen_port: Some(port), dht: false, ..Default::default() };
+        engine.set_network(base.clone()).await.unwrap();
+        assert_eq!(engine.network_status().await.unwrap().listen_port, Some(port), "the new port is in use");
+        assert!(engine.list().await.unwrap().iter().any(|t| t.id == id), "the torrent survived the restart");
+        assert_eq!(engine.session().ratelimits.get_download_bps().map(|n| n.get()), Some(500_000));
+        assert_eq!(engine.session().ratelimits.get_upload_bps().map(|n| n.get()), Some(100_000));
+
+        // same settings again: nothing is restarted
+        let before = Arc::as_ptr(&engine.session());
+        engine.set_network(base.clone()).await.unwrap();
+        assert_eq!(before, Arc::as_ptr(&engine.session()), "unchanged settings must not rebuild");
+
+        // a proxy turns incoming connections off (nothing may listen outside it)
+        let proxied = NetworkConfig { proxy: Some("socks5://127.0.0.1:9".into()), ..base.clone() };
+        engine.set_network(proxied).await.unwrap();
+        assert_eq!(engine.network_status().await.unwrap().listen_port, None);
+        assert!(engine.list().await.unwrap().iter().any(|t| t.id == id));
+
+        // invalid input is rejected before anything restarts
+        let bad = NetworkConfig { proxy: Some("http://nope".into()), ..base.clone() };
+        assert!(matches!(engine.set_network(bad).await, Err(EngineError::InvalidInput(_))));
+
+        // a list that can't be loaded fails the change but leaves the previous engine running
+        let missing = NetworkConfig { blocklist_file: Some(root.join("does-not-exist.txt")), ..base.clone() };
+        assert!(engine.set_network(missing).await.is_err());
+        assert!(engine.list().await.unwrap().iter().any(|t| t.id == id), "the engine is still usable");
+        assert_eq!(engine.session().ratelimits.get_download_bps().map(|n| n.get()), Some(500_000));
+        engine.shutdown().await;
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Add-dialog preview and input validation, no network needed (the torrent file carries its metadata).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn inspect_reads_files_and_rejects_garbage() {
@@ -462,6 +730,7 @@ mod tests {
             dht: false,
             upnp: false,
             persistence_dir: None,
+            ..Default::default()
         })
         .await
         .unwrap();
@@ -505,6 +774,7 @@ mod tests {
             dht: false,
             upnp: false,
             persistence_dir: Some(state.clone()),
+            ..Default::default()
         };
         let first = RqbitEngine::new(cfg()).await.unwrap();
         let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));

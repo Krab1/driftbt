@@ -43,6 +43,34 @@ pub struct Settings {
     pub categories: Vec<Category>,
     /// Write an .m3u8 next to a finished multi-file torrent that has several video or audio files.
     pub playlist_on_complete: bool,
+    /// Fixed incoming port; `None` picks a random one at each start.
+    pub listen_port: Option<u16>,
+    pub upnp: bool,
+    pub dht: bool,
+    /// `socks5://[user:pass@]host:port`; outgoing connections go through it and DHT and incoming are turned off.
+    pub proxy: Option<String>,
+    pub ip_filter: IpFilterSettings,
+    pub schedule: crate::schedule::Schedule,
+    /// `.torrent` files dropped here are added automatically.
+    pub watch_dir: Option<PathBuf>,
+    pub vpn_guard: crate::guard::VpnGuard,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IpFilterSettings {
+    pub enabled: bool,
+    pub lists: Vec<IpList>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct IpList {
+    /// Letters, digits, `-` and `_` only: it names the cached copy on disk.
+    pub id: String,
+    pub name: String,
+    /// An http(s) address or a path to a file on this computer.
+    pub source: String,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -70,11 +98,31 @@ impl Default for Settings {
             min_seed_minutes: 0,
             categories: Vec::new(),
             playlist_on_complete: true,
+            listen_port: None,
+            upnp: false,
+            dht: true,
+            proxy: None,
+            ip_filter: IpFilterSettings::default(),
+            schedule: crate::schedule::Schedule::default(),
+            watch_dir: None,
+            vpn_guard: crate::guard::VpnGuard::default(),
         }
     }
 }
 
 impl Settings {
+    /// The limits in force at this local time: an active schedule slot replaces the global limits.
+    /// `weekday`: 0 = Monday ... 6 = Sunday; `minute`: minutes after local midnight.
+    pub fn limits_at(&self, weekday: u8, minute: u16) -> (crate::model::Limits, bool) {
+        match crate::schedule::active(&self.schedule, weekday, minute) {
+            Some(slot) => {
+                let bps = |kib: u32| (kib > 0).then(|| kib.saturating_mul(1024));
+                (crate::model::Limits { down_bps: bps(slot.down_kib), up_bps: bps(slot.up_kib) }, true)
+            }
+            None => (self.effective_limits(), false),
+        }
+    }
+
     /// What the engine should enforce right now, in bytes per second.
     pub fn effective_limits(&self) -> crate::model::Limits {
         let bps = |kib: u32| (self.limits_enabled && kib > 0).then(|| kib.saturating_mul(1024));

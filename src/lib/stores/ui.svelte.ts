@@ -1,4 +1,4 @@
-import { api, type Settings, type TorrentDetails } from "../api";
+import { api, type GuardStatus, type LimitsStatus, type Settings, type TorrentDetails } from "../api";
 
 function remembered<T extends string | number | boolean>(key: string, fallback: T): T {
   try {
@@ -86,12 +86,36 @@ class Ui {
     this.settings = await api.getSettings();
   }
 
-  async saveSettings(patch: Partial<Settings>) {
-    if (!this.settings) return;
+  /** Bumped when the backend refuses a settings change, so inputs remount showing the values actually in use. */
+  settingsRev = $state(0);
+
+  /** Resolves to true when the change was accepted. */
+  async saveSettings(patch: Partial<Settings>): Promise<boolean> {
+    if (!this.settings) return false;
     try {
       this.settings = await api.setSettings({ ...this.settings, ...patch });
+      void this.refreshLimits();
+      return true;
     } catch (e) {
       this.toast((e as { message?: string }).message ?? "Couldn't save your settings.", "error");
+      try {
+        this.settings = await api.getSettings();
+      } catch {
+        /* keep what we have */
+      }
+      this.settingsRev++;
+      return false;
+    }
+  }
+
+  guard = $state<GuardStatus>({ state: "off", paused: 0 });
+  limits = $state<LimitsStatus>({ scheduled: false, down_bps: null, up_bps: null });
+
+  async refreshLimits() {
+    try {
+      this.limits = await api.limitsStatus();
+    } catch {
+      /* the status bar just keeps its last value */
     }
   }
 }

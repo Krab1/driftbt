@@ -8,7 +8,7 @@ export interface Command {
   title: string;
   group: string;
   shortcut?: string;
-  run: () => void | Promise<void>;
+  run: () => unknown;
 }
 
 const filters: [Filter, string][] = [

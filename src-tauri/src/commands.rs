@@ -5,6 +5,9 @@ use std::sync::atomic::Ordering;
 
 use drift_core::engine::EngineError;
 use drift_core::engine::TorrentEngine;
+use drift_core::guard::Adapter;
+use drift_core::manager::{GuardStatus, LimitsStatus};
+use drift_core::netctl::{FilterStatus, Refresh};
 use drift_core::playlist;
 use drift_core::model::{AddRequest, AddSource, TorrentDetails, TorrentId, TorrentPreview, TorrentView};
 use drift_core::queue::Move;
@@ -29,6 +32,10 @@ impl From<EngineError> for ApiError {
             EngineError::InvalidInput(_) => ApiError {
                 code: "invalid_input",
                 message: "That isn't a valid magnet link or torrent file.".into(),
+            },
+            EngineError::Blocked => ApiError {
+                code: "blocked",
+                message: "The VPN guard is holding torrents because your VPN isn't connected.".into(),
             },
             EngineError::Timeout => ApiError {
                 code: "timeout",
@@ -222,6 +229,46 @@ pub async fn reveal_torrent(state: State<'_, AppState>, id: TorrentId) -> ApiRes
 }
 
 #[tauri::command]
+pub fn list_adapters() -> Vec<Adapter> {
+    platform::adapters()
+}
+
+#[tauri::command]
+pub async fn network_status(state: State<'_, AppState>) -> ApiResult<drift_core::model::NetworkStatus> {
+    Ok(state.engine.network_status().await?)
+}
+
+#[tauri::command]
+pub fn limits_status(state: State<'_, AppState>) -> LimitsStatus {
+    state.manager.limits_status()
+}
+
+#[tauri::command]
+pub fn guard_status(state: State<'_, AppState>) -> GuardStatus {
+    state.guard_status.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub fn filter_status(state: State<'_, AppState>) -> FilterStatus {
+    let s = state.settings.lock().unwrap().clone();
+    state.net.filter_status(&s)
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Downloads every enabled IP list again now and restarts the engine's session if the merged list changed.
+#[tauri::command]
+pub async fn update_ip_lists(state: State<'_, AppState>) -> ApiResult<FilterStatus> {
+    let s = state.settings.lock().unwrap().clone();
+    state.net.apply(&s, Refresh::Force, unix_now()).await.map_err(|e| {
+        eprintln!("ip list update failed: {e}");
+        ApiError { code: "network", message: "Couldn't apply the IP filter. Your previous network settings are still in use.".into() }
+    })
+}
+
+#[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
 }
@@ -235,7 +282,27 @@ pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> Api
     state.store.save(&settings).map_err(|e| fail("settings save failed", &e))?;
     let before = std::mem::replace(&mut *state.settings.lock().unwrap(), settings.clone());
 
-    state.engine.set_limits(settings.effective_limits()).await?;
+    state.manager.sync_limits().await?;
+
+    let network_changed = before.listen_port != settings.listen_port
+        || before.upnp != settings.upnp
+        || before.dht != settings.dht
+        || before.proxy != settings.proxy
+        || before.ip_filter != settings.ip_filter;
+    if network_changed {
+        if let Err(e) = state.net.apply(&settings, Refresh::IfDue, unix_now()).await {
+            eprintln!("network settings failed: {e}");
+            // Put everything back so the saved settings always match what is actually running.
+            let _ = state.store.save(&before);
+            *state.settings.lock().unwrap() = before.clone();
+            let _ = state.net.apply(&before, Refresh::No, unix_now()).await;
+            let why = match e {
+                EngineError::InvalidInput(_) => "That proxy address isn't valid. Use the form socks5://host:port.",
+                _ => "Couldn't apply the network settings. Is the port already in use? Your previous settings are still running.",
+            };
+            return Err(ApiError { code: "network", message: why.into() });
+        }
+    }
     if before.start_with_windows != settings.start_with_windows {
         platform::autostart::set(settings.start_with_windows).map_err(|e| fail("autostart change failed", &e))?;
     }

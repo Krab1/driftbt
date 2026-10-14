@@ -4,7 +4,7 @@
 use async_trait::async_trait;
 use tokio::io::{AsyncRead, AsyncSeek};
 
-use crate::model::{AddRequest, AddSource, Limits, TorrentDetails, TorrentId, TorrentPreview, TorrentStats};
+use crate::model::{AddRequest, AddSource, Limits, NetworkConfig, NetworkStatus, TorrentDetails, TorrentId, TorrentPreview, TorrentStats};
 
 pub mod fake;
 pub mod rqbit;
@@ -25,6 +25,9 @@ pub enum EngineError {
     NotFound,
     #[error("invalid input: {0}")]
     InvalidInput(String),
+    /// The VPN guard is holding transfers because the chosen adapter is not connected.
+    #[error("blocked by the VPN guard")]
+    Blocked,
     /// Metadata could not be fetched in time (no peers, bad magnet, offline).
     #[error("timed out fetching torrent info")]
     Timeout,
@@ -53,4 +56,8 @@ pub trait TorrentEngine: Send + Sync {
     /// Replace the set of files to download.
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()>;
     async fn set_limits(&self, limits: Limits) -> Result<()>;
+    /// Applies networking settings. Anything that changed restarts the engine's session, which briefly
+    /// interrupts transfers; unchanged settings are a no-op.
+    async fn set_network(&self, cfg: NetworkConfig) -> Result<()>;
+    async fn network_status(&self) -> Result<NetworkStatus>;
 }

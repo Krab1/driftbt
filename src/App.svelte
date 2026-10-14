@@ -12,6 +12,7 @@
   import TorrentList from "./lib/components/TorrentList.svelte";
   import { api, type OpenPayload } from "./lib/api";
   import GoalDialog from "./lib/components/GoalDialog.svelte";
+  import GuardBanner from "./lib/components/GuardBanner.svelte";
   import Palette from "./lib/components/Palette.svelte";
   import RatioDialog from "./lib/components/RatioDialog.svelte";
   import DetailPanel from "./lib/components/DetailPanel.svelte";
@@ -36,7 +37,13 @@
     keep(api.onCompleted((c) => ui.toast(`${c.name} finished downloading`)));
     keep(api.onOpenSources(openSources));
     keep(api.onShown(() => torrents.refresh().catch(() => {})));
-    ui.loadSettings().catch((e) => ui.toast(errorText(e), "error"));
+    ui.loadSettings().then(() => ui.refreshLimits()).catch((e) => ui.toast(errorText(e), "error"));
+    api.guardStatus().then((g) => (ui.guard = g)).catch(() => {});
+    keep(api.onGuard((g) => (ui.guard = g)));
+    keep(api.onWatch((w) => (w.added ? ui.toast(`Added ${w.added} from the watch folder`) : ui.toast(`${w.invalid} isn't a valid torrent file, so it was set aside`, "error"))));
+    // The scheduled limit can change at any minute without a setting changing.
+    const limitsTimer = setInterval(() => ui.refreshLimits(), 30_000);
+    stops.push(() => clearInterval(limitsTimer));
     api.takePendingOpen().then(openSources).catch(() => {});
 
     // Tell the backend when we're hidden so it can poll less; catch up as soon as we're shown again.
@@ -111,6 +118,7 @@
 
 <div class="app">
   <TopBar bind:this={topbar} />
+  {#if ui.guard.state === "unprotected"}<GuardBanner />{/if}
   <div class="main">
     <Rail />
     <main class="content">
@@ -137,11 +145,12 @@
 
 <style>
   .app {
-    display: grid;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    display: flex;
+    flex-direction: column;
     height: 100%;
   }
   .main {
+    flex: 1;
     display: grid;
     grid-template-columns: 168px minmax(0, 1fr);
     min-height: 0;

@@ -12,7 +12,9 @@ use drift_core::engine::rqbit::{RqbitConfig, RqbitEngine};
 use drift_core::engine::TorrentEngine;
 use drift_core::events::completions;
 use drift_core::library::JsonMetaStore;
-use drift_core::manager::{Manager as TorrentManager, SharedSettings};
+use drift_core::manager::{GuardStatus, Manager as TorrentManager, SharedSettings};
+use drift_core::netctl::{self, NetControl, Refresh};
+use drift_core::watch;
 use drift_core::model::TorrentId;
 use drift_core::settings::{JsonFileStore, SettingsStore};
 use drift_core::ticker;
@@ -27,6 +29,9 @@ use platform::{autostart, OpenPayload};
 pub struct AppState {
     /// Everything the UI does to torrents goes through the manager (queue, categories, goals).
     pub manager: Arc<TorrentManager>,
+    pub net: Arc<NetControl>,
+    /// Latest VPN guard result, for the UI.
+    pub guard_status: Mutex<GuardStatus>,
     pub data_dir: std::path::PathBuf,
     /// Started the first time something is played.
     pub stream: tokio::sync::OnceCell<drift_core::stream::StreamServer>,
@@ -171,19 +176,22 @@ fn main() {
                     (fake, None)
                 }
                 None => {
+                    // The IP filter list from the last run is loaded straight away; refreshing happens later.
+                    let net = netctl::network_config(&settings, drift_core::netctl::IpFilterService::new(data_dir.join("ipfilter")).active_file(&settings.ip_filter));
                     let real = tauri::async_runtime::block_on(RqbitEngine::new(RqbitConfig {
                         output_dir: download_dir,
-                        listen: None,
-                        dht: true,
-                        upnp: false,
+                        listen: net.listen_port.map(|p| std::net::SocketAddr::from((std::net::Ipv6Addr::UNSPECIFIED, p))),
+                        dht: net.dht,
+                        upnp: net.upnp,
                         persistence_dir: Some(data_dir.join("session")),
+                        proxy: net.proxy,
+                        blocklist_file: net.blocklist_file,
                     }))
                     .map_err(|e| format!("couldn't start the torrent engine: {e}"))?;
                     let real = Arc::new(real);
                     (real.clone(), Some(real))
                 }
             };
-            tauri::async_runtime::block_on(engine.set_limits(settings.effective_limits()))?;
 
             // Keep the OS autostart entry in step with the saved setting.
             if autostart::is_enabled() != settings.start_with_windows {
@@ -203,8 +211,12 @@ fn main() {
                 Arc::new(JsonMetaStore::new(data_dir.join("library.json"))),
                 settings.clone(),
             ));
+            tauri::async_runtime::block_on(manager.sync_limits())?;
+            let net = Arc::new(NetControl::new(engine.clone(), data_dir.join("ipfilter")));
             app.manage(AppState {
                 manager: manager.clone(),
+                net: net.clone(),
+                guard_status: Mutex::new(GuardStatus { state: drift_core::guard::Verdict::Off, paused: 0 }),
                 data_dir: data_dir.clone(),
                 stream: tokio::sync::OnceCell::new(),
                 engine: engine.clone(),
@@ -252,6 +264,75 @@ fn main() {
                 ));
             }
 
+            // VPN guard: every 2 s while enabled, so a dropped adapter is noticed quickly.
+            {
+                let handle = app.handle().clone();
+                let manager = manager.clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut last: Option<GuardStatus> = None;
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        let enabled = handle.state::<AppState>().settings.lock().unwrap().vpn_guard.enabled;
+                        // Adapter enumeration blocks briefly, so keep it off the async threads.
+                        let adapters = if enabled { tauri::async_runtime::spawn_blocking(platform::adapters).await.unwrap_or_default() } else { Vec::new() };
+                        let Ok(status) = manager.guard_check(&adapters).await else { continue };
+                        if last.as_ref() != Some(&status) {
+                            *handle.state::<AppState>().guard_status.lock().unwrap() = status.clone();
+                            let _ = handle.emit("guard", &status);
+                            last = Some(status);
+                        }
+                    }
+                });
+            }
+
+            // Watch folder: .torrent files dropped there are added once and then renamed.
+            {
+                let handle = app.handle().clone();
+                let manager = manager.clone();
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                        let dir = handle.state::<AppState>().settings.lock().unwrap().watch_dir.clone();
+                        let Some(dir) = dir else { continue };
+                        for f in watch::scan(&dir, std::time::SystemTime::now()) {
+                            let name = f.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                            let req = drift_core::model::AddRequest::new(drift_core::model::AddSource::FileBytes(f.bytes));
+                            match manager.add(req, None, Vec::new()).await {
+                                Ok(_) => {
+                                    let _ = watch::mark(&f.path, watch::Outcome::Added);
+                                    let _ = handle.emit("watch", serde_json::json!({ "added": name }));
+                                }
+                                // Not a torrent: wait until the file has stopped changing, then set it aside.
+                                Err(drift_core::engine::EngineError::InvalidInput(_)) if f.settled => {
+                                    let _ = watch::mark(&f.path, watch::Outcome::Invalid);
+                                    let _ = handle.emit("watch", serde_json::json!({ "invalid": name }));
+                                }
+                                Err(e) => eprintln!("watch folder: {name}: {e}"),
+                            }
+                        }
+                    }
+                });
+            }
+
+            // IP filter lists: refresh the ones older than a week, a little after start and then every 6 hours.
+            {
+                let handle = app.handle().clone();
+                let net = net.clone();
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(Duration::from_secs(20)).await;
+                    loop {
+                        let s = handle.state::<AppState>().settings.lock().unwrap().clone();
+                        if s.ip_filter.enabled {
+                            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+                            if let Err(e) = net.apply(&s, Refresh::IfDue, now).await {
+                                eprintln!("ip list refresh failed: {e}");
+                            }
+                        }
+                        tokio::time::sleep(Duration::from_secs(6 * 3600)).await;
+                    }
+                });
+            }
+
             // Details loop: 2 Hz, only for the watched torrent and only while the window is visible.
             {
                 let handle = app.handle().clone();
@@ -291,6 +372,12 @@ fn main() {
             commands::reveal_torrent,
             commands::create_playlist,
             commands::play_torrent,
+            commands::list_adapters,
+            commands::network_status,
+            commands::limits_status,
+            commands::guard_status,
+            commands::filter_status,
+            commands::update_ip_lists,
             commands::get_settings,
             commands::set_settings,
         ])

@@ -94,6 +94,81 @@ export interface Completed {
   name: string;
 }
 
+export interface ScheduleSlot {
+  /** Bit 0 = Monday ... bit 6 = Sunday. */
+  days: number;
+  /** Minutes after local midnight. */
+  from_min: number;
+  to_min: number;
+  /** KiB/s while active; 0 = unlimited. */
+  down_kib: number;
+  up_kib: number;
+}
+
+export interface Schedule {
+  enabled: boolean;
+  slots: ScheduleSlot[];
+}
+
+export interface IpList {
+  /** Letters, digits, - and _ only. */
+  id: string;
+  name: string;
+  /** An http(s) address or a file path. */
+  source: string;
+  enabled: boolean;
+}
+
+export interface IpFilterSettings {
+  enabled: boolean;
+  lists: IpList[];
+}
+
+export interface VpnGuardSettings {
+  enabled: boolean;
+  adapter: string | null;
+  auto_resume: boolean;
+}
+
+export interface Adapter {
+  name: string;
+  description: string;
+  up: boolean;
+  has_ipv4: boolean;
+}
+
+export interface GuardStatus {
+  state: "off" | "protected" | "unprotected";
+  /** Torrents the guard is holding. */
+  paused: number;
+}
+
+export interface ListState {
+  ranges: number;
+  /** Unix seconds of the last successful load. */
+  updated_at: number;
+  error: string | null;
+  /** Fetched over plain http. */
+  insecure: boolean;
+}
+
+export interface FilterStatus {
+  enabled: boolean;
+  active_ranges: number;
+  lists: Record<string, ListState>;
+}
+
+export interface NetworkStatus {
+  /** The port the engine is listening on; null when it isn't (for example behind a proxy). */
+  listen_port: number | null;
+}
+
+export interface LimitsStatus {
+  scheduled: boolean;
+  down_bps: number | null;
+  up_bps: number | null;
+}
+
 export type Theme = "system" | "light" | "dark";
 
 export interface Settings {
@@ -117,6 +192,17 @@ export interface Settings {
   categories: Category[];
   /** Write an .m3u8 next to finished torrents with several video/audio files. */
   playlist_on_complete: boolean;
+  /** Fixed incoming port; null = random at each start. */
+  listen_port: number | null;
+  upnp: boolean;
+  dht: boolean;
+  /** socks5://[user:pass@]host:port. A proxy turns DHT and incoming connections off. */
+  proxy: string | null;
+  ip_filter: IpFilterSettings;
+  schedule: Schedule;
+  /** .torrent files dropped here are added automatically. */
+  watch_dir: string | null;
+  vpn_guard: VpnGuardSettings;
 }
 
 /** Already plain-language; show `message` as is. */
@@ -149,6 +235,18 @@ export interface Api {
   /** Tell the backend whether the window is visible so it can slow down when hidden. */
   setVisible(visible: boolean): Promise<void>;
   revealTorrent(id: string): Promise<void>;
+  listAdapters(): Promise<Adapter[]>;
+  networkStatus(): Promise<NetworkStatus>;
+  /** Opens a file chooser; null when cancelled. */
+  pickFile(current: string | null): Promise<string | null>;
+  limitsStatus(): Promise<LimitsStatus>;
+  guardStatus(): Promise<GuardStatus>;
+  onGuard(cb: (s: GuardStatus) => void): Promise<() => void>;
+  filterStatus(): Promise<FilterStatus>;
+  /** Downloads every enabled IP list again now. */
+  updateIpLists(): Promise<FilterStatus>;
+  /** A .torrent file was picked up (or rejected) from the watch folder. */
+  onWatch(cb: (e: { added?: string; invalid?: string }) => void): Promise<() => void>;
   /** Plays a file in the default player while it downloads (the largest media file when `file` is omitted). */
   play(id: string, file?: number | null): Promise<void>;
   /** Writes an .m3u8 next to the files; resolves to its path. */

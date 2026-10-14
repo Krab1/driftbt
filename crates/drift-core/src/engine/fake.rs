@@ -17,6 +17,7 @@ pub struct FakeEngine {
 struct Inner {
     torrents: BTreeMap<TorrentId, Entry>,
     limits: Limits,
+    network: NetworkConfig,
 }
 
 struct Entry {
@@ -55,6 +56,11 @@ impl FakeEngine {
     /// Test helper: the save folder this torrent was added with.
     pub fn output_dir(&self, id: &TorrentId) -> Option<std::path::PathBuf> {
         self.inner.lock().unwrap().torrents.get(id).and_then(|e| e.output_dir.clone())
+    }
+
+    /// Test helper: the last networking settings applied.
+    pub fn network(&self) -> NetworkConfig {
+        self.inner.lock().unwrap().network.clone()
     }
 
     pub fn limits(&self) -> Limits {
@@ -268,6 +274,16 @@ impl TorrentEngine for FakeEngine {
     async fn set_limits(&self, limits: Limits) -> Result<()> {
         self.inner.lock().unwrap().limits = limits;
         Ok(())
+    }
+
+    async fn set_network(&self, cfg: NetworkConfig) -> Result<()> {
+        self.inner.lock().unwrap().network = cfg;
+        Ok(())
+    }
+
+    async fn network_status(&self) -> Result<NetworkStatus> {
+        let n = self.inner.lock().unwrap().network.clone();
+        Ok(NetworkStatus { listen_port: n.proxy.is_none().then(|| n.listen_port.unwrap_or(51413)) })
     }
 }
 

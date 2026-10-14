@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Api, ApiError, Completed, OpenPayload, Torrent, TorrentDetails } from "./types";
+import type { Api, ApiError, Completed, GuardStatus, OpenPayload, Torrent, TorrentDetails } from "./types";
 
 /** Backend errors arrive already serialized as {code, message}; anything else is a bug worth a generic message. */
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -36,6 +36,18 @@ export const tauriApi: Api = {
   takePendingOpen: () => call("take_pending_open"),
   setVisible: (visible) => call("set_visible", { visible }),
   revealTorrent: (id) => call("reveal_torrent", { id }),
+  listAdapters: () => call("list_adapters"),
+  networkStatus: () => call("network_status"),
+  pickFile: async (current) => {
+    const r = await open({ directory: false, multiple: false, defaultPath: current ?? undefined });
+    return typeof r === "string" ? r : null;
+  },
+  limitsStatus: () => call("limits_status"),
+  guardStatus: () => call("guard_status"),
+  onGuard: on<GuardStatus>("guard"),
+  filterStatus: () => call("filter_status"),
+  updateIpLists: () => call("update_ip_lists"),
+  onWatch: on<{ added?: string; invalid?: string }>("watch"),
   play: (id, file = null) => call("play_torrent", { id, file }),
   createPlaylist: (id) => call("create_playlist", { id }),
   getSettings: () => call("get_settings"),

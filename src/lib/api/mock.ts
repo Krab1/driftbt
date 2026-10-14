@@ -103,6 +103,14 @@ export function createMockApi(count = 40): Api {
     default_goal: { ratio: null, minutes: null },
     min_seed_minutes: 0,
     playlist_on_complete: true,
+    listen_port: null,
+    upnp: false,
+    dht: true,
+    proxy: null,
+    ip_filter: { enabled: false, lists: [] },
+    schedule: { enabled: false, slots: [] },
+    watch_dir: null,
+    vpn_guard: { enabled: false, adapter: null, auto_resume: true },
     categories: [
       { name: "Linux", save_path: "D:\Torrents\Linux" },
       { name: "Docs", save_path: null },
@@ -114,6 +122,15 @@ export function createMockApi(count = 40): Api {
   const detailSubs = new Set<(d: TorrentDetails) => void>();
   const doneSubs = new Set<(c: Completed) => void>();
   const openSubs = new Set<(p: OpenPayload) => void>();
+  const guardSubs = new Set<(s: import("./types").GuardStatus) => void>();
+  const watchSubs = new Set<(e: { added?: string; invalid?: string }) => void>();
+  const filterStatus = (): import("./types").FilterStatus => ({
+    enabled: settings.ip_filter.enabled,
+    active_ranges: settings.ip_filter.enabled ? 48213 : 0,
+    lists: Object.fromEntries(
+      settings.ip_filter.lists.map((l) => [l.id, { ranges: 48213, updated_at: Math.floor(Date.now() / 1000) - 3600, error: l.source.includes("broken") ? "The list would block more than a quarter of the internet, so it was ignored." : null, insecure: l.source.startsWith("http://") }]),
+    ),
+  });
   const userPaused = new Set<string>();
   const goals = new Map<string, import("./types").Goal | null>();
   const complete = (t: Torrent) => t.total_bytes > 0 && t.progress_bytes >= t.total_bytes;
@@ -197,6 +214,17 @@ export function createMockApi(count = 40): Api {
 
   // Test hook: window.__driftOpen({magnets:[...], files:[...]}) behaves like a second launch.
   (window as unknown as { __driftOpen: (p: OpenPayload) => void }).__driftOpen = (p) => openSubs.forEach((cb) => cb(p));
+  // Test hook: window.__driftVpn(false) simulates the VPN adapter dropping (and true, coming back).
+  (window as unknown as { __driftVpn: (up: boolean) => void }).__driftVpn = (up) => {
+    (window as unknown as { __vpnDown?: boolean }).__vpnDown = !up;
+    if (!settings.vpn_guard.enabled) return;
+    if (!up) {
+      const running = torrents.filter((t) => t.state === "downloading" || t.state === "seeding");
+      running.forEach((t) => userPaused.add(t.id));
+      torrents = torrents.map((t) => (running.includes(t) ? { ...t, state: "paused", down_bps: 0, up_bps: 0, eta_secs: null } : t));
+    }
+    guardSubs.forEach((cb) => cb({ state: up ? "protected" : "unprotected", paused: up ? 0 : torrents.filter((t) => t.state === "paused").length }));
+  };
 
   const pending: OpenPayload = { magnets: [], files: [] };
   const open = new URLSearchParams(location.search).get("open");
@@ -286,6 +314,22 @@ export function createMockApi(count = 40): Api {
     takePendingOpen: async () => ({ ...pending }),
     setVisible: async () => {},
     revealTorrent: async (id) => void find(id),
+    listAdapters: async () => [
+      { name: "Ethernet", description: "Realtek PCIe GbE Family Controller", up: true, has_ipv4: true },
+      { name: "Wi-Fi", description: "Intel Wi-Fi 6E AX211", up: false, has_ipv4: false },
+      { name: "ProtonVPN", description: "WireGuard Tunnel", up: !(window as unknown as { __vpnDown?: boolean }).__vpnDown, has_ipv4: true },
+    ],
+    networkStatus: async () => ({ listen_port: settings.proxy ? null : (settings.listen_port ?? 51413) }),
+    pickFile: async () => "D:\\Lists\\my-list.txt",
+    limitsStatus: async () => ({ scheduled: false, down_bps: settings.limits_enabled && settings.down_limit_kib ? settings.down_limit_kib * 1024 : null, up_bps: null }),
+    guardStatus: async () => ({ state: settings.vpn_guard.enabled ? "protected" : "off", paused: 0 }),
+    onGuard: sub(guardSubs),
+    filterStatus: async () => filterStatus(),
+    updateIpLists: async () => {
+      await new Promise((r) => setTimeout(r, 400));
+      return filterStatus();
+    },
+    onWatch: sub(watchSubs),
     play: async (id) => {
       find(id);
       (window as unknown as { __played?: string[] }).__played = [...((window as unknown as { __played?: string[] }).__played ?? []), id];

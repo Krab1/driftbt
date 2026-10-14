@@ -2,7 +2,7 @@
   import type { Snippet } from "svelte";
 
   // Native <dialog>: focus trap, Esc, and inert backdrop come from the browser.
-  let { title, onclose, children, footer }: { title: string; onclose: () => void; children: Snippet; footer?: Snippet } = $props();
+  let { title, onclose, children, footer, wide = false }: { title: string; onclose: () => void; children: Snippet; footer?: Snippet; wide?: boolean } = $props();
   let el = $state<HTMLDialogElement>();
 
   $effect(() => {
@@ -10,7 +10,7 @@
   });
 </script>
 
-<dialog bind:this={el} aria-labelledby="dlg-title" {onclose} onclick={(e) => e.target === el && el?.close()}>
+<dialog bind:this={el} class:wide aria-labelledby="dlg-title" {onclose} onclick={(e) => e.target === el && el?.close()}>
   <div class="box">
     <h2 id="dlg-title">{title}</h2>
     <div class="body">{@render children()}</div>
@@ -27,6 +27,16 @@
     color: var(--text-primary);
     box-shadow: var(--shadow-menu);
     width: min(520px, calc(100vw - 32px));
+  }
+  /* Tall content (settings) scrolls inside the dialog instead of running off the window. */
+  dialog.wide {
+    width: min(700px, calc(100vw - 32px));
+    max-height: calc(100vh - 48px);
+  }
+  dialog.wide .body {
+    overflow: auto;
+    max-height: calc(100vh - 180px);
+    padding-right: 4px;
   }
   dialog::backdrop {
     background: rgba(0, 0, 0, 0.4);

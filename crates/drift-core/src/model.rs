@@ -128,6 +128,27 @@ pub struct TorrentPreview {
     pub files: Vec<PreviewFile>,
 }
 
+/// Engine networking. Changing any of it restarts the engine session (torrents resume from saved state).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NetworkConfig {
+    /// Fixed incoming port; `None` picks a random one at each start.
+    pub listen_port: Option<u16>,
+    pub upnp: bool,
+    pub dht: bool,
+    /// `socks5://[user:pass@]host:port`. When set, outgoing connections use it, and DHT and incoming
+    /// connections are turned off so your real address isn't exposed around the proxy.
+    pub proxy: Option<String>,
+    /// Normalised IP filter list to load (see `ipfilter`).
+    pub blocklist_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NetworkStatus {
+    /// The port the engine is actually listening on, if it is listening.
+    pub listen_port: Option<u16>,
+}
+
 /// Bytes per second; `None` means unlimited.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Limits {
