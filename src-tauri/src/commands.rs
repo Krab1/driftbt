@@ -213,6 +213,16 @@ pub fn set_caption_rect(state: State<'_, AppState>, rect: Option<[i32; 4]>) {
 }
 
 #[tauri::command]
+pub async fn check_update(app: tauri::AppHandle) -> ApiResult<Option<crate::updates::UpdateInfo>> {
+    crate::updates::check(&app).await.map_err(|message| ApiError { code: "update", message })
+}
+
+#[tauri::command]
+pub async fn install_update(app: tauri::AppHandle) -> ApiResult<()> {
+    crate::updates::install(&app).await.map_err(|message| ApiError { code: "update", message })
+}
+
+#[tauri::command]
 pub fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
 }

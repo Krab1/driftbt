@@ -225,6 +225,8 @@ export interface Settings {
   start_minimized: boolean;
   start_with_windows: boolean;
   notify_on_complete: boolean;
+  /** Look for a new version once a day. Installing always asks first. */
+  check_updates: boolean;
   /** Incomplete torrents downloading at once; 0 = no limit. */
   max_active_downloads: number;
   /** Applies to torrents without their own goal. */
@@ -269,7 +271,19 @@ export interface WindowChrome {
 }
 
 /** The only door between the UI and the backend. Two transports: Tauri IPC and an in-browser mock. */
+export interface UpdateInfo {
+  version: string;
+  notes: string | null;
+}
+
 export interface Api {
+  /** Looks for a newer version now. null means you're up to date. Desktop app only. */
+  checkUpdate?(): Promise<UpdateInfo | null>;
+  /** Downloads and installs the version found by the last check; the app restarts. */
+  installUpdate?(): Promise<void>;
+  onUpdateAvailable?(cb: (u: UpdateInfo) => void): Promise<() => void>;
+  /** This app's version. */
+  version?(): Promise<string>;
   chrome?: WindowChrome;
   list(): Promise<Torrent[]>;
   /** Reads a torrent's files without starting it. Magnets can take a while and may time out. */

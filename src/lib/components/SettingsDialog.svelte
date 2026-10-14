@@ -48,6 +48,22 @@
     { key: "dark", label: "Dark" },
   ];
 
+  let version = $state("");
+  let checking = $state(false);
+  let updateNote = $state("");
+  void api.version?.().then((v) => (version = v)).catch(() => {});
+  async function checkNow() {
+    checking = true;
+    updateNote = "";
+    try {
+      const u = await api.checkUpdate!();
+      if (u) ui.update = u;
+      updateNote = u ? `Version ${u.version} is available.` : "You're up to date.";
+    } catch (e) {
+      updateNote = (e as { message?: string }).message ?? "Couldn't check for updates.";
+    }
+    checking = false;
+  }
   let newName = $state("");
   let newPath = $state<string | null>(null);
   let catError = $state("");
@@ -126,6 +142,13 @@
           <label class="check"><input type="checkbox" checked={s.start_with_windows} onchange={(e) => ui.saveSettings({ start_with_windows: e.currentTarget.checked })} /> Start Drift when Windows starts</label>
           <label class="check sub"><input type="checkbox" checked={s.start_minimized} onchange={(e) => ui.saveSettings({ start_minimized: e.currentTarget.checked })} /> Start minimized to the tray</label>
           <label class="check"><input type="checkbox" checked={s.playlist_on_complete} onchange={(e) => ui.saveSettings({ playlist_on_complete: e.currentTarget.checked })} /> Create a playlist when a multi-file download finishes</label>
+          {#if api.checkUpdate}
+            <label class="check"><input type="checkbox" checked={s.check_updates} onchange={(e) => ui.saveSettings({ check_updates: e.currentTarget.checked })} /> Check for updates once a day (contacts GitHub)</label>
+            <div class="row">
+              <button class="btn" disabled={checking} onclick={checkNow}>{checking ? "Checking…" : "Check now"}</button>
+              <small role="status">{updateNote || (version ? `Drift ${version}` : "")}</small>
+            </div>
+          {/if}
           <label class="check"><input type="checkbox" checked={s.notify_on_complete} onchange={(e) => ui.saveSettings({ notify_on_complete: e.currentTarget.checked })} /> Notify me when a download finishes</label>
         </div>
 

@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { Api, ApiError, Completed, GuardStatus, OpenPayload, Torrent, TorrentDetails } from "./types";
@@ -18,6 +19,10 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
 const on = <T>(event: string) => (cb: (p: T) => void) => listen<T>(event, (e) => cb(e.payload));
 
 export const tauriApi: Api = {
+  checkUpdate: () => call("check_update"),
+  installUpdate: () => call("install_update"),
+  onUpdateAvailable: on("update-available"),
+  version: () => getVersion(),
   chrome: {
     minimize: () => getCurrentWindow().minimize(),
     toggleMaximize: () => getCurrentWindow().toggleMaximize(),

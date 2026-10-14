@@ -34,6 +34,8 @@ pub struct Settings {
     /// Mirrors the OS autostart entry; the app keeps the two in sync.
     pub start_with_windows: bool,
     pub notify_on_complete: bool,
+    /// Look for a new version on GitHub once a day. Installing always asks first.
+    pub check_updates: bool,
     /// How many incomplete torrents download at once; 0 means no limit. Others wait in the queue.
     pub max_active_downloads: u32,
     /// Stop seeding goal applied to every torrent without its own.
@@ -94,6 +96,7 @@ impl Default for Settings {
             start_minimized: false,
             start_with_windows: false,
             notify_on_complete: true,
+            check_updates: true,
             max_active_downloads: 3,
             default_goal: crate::rules::Goal::default(),
             min_seed_minutes: 0,

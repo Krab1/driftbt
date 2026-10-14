@@ -11,7 +11,18 @@
   },
   "app": {
     "windows": [
-      { "label": "main", "create": false, "title": "Drift", "decorations": false, "shadow": true, "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu", "width": 1100, "height": 700, "minWidth": 900, "minHeight": 560 }
+      {
+        "label": "main",
+        "create": false,
+        "title": "Drift",
+        "decorations": false,
+        "shadow": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --disable-gpu",
+        "width": 1100,
+        "height": 700,
+        "minWidth": 900,
+        "minHeight": 560
+      }
     ],
     "security": {
       "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
@@ -19,16 +30,48 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "publisher": "Drift",
     "shortDescription": "A fast, light BitTorrent client",
     "category": "Utility",
     "fileAssociations": [
-      { "ext": ["torrent"], "name": "BitTorrent file", "description": "BitTorrent file", "mimeType": "application/x-bittorrent", "role": "Viewer" }
+      {
+        "ext": [
+          "torrent"
+        ],
+        "name": "BitTorrent file",
+        "description": "BitTorrent file",
+        "mimeType": "application/x-bittorrent",
+        "role": "Viewer"
+      }
     ],
     "windows": {
-      "nsis": { "installMode": "currentUser", "installerHooks": "installer-hooks.nsh", "displayLanguageSelector": false }
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "installer-hooks.nsh",
+        "displayLanguageSelector": false
+      }
     },
-    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"]
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEY1MEE3NzAwODk0QjI0RTAKUldUZ0pFdUpBSGNLOVlZYzdNak8wcjBpRk9XRjB4cXh0dU1lVllodG5pc2ZGQ1VoV1V0Q0dFV0kK",
+      "endpoints": [
+        "https://github.com/Krab1/driftbt/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

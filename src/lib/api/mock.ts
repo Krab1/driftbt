@@ -99,6 +99,7 @@ export function createMockApi(count = 40): Api {
     start_minimized: false,
     start_with_windows: false,
     notify_on_complete: true,
+    check_updates: true,
     max_active_downloads: 3,
     default_goal: { ratio: null, minutes: null },
     min_seed_minutes: 0,

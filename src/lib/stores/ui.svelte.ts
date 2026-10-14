@@ -50,6 +50,8 @@ class Ui {
   paletteOpen = $state(false);
   ratioOpen = $state(false);
   searchOpen = $state(false);
+  /** A newer version waiting for the user's go-ahead. */
+  update = $state<import("../api").UpdateInfo | null>(null);
   menu = $state<{ x: number; y: number; id: string } | null>(null);
 
   // Detail panel (remembered per viewer, not part of app settings).

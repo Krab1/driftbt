@@ -2,6 +2,7 @@
 
 mod caption;
 mod commands;
+mod updates;
 mod platform;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -146,6 +147,7 @@ fn main() {
             }
         }))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -325,6 +327,8 @@ fn main() {
                 });
             }
 
+            app.manage(updates::Pending::default());
+            tauri::async_runtime::spawn(updates::background(app.handle().clone()));
             create_main_window(app, start_hidden)?;
             create_tray(app)?;
             Ok(())
@@ -357,6 +361,8 @@ fn main() {
             commands::search_keys_set,
             commands::set_search_key,
             commands::set_caption_rect,
+            commands::check_update,
+            commands::install_update,
             commands::get_settings,
             commands::set_settings,
         ])

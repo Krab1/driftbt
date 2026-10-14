@@ -12,6 +12,7 @@
   import TorrentList from "./lib/components/TorrentList.svelte";
   import { api, type OpenPayload } from "./lib/api";
   import GoalDialog from "./lib/components/GoalDialog.svelte";
+  import UpdateBanner from "./lib/components/UpdateBanner.svelte";
   import GuardBanner from "./lib/components/GuardBanner.svelte";
   import Palette from "./lib/components/Palette.svelte";
   import RatioDialog from "./lib/components/RatioDialog.svelte";
@@ -37,6 +38,7 @@
     keep(api.onDetails((d) => (ui.details = d)));
     keep(api.onCompleted((c) => ui.toast(`${c.name} finished downloading`)));
     keep(api.onOpenSources(openSources));
+    if (api.onUpdateAvailable) keep(api.onUpdateAvailable((u) => (ui.update = u)));
     keep(api.onShown(() => torrents.refresh().catch(() => {})));
     ui.loadSettings().then(() => ui.refreshLimits()).catch((e) => ui.toast(errorText(e), "error"));
     api.guardStatus().then((g) => (ui.guard = g)).catch(() => {});
@@ -123,6 +125,7 @@
 <div class="app">
   <TopBar bind:this={topbar} />
   {#if ui.guard.state === "unprotected"}<GuardBanner />{/if}
+  {#if ui.update}<UpdateBanner />{/if}
   <div class="main">
     <Rail />
     <main class="content">
