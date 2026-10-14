@@ -1,23 +1,30 @@
-import { api, type TorrentStats } from "../api";
+import { api, type Torrent } from "../api";
 import { matches, visibleTorrents, type Filter, type SortKey } from "./view";
 
 export type { Filter, SortKey };
 
 class TorrentStore {
-  all = $state.raw<TorrentStats[]>([]);
+  all = $state.raw<Torrent[]>([]);
   filter = $state<Filter>("all");
   query = $state("");
+  /** null = all categories */
+  category = $state<string | null>(null);
   sortKey = $state<SortKey>("name");
   sortDir = $state<1 | -1>(1);
   selectedId = $state<string | null>(null);
 
-  visible = $derived(visibleTorrents(this.all, this.filter, this.query, this.sortKey, this.sortDir));
+  visible = $derived(visibleTorrents(this.all, this.filter, this.query, this.sortKey, this.sortDir, this.category));
   counts = $derived({
     all: this.all.length,
     downloading: this.all.filter(matches.downloading).length,
     seeding: this.all.filter(matches.seeding).length,
     paused: this.all.filter(matches.paused).length,
     error: this.all.filter(matches.error).length,
+  });
+  categoryCounts = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (const t of this.all) if (t.category) m.set(t.category, (m.get(t.category) ?? 0) + 1);
+    return m;
   });
   totals = $derived({
     down: this.all.reduce((s, t) => s + t.down_bps, 0),

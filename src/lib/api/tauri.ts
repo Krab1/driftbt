@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { Api, ApiError, Completed, OpenPayload, TorrentDetails, TorrentStats } from "./types";
+import type { Api, ApiError, Completed, OpenPayload, Torrent, TorrentDetails } from "./types";
 
 /** Backend errors arrive already serialized as {code, message}; anything else is a bug worth a generic message. */
 async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
@@ -19,7 +19,11 @@ const on = <T>(event: string) => (cb: (p: T) => void) => listen<T>(event, (e) =>
 export const tauriApi: Api = {
   list: () => call("list_torrents"),
   inspect: (input) => call("inspect_torrent", { input }),
-  add: (input) => call("add_torrent", { input }),
+  add: (input, category = null) => call("add_torrent", { input, category }),
+  setCategory: (id, category) => call("set_torrent_category", { id, category }),
+  setTags: (id, tags) => call("set_torrent_tags", { id, tags }),
+  setGoal: (id, goal) => call("set_torrent_goal", { id, goal }),
+  moveInQueue: (id, to) => call("move_in_queue", { id, to }),
   pause: (id) => call("pause_torrent", { id }),
   resume: (id) => call("resume_torrent", { id }),
   remove: (id, deleteFiles) => call("remove_torrent", { id, deleteFiles }),
@@ -34,7 +38,7 @@ export const tauriApi: Api = {
   revealTorrent: (id) => call("reveal_torrent", { id }),
   getSettings: () => call("get_settings"),
   setSettings: (settings) => call("set_settings", { settings }),
-  onSnapshot: on<TorrentStats[]>("snapshot"),
+  onSnapshot: on<Torrent[]>("snapshot"),
   pickFolder: async (current) => {
     const r = await open({ directory: true, multiple: false, defaultPath: current ?? undefined });
     return typeof r === "string" ? r : null;

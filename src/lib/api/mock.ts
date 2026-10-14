@@ -9,6 +9,7 @@ import type {
   Settings,
   TorrentDetails,
   TorrentPreview,
+  Torrent,
   TorrentState,
   TorrentStats,
 } from "./types";
@@ -37,7 +38,7 @@ function rng(seed: number) {
   };
 }
 
-function demo(n: number): TorrentStats[] {
+function demo(n: number): Torrent[] {
   const r = rng(42);
   return Array.from({ length: n }, (_, i) => {
     const total = Math.floor((50 + r() * 6000) * 1048576);
@@ -57,6 +58,11 @@ function demo(n: number): TorrentStats[] {
       up_bps: state === "seeding" ? Math.floor(r() * 3_000_000) : 0,
       peers_live: state === "downloading" || state === "seeding" ? Math.floor(r() * 60) : 0,
       eta_secs: down > 0 ? Math.floor((total - progress) / down) : null,
+      tracker: i % 4 === 3 ? null : i % 2 ? "tracker.example.org" : "open.example.net",
+      category: i % 5 === 0 ? "Linux" : i % 7 === 0 ? "Docs" : null,
+      tags: [],
+      queue_pos: null,
+      note: null,
     };
   });
 }
@@ -93,13 +99,48 @@ export function createMockApi(count = 40): Api {
     start_minimized: false,
     start_with_windows: false,
     notify_on_complete: true,
+    max_active_downloads: 3,
+    default_goal: { ratio: null, minutes: null },
+    min_seed_minutes: 0,
+    categories: [
+      { name: "Linux", save_path: "D:\Torrents\Linux" },
+      { name: "Docs", save_path: null },
+    ],
   };
   const selection = new Map<string, Set<number>>();
   let watched: string | null = null;
-  const snapSubs = new Set<(l: TorrentStats[]) => void>();
+  const snapSubs = new Set<(l: Torrent[]) => void>();
   const detailSubs = new Set<(d: TorrentDetails) => void>();
   const doneSubs = new Set<(c: Completed) => void>();
   const openSubs = new Set<(p: OpenPayload) => void>();
+  const userPaused = new Set<string>();
+  const goals = new Map<string, import("./types").Goal | null>();
+  const complete = (t: Torrent) => t.total_bytes > 0 && t.progress_bytes >= t.total_bytes;
+  // Mirrors the backend manager: only max_active_downloads incomplete torrents run, the rest are queued.
+  let order: string[] = torrents.filter((t) => !complete(t)).map((t) => t.id);
+  const applyQueue = () => {
+    order = order.filter((id) => torrents.some((t) => t.id === id && !complete(t)));
+    for (const t of torrents) if (!complete(t) && !order.includes(t.id)) order.push(t.id);
+    const max = settings.max_active_downloads;
+    let running = 0;
+    torrents = torrents.map((t) => {
+      const pos = order.indexOf(t.id);
+      const base: Torrent = { ...t, queue_pos: pos < 0 ? null : pos + 1 };
+      if (complete(t) || userPaused.has(t.id) || t.state === "error") return base;
+      running += 1;
+      return base;
+    });
+    running = 0;
+    const wants = new Set(order.filter((id) => { const t = torrents.find((x) => x.id === id)!; return !userPaused.has(id) && t.state !== "error"; }));
+    torrents = torrents.map((t) => {
+      if (!wants.has(t.id)) return t;
+      const allowed = max === 0 || ++running <= max;
+      if (allowed && (t.state === "queued" || (t.state === "paused" && !userPaused.has(t.id)))) return { ...t, state: "downloading", down_bps: 3_000_000 };
+      if (!allowed && (t.state === "downloading" || t.state === "checking")) return { ...t, state: "queued", down_bps: 0, eta_secs: null };
+      return t;
+    });
+  };
+  applyQueue();
   const snapshot = () => torrents.map((t) => ({ ...t }));
   const find = (id: string) => torrents.find((t) => t.id === id) ?? fail("not_found", "That torrent no longer exists.");
 
@@ -121,7 +162,7 @@ export function createMockApi(count = 40): Api {
   };
 
   setInterval(() => {
-    const finished: TorrentStats[] = [];
+    const finished: Torrent[] = [];
     torrents = torrents.map((t) => {
       if (t.state === "checking" && t.total_bytes === 0) {
         // A magnet that "found" its metadata.
@@ -131,7 +172,7 @@ export function createMockApi(count = 40): Api {
       if (t.state !== "downloading") return t;
       const progress = Math.min(t.total_bytes, t.progress_bytes + t.down_bps);
       const done = progress === t.total_bytes;
-      const next: TorrentStats = {
+      const next: Torrent = {
         ...t,
         progress_bytes: progress,
         state: done ? "seeding" : "downloading",
@@ -141,6 +182,7 @@ export function createMockApi(count = 40): Api {
       if (done) finished.push(next);
       return next;
     });
+    applyQueue();
     const s = snapshot();
     snapSubs.forEach((cb) => cb(s));
     finished.forEach((t) => doneSubs.forEach((cb) => cb({ id: t.id, name: t.name })));
@@ -175,14 +217,14 @@ export function createMockApi(count = 40): Api {
       const files = PATHS.map((path, index) => ({ index, path, size: (index + 1) * 120_000_000 }));
       return { id: m[1].toLowerCase(), name: "demo-distro-1.0-amd64", total_bytes: files.reduce((a, f) => a + f.size, 0), files } satisfies TorrentPreview;
     },
-    add: async (input) => {
+    add: async (input, category = null) => {
       if (input.kind === "magnet") {
         const m = /btih:([0-9a-fA-F]{40})/.exec(input.value);
         if (!m) return invalid();
         const id = m[1].toLowerCase();
         if (!torrents.some((t) => t.id === id)) {
           torrents = [
-            { id, name: id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null },
+            { id, name: id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null },
             ...torrents,
           ];
           if (input.only_files) selection.set(id, new Set(input.only_files));
@@ -193,10 +235,12 @@ export function createMockApi(count = 40): Api {
     },
     pause: async (id) => {
       find(id);
+      userPaused.add(id);
       torrents = torrents.map((t) => (t.id === id ? { ...t, state: "paused", down_bps: 0, up_bps: 0, eta_secs: null } : t));
     },
     resume: async (id) => {
       find(id);
+      userPaused.delete(id);
       torrents = torrents.map((t) =>
         t.id === id
           ? { ...t, error: null, state: t.progress_bytes >= t.total_bytes && t.total_bytes > 0 ? "seeding" : "downloading", down_bps: 3_000_000 }
@@ -207,6 +251,24 @@ export function createMockApi(count = 40): Api {
       find(id);
       torrents = torrents.filter((t) => t.id !== id);
       if (watched === id) watched = null;
+    },
+    setCategory: async (id, category) => {
+      find(id);
+      torrents = torrents.map((t) => (t.id === id ? { ...t, category } : t));
+    },
+    setTags: async (id, tags) => {
+      find(id);
+      torrents = torrents.map((t) => (t.id === id ? { ...t, tags } : t));
+    },
+    setGoal: async (id, goal) => void (find(id), goals.set(id, goal)),
+    moveInQueue: async (id, to) => {
+      find(id);
+      const i = order.indexOf(id);
+      if (i < 0) return;
+      order.splice(i, 1);
+      const j = to === "top" ? 0 : to === "bottom" ? order.length : to === "up" ? Math.max(0, i - 1) : Math.min(order.length, i + 1);
+      order.splice(j, 0, id);
+      applyQueue();
     },
     setFiles: async (id, selected) => {
       find(id);

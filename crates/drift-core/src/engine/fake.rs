@@ -22,6 +22,7 @@ struct Inner {
 struct Entry {
     stats: TorrentStats,
     files: Vec<FileDetails>,
+    output_dir: Option<std::path::PathBuf>,
 }
 
 const FAKE_TOTAL: u64 = 1000;
@@ -42,6 +43,18 @@ impl FakeEngine {
                 }
             }
         }
+    }
+
+    /// Test helper: pretend `bytes` have been uploaded for this torrent.
+    pub fn set_uploaded(&self, id: &TorrentId, bytes: u64) {
+        if let Some(e) = self.inner.lock().unwrap().torrents.get_mut(id) {
+            e.stats.uploaded_bytes = bytes;
+        }
+    }
+
+    /// Test helper: the save folder this torrent was added with.
+    pub fn output_dir(&self, id: &TorrentId) -> Option<std::path::PathBuf> {
+        self.inner.lock().unwrap().torrents.get(id).and_then(|e| e.output_dir.clone())
     }
 
     pub fn limits(&self) -> Limits {
@@ -84,9 +97,10 @@ impl FakeEngine {
                     up_bps: if state == TorrentState::Seeding { next() % 3_000_000 } else { 0 },
                     peers_live: (next() % 60) as u32,
                     eta_secs: (down > 0).then(|| (total - progress) / down),
+                    tracker: Some("tracker.example.org".into()),
                 };
                 let files = demo_files(total, progress, next());
-                g.torrents.insert(id, Entry { stats, files });
+                g.torrents.insert(id, Entry { stats, files, output_dir: None });
             }
         }
         e
@@ -165,8 +179,10 @@ impl TorrentEngine for FakeEngine {
                 up_bps: 0,
                 peers_live: 0,
                 eta_secs: None,
+                tracker: Some("tracker.example.org".into()),
             },
             files: vec![FileDetails { index: 0, path: "file.bin".into(), size: FAKE_TOTAL, progress_bytes: 0, selected: true }],
+            output_dir: req.output_dir.clone(),
         });
         Ok(id)
     }

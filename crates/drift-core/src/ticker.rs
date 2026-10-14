@@ -1,21 +1,21 @@
-//! The single polling loop: reads the engine on a period and hands each snapshot to a sink.
-//! Queue and rules run from here later (M4); the UI never polls.
+//! The single polling loop: runs one manager round on a period and hands each snapshot to a sink.
+//! The UI never polls.
 
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::engine::TorrentEngine;
-use crate::model::TorrentStats;
+use crate::manager::Manager;
+use crate::model::TorrentView;
 
 /// Runs forever; spawn it on the app's runtime. `period` is asked before every wait so the app can
 /// slow the loop down while the window is hidden. Engine errors skip that tick.
 pub async fn run(
-    engine: Arc<dyn TorrentEngine>,
+    manager: Arc<Manager>,
     period: impl Fn() -> Duration + Send,
-    mut on_snapshot: impl FnMut(Vec<TorrentStats>) + Send,
+    mut on_snapshot: impl FnMut(Vec<TorrentView>) + Send,
 ) {
     loop {
-        if let Ok(list) = engine.list().await {
+        if let Ok(list) = manager.tick().await {
             on_snapshot(list);
         }
         tokio::time::sleep(period()).await;
@@ -26,22 +26,23 @@ pub async fn run(
 mod tests {
     use super::*;
     use crate::engine::fake::FakeEngine;
+    use crate::engine::TorrentEngine;
+    use crate::library::MemoryMetaStore;
     use crate::model::{AddRequest, AddSource};
+    use crate::settings::Settings;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
 
-    async fn engine_with_one() -> Arc<FakeEngine> {
+    async fn manager_with_one() -> Arc<Manager> {
         let engine = Arc::new(FakeEngine::new());
-        engine
-            .add(AddRequest::new(AddSource::Magnet("0123456789abcdef0123456789abcdef01234567".into())))
-            .await
-            .unwrap();
-        engine
+        engine.add(AddRequest::new(AddSource::Magnet("0123456789abcdef0123456789abcdef01234567".into()))).await.unwrap();
+        Arc::new(Manager::new(engine, Arc::new(MemoryMetaStore::default()), Arc::new(Mutex::new(Settings::default()))))
     }
 
     #[tokio::test]
     async fn emits_snapshots_reflecting_engine_state() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let handle = tokio::spawn(run(engine_with_one().await, || Duration::from_millis(5), move |s| {
+        let handle = tokio::spawn(run(manager_with_one().await, || Duration::from_millis(5), move |s| {
             let _ = tx.send(s);
         }));
         let first = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
@@ -56,7 +57,7 @@ mod tests {
         let counter = asked.clone();
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let handle = tokio::spawn(run(
-            engine_with_one().await,
+            manager_with_one().await,
             move || {
                 counter.fetch_add(1, Ordering::Relaxed);
                 Duration::from_millis(5)
@@ -75,7 +76,7 @@ mod tests {
     #[tokio::test]
     async fn a_long_period_stops_the_loop_from_emitting() {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-        let handle = tokio::spawn(run(engine_with_one().await, || Duration::from_secs(3600), move |s| {
+        let handle = tokio::spawn(run(manager_with_one().await, || Duration::from_secs(3600), move |s| {
             let _ = tx.send(s);
         }));
         rx.recv().await.unwrap();

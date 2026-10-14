@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { TorrentStats } from "../api";
+  import type { Torrent } from "../api";
   import { formatBytes, formatEta, formatSpeed, percent } from "../../format";
   import Icon from "./Icon.svelte";
 
@@ -12,7 +12,7 @@
     ontoggle,
     onremove,
   }: {
-    t: TorrentStats;
+    t: Torrent;
     selected: boolean;
     index: number;
     onselect: () => void;
@@ -24,16 +24,20 @@
   const pct = $derived(percent(t.progress_bytes, t.total_bytes));
   const speed = $derived(t.state === "seeding" ? t.up_bps : t.down_bps);
   const icon = $derived(
-    ({ downloading: "down", seeding: "up", paused: "pause", error: "alert", checking: "clock" } as const)[t.state],
+    ({ downloading: "down", seeding: "up", paused: "pause", queued: "list", error: "alert", checking: "clock" } as const)[t.state],
   );
   const label = $derived(
-    ({ downloading: "Downloading", seeding: "Seeding", paused: "Paused", error: "Error", checking: "Checking" } as const)[t.state],
+    ({ downloading: "Downloading", seeding: "Seeding", paused: "Paused", queued: "Queued", error: "Error", checking: "Checking" } as const)[t.state],
   );
   const canToggle = $derived(t.state !== "checking" && t.state !== "error");
   // Magnets show their hash until metadata arrives; say what is happening instead.
   const fetching = $derived(t.state === "checking" && t.total_bytes === 0);
   const caption = $derived(
-    fetching
+    t.state === "queued"
+      ? `Waiting for a free slot · #${t.queue_pos ?? "?"} in queue`
+      : t.note
+        ? t.note
+        : fetching
       ? "Fetching torrent info…"
       : t.state === "checking"
         ? "Checking files…"
@@ -122,7 +126,8 @@
     color: var(--neutral);
   }
   .state.downloading,
-  .state.checking {
+  .state.checking,
+  .state.queued {
     color: var(--accent);
   }
   .state.seeding {

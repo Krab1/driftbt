@@ -31,6 +31,7 @@ mod tests {
             up_bps: 0,
             peers_live: 0,
             eta_secs: None,
+            tracker: None,
         }
     }
 

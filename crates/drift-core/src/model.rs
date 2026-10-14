@@ -45,6 +45,8 @@ pub enum TorrentState {
     Downloading,
     Seeding,
     Paused,
+    /// Waiting for a free download slot. Set by the manager; engines never report it.
+    Queued,
     Error,
 }
 
@@ -61,6 +63,22 @@ pub struct TorrentStats {
     pub up_bps: u64,
     pub peers_live: u32,
     pub eta_secs: Option<u64>,
+    /// Host of the first tracker, for per-tracker totals. `None` for trackerless torrents.
+    #[serde(default)]
+    pub tracker: Option<String>,
+}
+
+/// What the UI shows for one torrent: engine stats plus the manager's own bookkeeping.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TorrentView {
+    #[serde(flatten)]
+    pub stats: TorrentStats,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+    /// Place in the download queue (1 = first); `None` once complete.
+    pub queue_pos: Option<u32>,
+    /// Short reason shown next to the name, e.g. "Seeding goal reached".
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

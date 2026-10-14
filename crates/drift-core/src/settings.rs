@@ -34,6 +34,20 @@ pub struct Settings {
     /// Mirrors the OS autostart entry; the app keeps the two in sync.
     pub start_with_windows: bool,
     pub notify_on_complete: bool,
+    /// How many incomplete torrents download at once; 0 means no limit. Others wait in the queue.
+    pub max_active_downloads: u32,
+    /// Stop seeding goal applied to every torrent without its own.
+    pub default_goal: crate::rules::Goal,
+    /// Nothing stops seeding before this many minutes, whatever the ratio.
+    pub min_seed_minutes: u32,
+    pub categories: Vec<Category>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Category {
+    pub name: String,
+    /// New torrents in this category download here instead of the default folder.
+    pub save_path: Option<PathBuf>,
 }
 
 impl Default for Settings {
@@ -49,6 +63,10 @@ impl Default for Settings {
             start_minimized: false,
             start_with_windows: false,
             notify_on_complete: true,
+            max_active_downloads: 3,
+            default_goal: crate::rules::Goal::default(),
+            min_seed_minutes: 0,
+            categories: Vec::new(),
         }
     }
 }
@@ -94,8 +112,7 @@ fn migrate(mut v: serde_json::Value) -> serde_json::Value {
 }
 
 fn parse(bytes: &[u8]) -> Option<Settings> {
-    // Notepad and PowerShell 5 save UTF-8 files with a BOM; serde_json rejects it.
-    let bytes = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(bytes);
+    let bytes = crate::jsonfile::strip_bom(bytes);
     let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
     serde_json::from_value(migrate(v)).ok()
 }
@@ -113,13 +130,7 @@ impl SettingsStore for JsonFileStore {
     }
 
     fn save(&self, settings: &Settings) -> std::io::Result<()> {
-        if let Some(dir) = self.path.parent() {
-            std::fs::create_dir_all(dir)?;
-        }
-        // Write-then-rename so a crash never leaves a half-written file.
-        let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?)?;
-        std::fs::rename(tmp, &self.path)
+        crate::jsonfile::write_atomic(&self.path, &serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?)
     }
 }
 

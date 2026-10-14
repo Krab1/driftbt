@@ -11,8 +11,10 @@ use drift_core::engine::fake::FakeEngine;
 use drift_core::engine::rqbit::{RqbitConfig, RqbitEngine};
 use drift_core::engine::TorrentEngine;
 use drift_core::events::completions;
+use drift_core::library::JsonMetaStore;
+use drift_core::manager::{Manager as TorrentManager, SharedSettings};
 use drift_core::model::TorrentId;
-use drift_core::settings::{JsonFileStore, Settings, SettingsStore};
+use drift_core::settings::{JsonFileStore, SettingsStore};
 use drift_core::ticker;
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem};
@@ -23,9 +25,12 @@ use tauri_plugin_notification::NotificationExt;
 use platform::{autostart, OpenPayload};
 
 pub struct AppState {
+    /// Everything the UI does to torrents goes through the manager (queue, categories, goals).
+    pub manager: Arc<TorrentManager>,
+    /// Direct engine access, only for what the manager has no opinion on (details, inspect, file selection).
     pub engine: Arc<dyn TorrentEngine>,
     pub store: Arc<dyn SettingsStore>,
-    pub settings: Mutex<Settings>,
+    pub settings: SharedSettings,
     /// Reported by the UI (`document.hidden`); drives how often we poll and push.
     pub visible: Arc<AtomicBool>,
     /// Torrent whose details panel is open, if any.
@@ -189,10 +194,17 @@ fn main() {
 
             // The state must be registered before any loop starts: they look it up on their first tick.
             let pending = platform::open_payload(&args);
+            let settings: SharedSettings = Arc::new(Mutex::new(settings));
+            let manager = Arc::new(TorrentManager::new(
+                engine.clone(),
+                Arc::new(JsonMetaStore::new(data_dir.join("library.json"))),
+                settings.clone(),
+            ));
             app.manage(AppState {
+                manager: manager.clone(),
                 engine: engine.clone(),
                 store,
-                settings: Mutex::new(settings),
+                settings,
                 visible: visible.clone(),
                 watched: watched.clone(),
                 pending_open: Mutex::new(pending),
@@ -206,12 +218,13 @@ fn main() {
                 let period_handle = app.handle().clone();
                 let mut prev = Vec::new();
                 tauri::async_runtime::spawn(ticker::run(
-                    engine.clone(),
+                    manager.clone(),
                     move || Duration::from_secs(if window_active(&period_handle, &vis) { 1 } else { 5 }),
                     move |list| {
                         let state = handle.state::<AppState>();
                         let notify = state.settings.lock().unwrap().notify_on_complete;
-                        for t in completions(&prev, &list) {
+                        let stats: Vec<_> = list.iter().map(|v| v.stats.clone()).collect();
+                        for t in completions(&prev, &stats) {
                             let _ = handle.emit("completed", Completed { id: t.id.clone(), name: t.name.clone() });
                             let focused = handle.get_webview_window("main").and_then(|w| w.is_focused().ok()).unwrap_or(false);
                             if notify && !focused {
@@ -219,7 +232,7 @@ fn main() {
                             }
                         }
                         let _ = handle.emit("snapshot", &list);
-                        prev = list;
+                        prev = stats;
                     },
                 ));
             }
@@ -253,6 +266,10 @@ fn main() {
             commands::resume_torrent,
             commands::remove_torrent,
             commands::set_files,
+            commands::set_torrent_category,
+            commands::set_torrent_tags,
+            commands::set_torrent_goal,
+            commands::move_in_queue,
             commands::watch_details,
             commands::set_visible,
             commands::take_pending_open,

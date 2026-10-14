@@ -11,6 +11,7 @@
   import TopBar from "./lib/components/TopBar.svelte";
   import TorrentList from "./lib/components/TorrentList.svelte";
   import { api, type OpenPayload } from "./lib/api";
+  import GoalDialog from "./lib/components/GoalDialog.svelte";
   import DetailPanel from "./lib/components/DetailPanel.svelte";
   import { torrents } from "./lib/stores/torrents.svelte";
   import { ui, errorText } from "./lib/stores/ui.svelte";
@@ -117,6 +118,7 @@
 {#if ui.addOpen}<AddDialog />{/if}
 {#if ui.removeTarget}<RemoveDialog />{/if}
 {#if ui.settingsOpen}<SettingsDialog />{/if}
+{#if ui.goalTarget}<GoalDialog />{/if}
 <Toasts />
 
 {#if dragging}

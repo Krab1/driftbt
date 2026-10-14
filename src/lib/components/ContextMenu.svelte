@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "../api";
+  import { api, type QueueMove } from "../api";
   import { torrents } from "../stores/torrents.svelte";
   import { ui, errorText } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
@@ -7,6 +7,14 @@
   const menu = ui.menu!;
   const t = torrents.all.find((x) => x.id === menu.id);
   const canToggle = !!t && t.state !== "checking" && t.state !== "error";
+  const inQueue = !!t && t.queue_pos !== null;
+  const categories = ui.settings?.categories ?? [];
+  const queueMoves: { to: QueueMove; label: string }[] = [
+    { to: "top", label: "Move to top of queue" },
+    { to: "up", label: "Move up in queue" },
+    { to: "down", label: "Move down in queue" },
+    { to: "bottom", label: "Move to bottom of queue" },
+  ];
 
   let el = $state<HTMLDivElement>();
   let pos = $state({ x: menu.x, y: menu.y });
@@ -52,6 +60,33 @@
     }
   }
 
+  async function move(to: QueueMove) {
+    close();
+    if (!t) return;
+    try {
+      await api.moveInQueue(t.id, to);
+      await torrents.refresh();
+    } catch (e) {
+      ui.toast(errorText(e), "error");
+    }
+  }
+
+  async function setCategory(name: string | null) {
+    close();
+    if (!t) return;
+    try {
+      await api.setCategory(t.id, name);
+      await torrents.refresh();
+    } catch (e) {
+      ui.toast(errorText(e), "error");
+    }
+  }
+
+  function goal() {
+    close();
+    if (t) ui.goalTarget = { id: t.id, name: t.name };
+  }
+
   function remove() {
     close();
     if (t) ui.removeTarget = { id: t.id, name: t.name };
@@ -74,6 +109,24 @@
   {/if}
   <button role="menuitem" onclick={reveal}><Icon name="folder" />Show in folder</button>
   <button role="menuitem" onclick={copyMagnet}><Icon name="file" />Copy magnet link</button>
+  {#if inQueue}
+    <hr />
+    {#each queueMoves as m (m.to)}
+      <button role="menuitem" onclick={() => move(m.to)}><Icon name={m.to === "top" || m.to === "up" ? "up" : "down"} />{m.label}</button>
+    {/each}
+  {/if}
+  {#if categories.length}
+    <hr />
+    <div class="lbl" id="cm-cat">Category</div>
+    <div role="group" aria-labelledby="cm-cat">
+      <button role="menuitemradio" aria-checked={!t?.category} onclick={() => setCategory(null)}><span class="tick">{!t?.category ? "✓" : ""}</span>None</button>
+      {#each categories as c (c.name)}
+        <button role="menuitemradio" aria-checked={t?.category === c.name} onclick={() => setCategory(c.name)}><span class="tick">{t?.category === c.name ? "✓" : ""}</span>{c.name}</button>
+      {/each}
+    </div>
+  {/if}
+  <hr />
+  <button role="menuitem" onclick={goal}><Icon name="clock" />Seeding goal…</button>
   <button role="menuitem" onclick={remove}><Icon name="trash" />Remove…</button>
 </div>
 
@@ -99,6 +152,21 @@
     border-radius: var(--radius);
     background: transparent;
     text-align: left;
+  }
+  hr {
+    margin: 4px 0;
+    border: 0;
+    border-top: 1px solid var(--border);
+  }
+  .lbl {
+    padding: 4px 10px 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .tick {
+    display: inline-block;
+    width: 16px;
+    text-align: center;
   }
   button:hover,
   button:focus-visible {

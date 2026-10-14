@@ -4,7 +4,9 @@ use std::path::Path;
 use std::sync::atomic::Ordering;
 
 use drift_core::engine::EngineError;
-use drift_core::model::{AddRequest, AddSource, TorrentDetails, TorrentId, TorrentPreview, TorrentStats};
+use drift_core::model::{AddRequest, AddSource, TorrentDetails, TorrentId, TorrentPreview, TorrentView};
+use drift_core::queue::Move;
+use drift_core::rules::Goal;
 use drift_core::settings::Settings;
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -65,8 +67,8 @@ impl AddInput {
 }
 
 #[tauri::command]
-pub async fn list_torrents(state: State<'_, AppState>) -> ApiResult<Vec<TorrentStats>> {
-    Ok(state.engine.list().await?)
+pub async fn list_torrents(state: State<'_, AppState>) -> ApiResult<Vec<TorrentView>> {
+    Ok(state.manager.snapshot().await?)
 }
 
 #[tauri::command]
@@ -75,27 +77,48 @@ pub async fn inspect_torrent(state: State<'_, AppState>, input: AddInput) -> Api
 }
 
 #[tauri::command]
-pub async fn add_torrent(state: State<'_, AppState>, input: AddInput) -> ApiResult<TorrentId> {
+pub async fn add_torrent(state: State<'_, AppState>, input: AddInput, category: Option<String>) -> ApiResult<TorrentId> {
     let (source, only_files) = input.into_parts();
     let mut req = AddRequest::new(source);
     req.only_files = only_files;
-    req.output_dir = state.settings.lock().unwrap().download_dir.clone();
-    Ok(state.engine.add(req).await?)
+    // The manager picks the save folder (category, else the default) and the queue slot.
+    Ok(state.manager.add(req, category, Vec::new()).await?)
 }
 
 #[tauri::command]
 pub async fn pause_torrent(state: State<'_, AppState>, id: TorrentId) -> ApiResult<()> {
-    Ok(state.engine.pause(&id).await?)
+    Ok(state.manager.pause(&id).await?)
 }
 
 #[tauri::command]
 pub async fn resume_torrent(state: State<'_, AppState>, id: TorrentId) -> ApiResult<()> {
-    Ok(state.engine.resume(&id).await?)
+    Ok(state.manager.resume(&id).await?)
 }
 
 #[tauri::command]
 pub async fn remove_torrent(state: State<'_, AppState>, id: TorrentId, delete_files: bool) -> ApiResult<()> {
-    Ok(state.engine.remove(&id, delete_files).await?)
+    Ok(state.manager.remove(&id, delete_files).await?)
+}
+
+#[tauri::command]
+pub fn set_torrent_category(state: State<'_, AppState>, id: TorrentId, category: Option<String>) {
+    state.manager.set_category(&id, category);
+}
+
+#[tauri::command]
+pub fn set_torrent_tags(state: State<'_, AppState>, id: TorrentId, tags: Vec<String>) {
+    state.manager.set_tags(&id, tags);
+}
+
+/// `None` goes back to the default seeding goal.
+#[tauri::command]
+pub fn set_torrent_goal(state: State<'_, AppState>, id: TorrentId, goal: Option<Goal>) {
+    state.manager.set_goal(&id, goal);
+}
+
+#[tauri::command]
+pub async fn move_in_queue(state: State<'_, AppState>, id: TorrentId, to: Move) -> ApiResult<()> {
+    Ok(state.manager.move_in_queue(&id, to).await?)
 }
 
 #[tauri::command]

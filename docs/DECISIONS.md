@@ -32,4 +32,7 @@ Append-only. Format: `D-n · date · decision — why — consequence`.
 - **D-22 · 2026-10-14 · No in-app "register as magnet handler" button** — Windows protects the user's default-app choice and a registry write could overwrite another client's setting. The installer registers `magnet:` and `.torrent` (M3-04).
 - **D-23 · 2026-10-14 · The backend decides whether the window is visible** — WebView2 keeps `document.hidden == false` after the window is hidden to the tray, so the loops combine the native window state with the UI's report, and a `window-shown` event makes the UI catch up when it returns.
 
+- **D-24 · 2026-10-14 · `core::manager` sits between the app and the engine** — queue order, categories, tags, goals and the seeding clock are not engine concepts. The manager is the only thing the UI mutates through; it uses pure planners (`queue`, `rules`) that are unit-tested against the fake engine. The engine gains no new methods for any of it; queueing is just pause/resume. Per-torrent bookkeeping lives in `library.json`, separate from `settings.json`.
+- **D-25 · 2026-10-14 · A torrent first seen already paused is treated as user-paused** — so adopting torrents from older versions never auto-resumes something the user stopped.
+
 Note: rqbit already ships its own Tauri desktop app (web UI wrapped). We are not forking it; our value is a purpose-built native-feeling UI plus queue/rules/streaming UX.

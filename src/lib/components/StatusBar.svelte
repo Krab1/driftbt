@@ -4,6 +4,7 @@
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
 
+  const queued = $derived(torrents.all.filter((t) => t.state === "queued").length);
   const s = $derived(ui.settings);
   const hasValues = $derived(!!s && (s.down_limit_kib > 0 || s.up_limit_kib > 0));
   const label = $derived.by(() => {
@@ -26,7 +27,7 @@
   <button class="lim" class:on={s?.limits_enabled} role="switch" aria-checked={s?.limits_enabled ?? false} aria-label="Speed limit" onclick={toggleLimit}>
     <span class="dot" aria-hidden="true"></span>{label}
   </button>
-  <span class="end num">{torrents.counts.all} {torrents.counts.all === 1 ? "torrent" : "torrents"} · {torrents.counts.downloading} active</span>
+  <span class="end num">{torrents.counts.all} {torrents.counts.all === 1 ? "torrent" : "torrents"} · {torrents.counts.downloading - queued} active{#if queued}{" · "}{queued} queued{/if}</span>
 </footer>
 
 <style>

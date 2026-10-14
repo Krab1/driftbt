@@ -1,5 +1,6 @@
 <script lang="ts">
   import { torrents, type Filter } from "../stores/torrents.svelte";
+  import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
 
   const items: { key: Filter; label: string; icon: "list" | "down" | "up" | "pause" | "alert" }[] = [
@@ -19,6 +20,18 @@
       <span class="count num">{torrents.counts[it.key]}</span>
     </button>
   {/each}
+  {#if ui.settings?.categories.length}
+    <div class="group" id="cat-label">Categories</div>
+    <div role="group" aria-labelledby="cat-label" class="cats">
+      {#each ui.settings.categories as c (c.name)}
+        <button class="item" class:on={torrents.category === c.name} aria-pressed={torrents.category === c.name} title="{c.name} ({torrents.categoryCounts.get(c.name) ?? 0})" onclick={() => (torrents.category = torrents.category === c.name ? null : c.name)}>
+          <Icon name="folder" />
+          <span class="label">{c.name}</span>
+          <span class="count num">{torrents.categoryCounts.get(c.name) ?? 0}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
 </nav>
 
 <style>
@@ -51,6 +64,24 @@
   }
   .label {
     flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .group {
+    margin: 12px 8px 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .cats {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  @media (max-width: 760px) {
+    .group {
+      display: none;
+    }
   }
   .count {
     font-size: 11px;

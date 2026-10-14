@@ -62,9 +62,9 @@ Bugs found by the real-app run and fixed: ticker task spawned before the app sta
 ## M4 — Power features
 | ID | Task | Acceptance |
 |---|---|---|
-| [ ] M4-01 | `core::queue`: max active, priority, drag reorder | Unit tests with FakeEngine (ordering, slot release, paused/completed) |
-| [ ] M4-02 | Categories + tags + default paths + move on complete | Sidebar groups; file moved after completion; test for path rules |
-| [ ] M4-03 | `core::rules`: stop at ratio / seed time | Unit tests; UI shows goal and remaining |
+| [x] M4-01 (verified live: with a limit of 1, a second real ISO waited "queued" and started the moment the first finished) | `core::queue`: max active, priority, drag reorder | Unit tests with FakeEngine (ordering, slot release, paused/completed) |
+| [~] M4-02 (categories with their own save folders, rail filter, context-menu assignment and Add-dialog picker are done; **tags have a backend API but no UI, and move-on-complete is not built** because librqbit cannot relocate a live torrent) | Categories + tags + default paths + move on complete | Sidebar groups; file moved after completion; test for path rules |
+| [x] M4-03 (default goal in Settings, per-torrent goal dialog, minimum seed time; unit-tested, not yet exercised on a real swarm) | `core::rules`: stop at ratio / seed time | Unit tests; UI shows goal and remaining |
 | [ ] M4-04 | Play while downloading (stream URL → default player) | Video starts before 5% downloaded on a test file |
 | [ ] M4-05 | Command palette (Ctrl+K) + shortcuts | All main actions reachable without the mouse |
 | [ ] M4-06 | Speed graph (status bar + detail), `dataviz` rules | Light and dark checked |

@@ -12,6 +12,9 @@
   let error = $state("");
   let busy = $state(false);
   let picker = $state<HTMLInputElement>();
+  let category = $state<string>(torrents.category ?? "");
+  const categories = $derived(ui.settings?.categories ?? []);
+  const savePath = $derived(categories.find((c) => c.name === category)?.save_path ?? ui.settings?.download_dir ?? "…");
 
   const magnetLines = $derived(magnets.split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
   const count = $derived(magnetLines.length + files.length);
@@ -91,7 +94,7 @@
     let firstError = "";
     for (const m of magnetLines) {
       try {
-        await api.add({ kind: "magnet", value: m, only_files: only });
+        await api.add({ kind: "magnet", value: m, only_files: only }, category || null);
         added++;
       } catch (e) {
         failedMagnets.push(m);
@@ -100,7 +103,7 @@
     }
     for (const f of files) {
       try {
-        await api.add({ kind: "file", bytes: f.bytes, only_files: only });
+        await api.add({ kind: "file", bytes: f.bytes, only_files: only }, category || null);
         added++;
       } catch (e) {
         failedFiles.push(f);
@@ -157,10 +160,20 @@
     </div>
   {/if}
 
+  {#if categories.length}
+    <label class="field">
+      <span>Category</span>
+      <select bind:value={category}>
+        <option value="">None</option>
+        {#each categories as c (c.name)}<option value={c.name}>{c.name}</option>{/each}
+      </select>
+    </label>
+  {/if}
+
   <div class="field">
     <span>Save to</span>
     <div class="folder">
-      <code title={ui.settings?.download_dir ?? ""}>{ui.settings?.download_dir ?? "…"}</code>
+      <code title={savePath}>{savePath}</code>
       <button class="btn" onclick={changeFolder}><Icon name="folder" />Change</button>
     </div>
   </div>
@@ -261,6 +274,15 @@
     background: var(--surface-1);
     font-family: var(--font-mono);
     font-size: 12px;
+  }
+  select {
+    height: 28px;
+    padding: 0 8px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    background: var(--bg);
+    width: fit-content;
+    min-width: 160px;
   }
   .err {
     margin: 0;

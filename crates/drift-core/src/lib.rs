@@ -3,8 +3,14 @@
 pub mod engine;
 pub mod errors;
 pub mod events;
+pub mod jsonfile;
+pub mod library;
+pub mod manager;
 pub mod model;
 pub mod open_args;
+pub mod playlist;
+pub mod queue;
+pub mod rules;
 pub mod settings;
 pub mod ticker;
 

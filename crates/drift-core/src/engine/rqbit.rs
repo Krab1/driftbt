@@ -138,6 +138,7 @@ fn stats_of(h: &ManagedTorrent) -> TorrentStats {
         up_bps,
         peers_live,
         eta_secs,
+        tracker: h.shared().trackers.iter().min().and_then(|u| u.host_str().map(str::to_owned)),
     }
 }
 

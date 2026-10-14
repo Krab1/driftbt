@@ -1,6 +1,6 @@
 // Mirrors drift-core's model.rs / settings.rs (snake_case, as serialized by serde).
 
-export type TorrentState = "checking" | "downloading" | "seeding" | "paused" | "error";
+export type TorrentState = "checking" | "downloading" | "seeding" | "paused" | "queued" | "error";
 
 export interface TorrentStats {
   id: string;
@@ -14,7 +14,32 @@ export interface TorrentStats {
   up_bps: number;
   peers_live: number;
   eta_secs: number | null;
+  /** Host of the first tracker. */
+  tracker: string | null;
 }
+
+/** A torrent as the list shows it: engine stats plus the manager's bookkeeping. */
+export interface Torrent extends TorrentStats {
+  category: string | null;
+  tags: string[];
+  /** Place in the download queue (1 = first); null once complete. */
+  queue_pos: number | null;
+  /** Short reason shown next to the name, e.g. "Seeding goal reached". */
+  note: string | null;
+}
+
+/** Stop seeding at this share ratio or after this many minutes, whichever comes first. */
+export interface Goal {
+  ratio: number | null;
+  minutes: number | null;
+}
+
+export interface Category {
+  name: string;
+  save_path: string | null;
+}
+
+export type QueueMove = "top" | "up" | "down" | "bottom";
 
 export interface FileDetails {
   index: number;
@@ -83,6 +108,13 @@ export interface Settings {
   start_minimized: boolean;
   start_with_windows: boolean;
   notify_on_complete: boolean;
+  /** Incomplete torrents downloading at once; 0 = no limit. */
+  max_active_downloads: number;
+  /** Applies to torrents without their own goal. */
+  default_goal: Goal;
+  /** Nothing stops seeding before this many minutes. */
+  min_seed_minutes: number;
+  categories: Category[];
 }
 
 /** Already plain-language; show `message` as is. */
@@ -93,10 +125,15 @@ export interface ApiError {
 
 /** The only door between the UI and the backend. Two transports: Tauri IPC and an in-browser mock. */
 export interface Api {
-  list(): Promise<TorrentStats[]>;
+  list(): Promise<Torrent[]>;
   /** Reads a torrent's files without starting it. Magnets can take a while and may time out. */
   inspect(input: AddInput): Promise<TorrentPreview>;
-  add(input: AddInput): Promise<string>;
+  add(input: AddInput, category?: string | null): Promise<string>;
+  setCategory(id: string, category: string | null): Promise<void>;
+  setTags(id: string, tags: string[]): Promise<void>;
+  /** null goes back to the default goal. */
+  setGoal(id: string, goal: Goal | null): Promise<void>;
+  moveInQueue(id: string, to: QueueMove): Promise<void>;
   setFiles(id: string, selected: number[]): Promise<void>;
   /** Choose which torrent's details are pushed (or null). Returns its current details at once. */
   watchDetails(id: string | null): Promise<TorrentDetails | null>;
@@ -116,6 +153,6 @@ export interface Api {
   getSettings(): Promise<Settings>;
   setSettings(s: Settings): Promise<Settings>;
   /** Returns an unsubscribe function. */
-  onSnapshot(cb: (list: TorrentStats[]) => void): Promise<() => void>;
+  onSnapshot(cb: (list: Torrent[]) => void): Promise<() => void>;
   pickFolder(current: string | null): Promise<string | null>;
 }
