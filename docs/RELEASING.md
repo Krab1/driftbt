@@ -29,7 +29,7 @@ reinstall by hand. Changing the key has the same effect.
 3. Run a **debug** build with `DRIFT_UPDATE_URL=http://127.0.0.1:8899/latest.json` (the override is compiled out of release
    builds) and click Check now → Install and restart.
 
-This was done on 2026-10-14: the signature verified, the installer ran, the app came back as 0.0.2.
+Because the signature carries the version, the test manifest must keep the real version; run a debug build whose `tauri.conf.json` version is temporarily one lower (and put it back). This was done on 2026-10-14 for 0.1.2: the signature verified, the installer ran, the app came back as 0.0.2.
 
 ## Unsigned installer
 

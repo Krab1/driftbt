@@ -1,4 +1,4 @@
-//! Self-update from GitHub Releases. Checks are quiet; installing always waits for the user's click.
+﻿//! Self-update from GitHub Releases. Checks are quiet; installing always waits for the user's click.
 
 use std::sync::Mutex;
 use std::time::Duration;
@@ -41,13 +41,48 @@ pub async fn check(app: &AppHandle) -> Result<Option<UpdateInfo>, String> {
     Ok(info)
 }
 
-/// Downloads and runs the installer found by the last check. The installer closes this app and restarts it.
+/// Downloads the update, then lets the installer run only once this process is really gone. The stock plugin
+/// starts the installer first and exits second; if the exit is slow the installer's own check finds Drift still
+/// running and stops with "Failed to kill Drift". Here a detached helper waits, ends this process if it is still
+/// there, and only then starts the installer, which restarts Drift when it finishes.
 pub async fn install(app: &AppHandle) -> Result<(), String> {
     let update = app.state::<Pending>().0.lock().unwrap().take().ok_or("There's no update waiting. Check for updates first.")?;
-    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| {
-        eprintln!("update install failed: {e}");
-        "The update couldn't be installed. Try again later.".to_string()
-    })
+    let bytes = update.download(|_, _| {}, || {}).await.map_err(|e| {
+        eprintln!("update download failed: {e}");
+        "The update couldn't be downloaded. Try again later.".to_string()
+    })?;
+    #[cfg(windows)]
+    {
+        launch_after_exit(&update.version, &bytes).map_err(|e| {
+            eprintln!("update launch failed: {e}");
+            "The update couldn't be started. Try again later.".to_string()
+        })?;
+        app.exit(0);
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        update.install(bytes).map_err(|e| {
+            eprintln!("update install failed: {e}");
+            "The update couldn't be installed. Try again later.".to_string()
+        })
+    }
+}
+
+#[cfg(windows)]
+fn launch_after_exit(version: &str, installer: &[u8]) -> std::io::Result<()> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    // The version comes from a signed manifest, but it still names a folder, so keep it to safe characters.
+    let safe: String = version.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-').collect();
+    let dir = std::env::temp_dir().join(format!("Drift-{safe}-update"));
+    std::fs::create_dir_all(&dir)?;
+    let exe = dir.join("Drift-setup.exe");
+    std::fs::write(&exe, installer)?;
+    let script = format!("ping -n 4 127.0.0.1 >nul & taskkill /F /PID {} >nul 2>&1 & \"{}\" /P /R /UPDATE", std::process::id(), exe.display());
+    std::process::Command::new("cmd").raw_arg(format!("/C \"{script}\"")).creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS).spawn()?;
+    Ok(())
 }
 
 /// A little after start and then daily, if the user hasn't turned checking off.
