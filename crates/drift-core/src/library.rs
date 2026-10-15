@@ -27,6 +27,8 @@ pub struct TorrentMeta {
     pub seed_secs: u64,
     /// Unix seconds.
     pub added_at: u64,
+    /// Unix seconds when it was seen to complete.
+    pub finished_at: Option<u64>,
 }
 
 pub type Library = BTreeMap<TorrentId, TorrentMeta>;

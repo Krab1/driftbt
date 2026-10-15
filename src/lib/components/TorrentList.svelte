@@ -4,6 +4,7 @@
   import { ui, errorText } from "../stores/ui.svelte";
   import TorrentRow from "./TorrentRow.svelte";
   import Icon from "./Icon.svelte";
+  import { COLUMNS, columns } from "../stores/columns.svelte";
 
   const ROW = 44;
   const BUFFER = 6;
@@ -18,13 +19,8 @@
   const slice = $derived(items.slice(start, end));
   const selIndex = $derived(items.findIndex((t) => t.id === torrents.selectedId));
 
-  const heads: { key: SortKey; label: string; right?: boolean }[] = [
-    { key: "name", label: "Name" },
-    { key: "progress", label: "Done", right: true },
-    { key: "size", label: "Size", right: true },
-    { key: "speed", label: "Speed", right: true },
-    { key: "eta", label: "ETA", right: true },
-  ];
+  const heads = $derived<{ key: SortKey; label: string; right?: boolean }[]>([{ key: "name", label: "Name" }, ...columns.shown.map((c) => ({ key: c.key, label: c.label, right: true }))]);
+  let picking = $state(false);
 
   async function toggle(id: string) {
     const t = torrents.all.find((x) => x.id === id);
@@ -68,7 +64,7 @@
   }
 </script>
 
-<div class="list" role="grid" aria-label="Torrents" aria-rowcount={items.length + 1} aria-activedescendant={torrents.selectedId ? `row-${torrents.selectedId}` : undefined} tabindex="0" {onkeydown}>
+<div class="list" style="--cols-full: {columns.template}" role="grid" aria-label="Torrents" aria-rowcount={items.length + 1} aria-activedescendant={torrents.selectedId ? `row-${torrents.selectedId}` : undefined} tabindex="0" {onkeydown}>
   <div class="head" role="row" aria-rowindex="1">
     {#each heads as h (h.key)}
       <div class="hcell c-{h.key}" class:r={h.right} role="columnheader" aria-sort={torrents.sortKey === h.key ? (torrents.sortDir === 1 ? "ascending" : "descending") : "none"}>
@@ -77,7 +73,19 @@
         </button>
       </div>
     {/each}
-    <span></span>
+    <div class="pick">
+      <button class="btn ghost icon" aria-label="Choose columns" aria-haspopup="true" aria-expanded={picking} title="Choose columns" onclick={() => (picking = !picking)}><Icon name="sliders" size={14} /></button>
+      {#if picking}
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="scrim" onclick={() => (picking = false)} onkeydown={(e) => e.key === "Escape" && (picking = false)}></div>
+        <div class="menu" role="group" aria-label="Columns">
+          {#each COLUMNS as c (c.key)}
+            <label><input type="checkbox" checked={columns.on.includes(c.key)} onchange={(e) => columns.set(c.key, e.currentTarget.checked)} /> {c.label}</label>
+          {/each}
+          <button class="btn ghost reset" onclick={() => columns.reset()}>Reset to default</button>
+        </div>
+      {/if}
+    </div>
   </div>
 
   {#if torrents.all.length === 0}
@@ -115,7 +123,7 @@
 
 <style>
   .list {
-    --cols: minmax(0, 1fr) 56px 76px 84px 64px 92px;
+    --cols: var(--cols-full);
     display: flex;
     flex-direction: column;
     min-width: 0;
@@ -141,11 +149,51 @@
     .list {
       --cols: minmax(0, 1fr) 84px 92px;
     }
-    .list :global(.c-progress),
-    .list :global(.c-size),
-    .list :global(.c-eta) {
+    .list :global(.hcell:not(.c-name, .c-speed)),
+    .list :global(.cell:not(.c-speed)) {
       display: none;
     }
+  }
+  .head {
+    position: relative;
+  }
+  .pick {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+  }
+  .menu {
+    position: absolute;
+    top: 30px;
+    right: 8px;
+    z-index: 21;
+    display: grid;
+    gap: 6px;
+    padding: 10px 12px;
+    min-width: 150px;
+    background: var(--bg-elevated, var(--bg));
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.3);
+    color: var(--text-primary);
+    font-size: 12px;
+  }
+  .menu label {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .menu input {
+    accent-color: var(--accent);
+    margin: 0;
+  }
+  .reset {
+    margin-top: 4px;
+    justify-self: start;
   }
   .hcell.r {
     text-align: right;

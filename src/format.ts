@@ -31,3 +31,9 @@ export function percent(progress: number, total: number): number {
   if (total <= 0) return 0;
   return Math.min(100, Math.floor((progress / total) * 100));
 }
+
+/** Unix seconds as a short local date and time; "—" when unknown. */
+export function formatWhen(secs: number | null): string {
+  if (!secs) return "—";
+  return new Date(secs * 1000).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}

@@ -79,6 +79,10 @@ pub struct TorrentView {
     pub queue_pos: Option<u32>,
     /// Short reason shown next to the name, e.g. "Seeding goal reached".
     pub note: Option<String>,
+    /// Unix seconds. `None` for torrents Drift didn't see being added.
+    pub added_at: Option<u64>,
+    /// Unix seconds. `None` while incomplete, and for torrents that finished before Drift tracked it.
+    pub finished_at: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

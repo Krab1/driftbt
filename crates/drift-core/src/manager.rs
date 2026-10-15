@@ -53,6 +53,8 @@ struct State {
     last_tick: Option<Instant>,
     last_save: Instant,
     dirty: bool,
+    /// Torrents seen incomplete since start-up; only those get a finish time when they complete.
+    was_incomplete: HashSet<TorrentId>,
 }
 
 pub struct Manager {
@@ -83,7 +85,7 @@ impl Manager {
 
     pub fn with_clock(engine: Arc<dyn TorrentEngine>, store: Arc<dyn MetaStore>, settings: SharedSettings, clock: Clock) -> Self {
         let lib = store.load();
-        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false };
+        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false, was_incomplete: HashSet::new() };
         Self { engine, store, settings, clock, guard: Mutex::new(Guard::default()), state: Mutex::new(state) }
     }
 
@@ -311,6 +313,8 @@ impl Manager {
                     category: meta.and_then(|m| m.category.clone()),
                     tags: meta.map(|m| m.tags.clone()).unwrap_or_default(),
                     note,
+                    added_at: meta.map(|m| m.added_at).filter(|&a| a > 0),
+                    finished_at: meta.and_then(|m| m.finished_at),
                     stats,
                 }
             })
@@ -339,9 +343,19 @@ impl Manager {
                 if !st.lib.contains_key(&t.id) {
                     // A torrent we've never seen that is already paused was paused by its owner; keep it that way.
                     let position = next_position(&st.lib);
-                    let meta = TorrentMeta { position, added_at: now_secs(), user_paused: t.state == TorrentState::Paused, ..Default::default() };
+                    let finished_at = complete(t).then(now_secs);
+                    let meta = TorrentMeta { position, added_at: now_secs(), user_paused: t.state == TorrentState::Paused, finished_at, ..Default::default() };
                     st.lib.insert(t.id.clone(), meta);
                     structural = true;
+                }
+                if !complete(t) {
+                    st.was_incomplete.insert(t.id.clone());
+                } else if st.was_incomplete.remove(&t.id) {
+                    let m = st.lib.get_mut(&t.id).expect("inserted above");
+                    if m.finished_at.is_none() {
+                        m.finished_at = Some(now_secs());
+                        structural = true;
+                    }
                 }
                 let m = st.lib.get_mut(&t.id).expect("inserted above");
                 if t.state == TorrentState::Seeding {
@@ -435,6 +449,18 @@ mod tests {
         let v = m.tick().await.unwrap();
         assert_eq!(states(&v), [(1, Seeding), (2, Downloading), (3, Downloading), (4, Queued)]);
         assert_eq!(v.iter().find(|t| t.stats.id == id(1)).unwrap().queue_pos, None, "finished torrents leave the queue");
+    }
+
+    #[tokio::test]
+    async fn finish_time_is_stamped_once_when_a_torrent_is_seen_completing() {
+        let (engine, m, _) = setup(0);
+        m.add(mag(1), None, vec![]).await.unwrap();
+        let v = m.tick().await.unwrap();
+        assert!(v[0].added_at.is_some() && v[0].finished_at.is_none());
+        engine.advance(&id(1), 10_000);
+        let first = m.tick().await.unwrap()[0].finished_at;
+        assert!(first.is_some());
+        assert_eq!(m.tick().await.unwrap()[0].finished_at, first, "stays put on later ticks");
     }
 
     #[tokio::test]

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Torrent } from "../api";
-  import { formatBytes, formatEta, formatSpeed, percent } from "../../format";
+  import { percent } from "../../format";
+  import { columns } from "../stores/columns.svelte";
   import Icon from "./Icon.svelte";
 
   let {
@@ -22,7 +23,6 @@
   } = $props();
 
   const pct = $derived(percent(t.progress_bytes, t.total_bytes));
-  const speed = $derived(t.state === "seeding" ? t.up_bps : t.down_bps);
   const icon = $derived(
     ({ downloading: "down", seeding: "up", paused: "pause", queued: "list", error: "alert", checking: "clock" } as const)[t.state],
   );
@@ -77,10 +77,9 @@
       </div>
     </div>
   </div>
-  <div class="num r c-progress" role="gridcell">{t.state === "error" ? "" : `${pct}%`}</div>
-  <div class="num r c-size" role="gridcell">{t.total_bytes ? formatBytes(t.total_bytes) : "—"}</div>
-  <div class="num r" role="gridcell">{formatSpeed(speed)}</div>
-  <div class="num r c-eta" role="gridcell">{t.state === "downloading" ? formatEta(t.eta_secs) : "—"}</div>
+  {#each columns.shown as c (c.key)}
+    <div class="num r cell c-{c.key}" role="gridcell" title={c.key === "added" || c.key === "finished" || c.key === "tracker" ? c.text(t) : undefined}>{c.text(t)}</div>
+  {/each}
   <div class="actions" role="gridcell">
     {#if t.state === "error"}
       <button class="btn ghost retry" onclick={(e) => { e.stopPropagation(); ontoggle(); }}>Retry</button>
@@ -202,6 +201,9 @@
   .r {
     text-align: right;
     color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .actions {
     display: flex;

@@ -62,7 +62,7 @@ function demo(n: number): Torrent[] {
       category: i % 5 === 0 ? "Linux" : i % 7 === 0 ? "Docs" : null,
       tags: [],
       queue_pos: null,
-      note: null,
+      note: null, added_at: 1_760_000_000 + i * 3600, finished_at: i % 3 === 0 ? 1_760_100_000 + i * 3600 : null,
     };
   });
 }
@@ -256,7 +256,7 @@ export function createMockApi(count = 40): Api {
       if (input.kind === "url") {
         const id = [...input.value].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(16).padStart(8, "0").repeat(5);
         if (!torrents.some((t) => t.id === id)) {
-          torrents = [{ id, name: input.value.split("/").pop() ?? id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null }, ...torrents];
+          torrents = [{ id, name: input.value.split("/").pop() ?? id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null }, ...torrents];
         }
         return id;
       }
@@ -266,7 +266,7 @@ export function createMockApi(count = 40): Api {
         const id = m[1].toLowerCase();
         if (!torrents.some((t) => t.id === id)) {
           torrents = [
-            { id, name: id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null },
+            { id, name: id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null },
             ...torrents,
           ];
           if (input.only_files) selection.set(id, new Set(input.only_files));

@@ -20,23 +20,26 @@
   } = $props();
 
   const tree = $derived(buildTree(files));
-  let collapsed = $state(new Set<string>());
+  // Folders start closed so a big torrent reads as a short list. The one exception is a single top-level
+  // folder (the usual case), which starts open so the first screen isn't a lone row.
+  let userOpened = $state<Set<string> | null>(null);
+  const opened = $derived(userOpened ?? new Set(tree.length === 1 && !tree[0].isFile ? [tree[0].key] : []));
 
   function toggleOpen(key: string) {
-    const next = new Set(collapsed);
+    const next = new Set(opened);
     next.has(key) ? next.delete(key) : next.add(key);
-    collapsed = next;
+    userOpened = next;
   }
 </script>
 
 {#snippet row(n: TreeNode, depth: number)}
   {@const st = checkState(n, selected)}
-  <div class="row" role="treeitem" aria-level={depth + 1} aria-selected={st === "all"} aria-expanded={n.isFile ? undefined : !collapsed.has(n.key)} style="padding-left: {depth * 16 + 4}px">
+  <div class="row" role="treeitem" aria-level={depth + 1} aria-selected={st === "all"} aria-expanded={n.isFile ? undefined : opened.has(n.key)} style="padding-left: {depth * 16 + 4}px">
     {#if n.isFile}
       <span class="twist"></span>
     {:else}
-      <button class="twist" aria-label={collapsed.has(n.key) ? `Expand ${n.name}` : `Collapse ${n.name}`} onclick={() => toggleOpen(n.key)}>
-        <span class="chev" class:open={!collapsed.has(n.key)}>▸</span>
+      <button class="twist" aria-label={opened.has(n.key) ? `Collapse ${n.name}` : `Expand ${n.name}`} onclick={() => toggleOpen(n.key)}>
+        <span class="chev" class:open={opened.has(n.key)}>▸</span>
       </button>
     {/if}
     <input type="checkbox" aria-label={n.name} checked={st === "all"} indeterminate={st === "some"} onchange={() => onchange(toggleNode(n, selected))} />
@@ -50,7 +53,7 @@
       <span class="play-gap"></span>
     {/if}
   </div>
-  {#if !n.isFile && !collapsed.has(n.key)}
+  {#if !n.isFile && opened.has(n.key)}
     {#each n.children as c (c.key)}{@render row(c, depth + 1)}{/each}
   {/if}
 {/snippet}

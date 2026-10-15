@@ -26,6 +26,9 @@ export interface Torrent extends TorrentStats {
   queue_pos: number | null;
   /** Short reason shown next to the name, e.g. "Seeding goal reached". */
   note: string | null;
+  /** Unix seconds; null when unknown. */
+  added_at: number | null;
+  finished_at: number | null;
 }
 
 /** Stop seeding at this share ratio or after this many minutes, whichever comes first. */

@@ -1,7 +1,7 @@
 import type { Torrent } from "../api/types";
 
 export type Filter = "all" | "downloading" | "seeding" | "paused" | "error";
-export type SortKey = "queue" | "name" | "progress" | "size" | "speed" | "eta";
+export type SortKey = "queue" | "name" | "progress" | "size" | "speed" | "eta" | "added" | "finished" | "uploaded" | "ratio" | "peers" | "category" | "tracker";
 
 export const matches: Record<Filter, (t: Torrent) => boolean> = {
   all: () => true,
@@ -20,6 +20,13 @@ const sortValue: Record<SortKey, (t: Torrent) => string | number> = {
   speed: (t) => t.down_bps + t.up_bps,
   // No ETA sorts last in ascending order.
   eta: (t) => t.eta_secs ?? Number.MAX_SAFE_INTEGER,
+  added: (t) => t.added_at ?? 0,
+  finished: (t) => t.finished_at ?? 0,
+  uploaded: (t) => t.uploaded_bytes,
+  ratio: (t) => (t.total_bytes ? t.uploaded_bytes / t.total_bytes : 0),
+  peers: (t) => t.peers_live,
+  category: (t) => (t.category ?? "").toLowerCase(),
+  tracker: (t) => (t.tracker ?? "").toLowerCase(),
 };
 
 /** `category`: null shows everything; a name shows only that category. */
