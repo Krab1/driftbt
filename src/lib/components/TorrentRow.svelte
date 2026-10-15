@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Torrent } from "../api";
-  import { formatWhen, percent } from "../../format";
+  import { formatBytes, formatWhen, percent } from "../../format";
   import { columns } from "../stores/columns.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
@@ -33,6 +33,11 @@
   const canToggle = $derived(t.state !== "checking" && t.state !== "error");
   // Magnets show their hash until metadata arrives; say what is happening instead.
   const fetching = $derived(t.state === "checking" && t.total_bytes === 0);
+  const ownLimit = $derived(
+    "This torrent has its own speed limit" +
+      [t.limit_down_kib ? `↓ ${formatBytes(t.limit_down_kib * 1024)}/s` : "", t.limit_up_kib ? `↑ ${formatBytes(t.limit_up_kib * 1024)}/s` : ""].filter(Boolean).join("  ").replace(/^/, ": ") +
+      ". The overall limit still applies.",
+  );
   const caption = $derived(
     t.state === "queued"
       ? `Waiting for a free slot · #${t.queue_pos ?? "?"} in queue`
@@ -71,6 +76,7 @@
     <div class="nm">
       <span class="line">
         <span class="text" class:muted={fetching} title={t.name}>{fetching ? "New torrent" : t.name}</span>
+        {#if t.limit_down_kib || t.limit_up_kib}<span class="own" title={ownLimit}>Limited</span>{/if}
         {#if caption}<span class="cap" class:bad={t.state === "error"} title={caption}>{caption}</span>{/if}
       </span>
       <div class="bar" role="progressbar" aria-valuenow={pct} aria-valuemin="0" aria-valuemax="100" aria-label="Progress">
@@ -167,6 +173,16 @@ ${t.error_detail}` }; }}>Details</button>
     white-space: nowrap;
     font-size: 11px;
     color: var(--text-muted);
+  }
+  /* The torrent has a speed limit of its own (the overall one still applies). */
+  .own {
+    flex: none;
+    padding: 0 6px;
+    border: 1px solid var(--border-strong);
+    border-radius: 9px;
+    font-size: 10px;
+    line-height: 16px;
+    color: var(--text-secondary);
   }
   .cap.bad {
     color: var(--danger-fg);
