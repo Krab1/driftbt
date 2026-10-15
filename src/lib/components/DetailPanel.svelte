@@ -6,6 +6,7 @@
   import FileTree from "./FileTree.svelte";
   import Flag from "./Flag.svelte";
   import Icon from "./Icon.svelte";
+  import Sparkline from "./Sparkline.svelte";
 
   const tabs: { key: DetailTab; label: string }[] = [
     { key: "overview", label: "Overview" },
@@ -18,6 +19,7 @@
   // Details are only trusted when they belong to the torrent that is selected right now.
   const d = $derived(ui.details && sel && ui.details.stats.id === sel.id ? ui.details : null);
   const stats = $derived(d?.stats ?? sel);
+  const samples = $derived(sel ? (torrents.perTorrent.get(sel.id) ?? []) : []);
 
   // Ask the backend to push details for the selected torrent only while the panel is open.
   $effect(() => {
@@ -153,6 +155,10 @@
           <div><dt>Peers</dt><dd class="num">{stats.peers_live}</dd></div>
           <div><dt>Time left</dt><dd class="num">{stats.state === "downloading" ? formatEta(stats.eta_secs) : "—"}</dd></div>
         </dl>
+        <div class="graph">
+          <Sparkline width={600} height={64} down={samples.map((x) => x.d)} up={samples.map((x) => x.u)} label="Speed of this torrent over the last two minutes: download in blue, upload in green" />
+          <span class="legend"><i class="d"></i>Download <i class="u"></i>Upload · last 2 min</span>
+        </div>
         <div class="path">
           <span class="lbl">Saved in</span>
           <code title={d?.save_path ?? ""}>{d?.save_path ?? "…"}</code>
@@ -191,6 +197,38 @@
 </section>
 
 <style>
+  .graph {
+    margin: 12px 0 4px;
+  }
+  .graph :global(svg) {
+    display: block;
+    width: 100%;
+    height: 64px;
+    border-bottom: 1px solid var(--border);
+  }
+  .legend {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .legend i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-left: 6px;
+  }
+  .legend i:first-child {
+    margin-left: 0;
+  }
+  .legend .d {
+    background: var(--accent);
+  }
+  .legend .u {
+    background: var(--success);
+  }
   .panel {
     position: relative;
     display: flex;

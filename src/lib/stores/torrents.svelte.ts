@@ -16,6 +16,8 @@ class TorrentStore {
   selectedId = $state<string | null>(null);
   /** Total speeds, one sample per snapshot, newest last (about two minutes). */
   history = $state.raw<{ d: number; u: number }[]>([]);
+  /** The same samples per torrent, for the detail panel graph. Kept for torrents still in the list. */
+  perTorrent = $state.raw<Map<string, { d: number; u: number }[]>>(new Map());
 
   tagCounts = $derived.by(() => {
     const m = new Map<string, number>();
@@ -57,6 +59,9 @@ class TorrentStore {
       const d = list.reduce((s, t) => s + t.down_bps, 0);
       const u = list.reduce((s, t) => s + t.up_bps, 0);
       this.history = [...this.history.slice(-119), { d, u }];
+      const next = new Map<string, { d: number; u: number }[]>();
+      for (const t of list) next.set(t.id, [...(this.perTorrent.get(t.id) ?? []).slice(-119), { d: t.down_bps, u: t.up_bps }]);
+      this.perTorrent = next;
     });
   }
 

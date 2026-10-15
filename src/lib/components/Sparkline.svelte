@@ -10,7 +10,7 @@
   }
 </script>
 
-<svg {width} {height} viewBox="0 0 {width} {height}" role="img" aria-label={label}>
+<svg {width} {height} viewBox="0 0 {width} {height}" preserveAspectRatio="none" role="img" aria-label={label}>
   <title>{label}</title>
   <polyline class="u" points={points(up)} />
   <polyline class="d" points={points(down)} />
@@ -26,6 +26,7 @@
     stroke-width: 1.5;
     stroke-linejoin: round;
     stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
   }
   .d {
     stroke: var(--accent);
