@@ -55,6 +55,10 @@ struct State {
     dirty: bool,
     /// Torrents seen incomplete since start-up; only those get a finish time when they complete.
     was_incomplete: HashSet<TorrentId>,
+    /// Finished torrents waiting to be moved to the `move_on_complete` folder.
+    pending_moves: Vec<TorrentId>,
+    /// Short messages shown next to a torrent while it is being moved, or after a move failed.
+    move_notes: std::collections::HashMap<TorrentId, String>,
 }
 
 pub struct Manager {
@@ -100,7 +104,7 @@ impl Manager {
 
     pub fn with_clock(engine: Arc<dyn TorrentEngine>, store: Arc<dyn MetaStore>, settings: SharedSettings, clock: Clock) -> Self {
         let lib = store.load();
-        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false, was_incomplete: HashSet::new() };
+        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false, was_incomplete: HashSet::new(), pending_moves: Vec::new(), move_notes: Default::default() };
         Self { engine, store, settings, clock, guard: Mutex::new(Guard::default()), state: Mutex::new(state) }
     }
 
@@ -229,6 +233,42 @@ impl Manager {
         self.tick().await.map(|_| ())
     }
 
+    /// Moves a torrent's files to `dest` (see `TorrentEngine::relocate`). Refused while the VPN guard holds traffic,
+    /// because the torrent is re-added at the new place and would reconnect.
+    pub async fn relocate(&self, id: &TorrentId, dest: &std::path::Path) -> Result<()> {
+        if self.guard_tripped() {
+            return Err(EngineError::Blocked);
+        }
+        std::fs::create_dir_all(dest).map_err(|e| EngineError::Backend(e.to_string()))?;
+        self.state.lock().unwrap().move_notes.insert(id.clone(), "Moving files…".into());
+        let r = self.engine.relocate(id, dest).await;
+        {
+            let mut st = self.state.lock().unwrap();
+            match &r {
+                Ok(()) => drop(st.move_notes.remove(id)),
+                Err(e) => {
+                    eprintln!("move failed: {e}");
+                    st.move_notes.insert(id.clone(), "Couldn't move the files. They are still in their old folder.".into());
+                }
+            }
+        }
+        r?;
+        self.tick().await.map(|_| ())
+    }
+
+    pub fn has_pending_moves(&self) -> bool {
+        !self.state.lock().unwrap().pending_moves.is_empty()
+    }
+
+    /// Moves the torrents that just finished to the `move_on_complete` folder, one after another.
+    pub async fn run_pending_moves(&self) {
+        let ids = std::mem::take(&mut self.state.lock().unwrap().pending_moves);
+        for id in ids {
+            let Some(dest) = self.settings().move_on_complete else { return };
+            let _ = self.relocate(&id, &dest).await; // a failure is already shown on the torrent
+        }
+    }
+
     /// Verifies the downloaded data again (see `TorrentEngine::recheck`). Refused while the VPN guard holds
     /// traffic, because a recheck re-adds the torrent and would otherwise reconnect it.
     pub async fn recheck(&self, id: &TorrentId) -> Result<()> {
@@ -332,6 +372,7 @@ impl Manager {
                 if goal_paused.contains(&t.id) {
                     stats.state = TorrentState::Paused;
                 }
+                let moving = st.move_notes.get(&t.id).cloned();
                 if meta.is_some_and(|m| m.goal_reached) && stats.state == TorrentState::Paused && !meta.is_some_and(|m| m.user_paused) {
                     note = Some(SEED_GOAL_NOTE.to_string());
                 }
@@ -339,7 +380,7 @@ impl Manager {
                     queue_pos: rank.get(&t.id).copied(),
                     category: meta.and_then(|m| m.category.clone()),
                     tags: meta.map(|m| m.tags.clone()).unwrap_or_default(),
-                    note,
+                    note: moving.or(note),
                     added_at: meta.map(|m| m.added_at).filter(|&a| a > 0),
                     finished_at: meta.and_then(|m| m.finished_at),
                     stats,
@@ -382,6 +423,9 @@ impl Manager {
                     if m.finished_at.is_none() {
                         m.finished_at = Some(now_secs());
                         structural = true;
+                        if s.move_on_complete.is_some() {
+                            st.pending_moves.push(t.id.clone());
+                        }
                     }
                 }
                 let m = st.lib.get_mut(&t.id).expect("inserted above");
@@ -508,6 +552,27 @@ mod tests {
         assert_eq!(engine.rechecked(), [id(1)]);
         assert_eq!(m.snapshot().await.unwrap()[0].category.as_deref(), Some("Linux"));
         assert!(matches!(m.recheck(&id(9)).await, Err(EngineError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn a_torrent_that_finishes_is_moved_to_the_completed_folder_once() {
+        let dest = std::env::temp_dir().join(format!("drift-done-{}", std::process::id()));
+        let (engine, m, settings) = setup(0);
+        settings.lock().unwrap().move_on_complete = Some(dest.clone());
+        m.add(mag(1), None, vec![]).await.unwrap();
+        m.add(mag(2), None, vec![]).await.unwrap();
+        m.tick().await.unwrap();
+        assert!(!m.has_pending_moves(), "nothing to move while downloading");
+        engine.advance(&id(1), 10_000);
+        m.tick().await.unwrap();
+        assert!(m.has_pending_moves());
+        m.run_pending_moves().await;
+        assert_eq!(engine.output_dir(&id(1)), Some(dest.clone()));
+        assert_eq!(engine.output_dir(&id(2)), Some("D:/dl".into()), "unfinished torrents stay put");
+        assert!(!m.has_pending_moves());
+        m.tick().await.unwrap();
+        assert!(!m.has_pending_moves(), "a finished torrent is moved once, not at every tick");
+        std::fs::remove_dir_all(dest).ok();
     }
 
     #[tokio::test]

@@ -56,6 +56,10 @@ pub trait TorrentEngine: Send + Sync {
     /// Hashes the files on disk again and keeps what is correct; the torrent shows as checking meanwhile and then
     /// carries on downloading whatever is missing or damaged. Keeps the torrent paused if it was paused.
     async fn recheck(&self, id: &TorrentId) -> Result<()>;
+    /// Moves the torrent's files into `dest` (a folder; the torrent keeps its own name and layout inside it) and
+    /// carries on from there. The torrent is checked again at the new place. Nothing is overwritten; on failure the
+    /// files are put back where they were.
+    async fn relocate(&self, id: &TorrentId, dest: &std::path::Path) -> Result<()>;
     /// Replace the set of files to download.
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()>;
     async fn set_limits(&self, limits: Limits) -> Result<()>;

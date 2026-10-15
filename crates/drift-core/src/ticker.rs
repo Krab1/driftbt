@@ -18,6 +18,11 @@ pub async fn run(
         if let Ok(list) = manager.tick().await {
             on_snapshot(list);
         }
+        if manager.has_pending_moves() {
+            // Moving can take a while on another drive, so it never holds up the snapshots.
+            let m = manager.clone();
+            tokio::spawn(async move { m.run_pending_moves().await });
+        }
         tokio::time::sleep(period()).await;
     }
 }

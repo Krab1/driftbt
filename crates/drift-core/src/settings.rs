@@ -55,6 +55,8 @@ pub struct Settings {
     pub schedule: crate::schedule::Schedule,
     /// `.torrent` files dropped here are added automatically.
     pub watch_dir: Option<PathBuf>,
+    /// Finished downloads are moved here (and keep seeding from there). `None` leaves them where they were saved.
+    pub move_on_complete: Option<PathBuf>,
     pub vpn_guard: crate::guard::VpnGuard,
     pub search: crate::search::config::SearchSettings,
     /// Ids of the plugins the user has turned on.
@@ -111,6 +113,7 @@ impl Default for Settings {
             ip_filter: IpFilterSettings::default(),
             schedule: crate::schedule::Schedule::default(),
             watch_dir: None,
+            move_on_complete: None,
             vpn_guard: crate::guard::VpnGuard::default(),
             search: Default::default(),
             plugins: Vec::new(),

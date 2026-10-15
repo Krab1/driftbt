@@ -2,6 +2,7 @@
 
 pub mod background;
 pub mod engine;
+pub mod fsmove;
 pub mod errors;
 pub mod events;
 pub mod geoip;

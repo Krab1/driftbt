@@ -42,6 +42,11 @@ pub async fn pause_torrent(state: State<'_, AppState>, id: TorrentId) -> ApiResu
 }
 
 #[tauri::command]
+pub async fn move_torrent(state: State<'_, AppState>, id: TorrentId, dest: String) -> ApiResult<()> {
+    Ok(state.manager.relocate(&id, Path::new(dest.trim())).await?)
+}
+
+#[tauri::command]
 pub async fn recheck_torrent(state: State<'_, AppState>, id: TorrentId) -> ApiResult<()> {
     Ok(state.manager.recheck(&id).await?)
 }

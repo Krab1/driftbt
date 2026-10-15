@@ -75,6 +75,11 @@
     if (dir) await ui.saveSettings({ download_dir: dir });
   }
 
+  async function changeMoveDone() {
+    const dir = await api.pickFolder(ui.settings?.move_on_complete ?? ui.settings?.download_dir ?? null);
+    if (dir) await ui.saveSettings({ move_on_complete: dir });
+  }
+
   async function changeWatch() {
     const dir = await api.pickFolder(ui.settings?.watch_dir ?? ui.settings?.download_dir ?? null);
     if (dir) await ui.saveSettings({ watch_dir: dir });
@@ -126,6 +131,16 @@
             <button class="btn" onclick={changeFolder}><Icon name="folder" />Change</button>
           </div>
           <small>New torrents are saved here. Existing torrents keep their folder.</small>
+        </div>
+
+        <div class="field">
+          <span>Move finished downloads to</span>
+          <div class="folder">
+            <code title={s.move_on_complete ?? ""}>{s.move_on_complete ?? "Off"}</code>
+            <button class="btn" onclick={changeMoveDone}><Icon name="folder" />{s.move_on_complete ? "Change" : "Choose…"}</button>
+            {#if s.move_on_complete}<button class="btn" onclick={() => ui.saveSettings({ move_on_complete: null })}>Turn off</button>{/if}
+          </div>
+          <small>When a download finishes it is moved here and keeps seeding from the new place. Drift checks the files again after the move, which takes a while for big torrents. Torrents already finished are not moved; right-click one and choose Move files to do that.</small>
         </div>
 
         <div class="field">

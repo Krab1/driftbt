@@ -262,6 +262,8 @@ export interface Settings {
   schedule: Schedule;
   /** .torrent files dropped here are added automatically. */
   watch_dir: string | null;
+  /** Finished downloads are moved here; null leaves them where they were saved. */
+  move_on_complete: string | null;
   vpn_guard: VpnGuardSettings;
   search: SearchSettings;
   /** Ids of the plugins that are turned on. */
@@ -347,6 +349,8 @@ export interface Api {
   resume(id: string): Promise<void>;
   /** Hashes the downloaded files again and re-downloads anything missing or damaged. */
   recheck(id: string): Promise<void>;
+  /** Moves the torrent's files into this folder (on the machine running Drift) and keeps seeding from there. */
+  moveTorrent(id: string, dest: string): Promise<void>;
   remove(id: string, deleteFiles: boolean): Promise<void>;
   search(text: string): Promise<SearchReport>;
   /** Ids of search sources that have an API key saved. The keys themselves never reach the UI. */

@@ -278,6 +278,12 @@ impl TorrentEngine for FakeEngine {
         Ok(())
     }
 
+    async fn relocate(&self, id: &TorrentId, dest: &std::path::Path) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        g.torrents.get_mut(id).ok_or(EngineError::NotFound)?.output_dir = Some(dest.to_path_buf());
+        Ok(())
+    }
+
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()> {
         let mut g = self.inner.lock().unwrap();
         let e = g.torrents.get_mut(id).ok_or(EngineError::NotFound)?;

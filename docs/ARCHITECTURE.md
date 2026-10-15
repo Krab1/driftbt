@@ -97,6 +97,7 @@ pub trait TorrentEngine: Send + Sync {
     async fn details(&self, id: TorrentId) -> Result<TorrentDetails>; // files, peers, trackers
     async fn pause(&self, id: TorrentId) -> Result<()>;
     async fn resume(&self, id: TorrentId) -> Result<()>;
+    async fn relocate(&self, id: TorrentId, dest: &Path) -> Result<()>;   // move files, re-add there, check; rolls back on failure
     async fn recheck(&self, id: TorrentId) -> Result<()>;   // hash the files on disk again, keep good pieces; stays paused if paused
     async fn remove(&self, id: TorrentId, delete_files: bool) -> Result<()>;
     async fn set_files(&self, id: TorrentId, selected: Vec<FileIdx>) -> Result<()>;

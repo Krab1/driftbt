@@ -59,6 +59,16 @@ pub struct RqbitEngine {
     geo: crate::geoip::GeoIp,
 }
 
+/// Everything needed to add a torrent again exactly as it was.
+struct Saved {
+    hash: librqbit::dht::Id20,
+    bytes: Vec<u8>,
+    paused: bool,
+    only_files: Option<Vec<usize>>,
+    output: PathBuf,
+    files: Vec<PathBuf>,
+}
+
 /// `file:///C:/dir/a%20b.txt`, which is how the engine takes a list from disk.
 fn file_url(p: &Path) -> String {
     let path = p.display().to_string().replace('\\', "/").replace('%', "%25").replace(' ', "%20");
@@ -117,6 +127,28 @@ impl RqbitEngine {
     /// Address the engine actually listens on (useful for tests and the port-check UI).
     pub fn listen_addr(&self) -> Option<SocketAddr> {
         self.session().listen_addr()
+    }
+
+    fn saved(&self, id: &TorrentId) -> Result<Saved> {
+        let h = self.handle(id)?;
+        let (bytes, files) = h.with_metadata(|m| (m.torrent_bytes.to_vec(), m.file_infos.iter().map(|f| f.relative_filename.clone()).collect::<Vec<_>>())).map_err(backend)?;
+        if bytes.is_empty() {
+            return Err(EngineError::Backend("torrent file bytes are not available".into()));
+        }
+        Ok(Saved { hash: h.info_hash(), bytes, paused: stats_of(&h).state == TorrentState::Paused, only_files: h.only_files(), output: h.output_folder().to_path_buf(), files })
+    }
+
+    /// Adds a torrent back, existing files being checked rather than refused. `output` overrides the save folder.
+    async fn add_saved(&self, s: Saved, output: Option<PathBuf>) -> Result<()> {
+        let opts = AddTorrentOptions {
+            paused: s.paused,
+            overwrite: true,
+            only_files: s.only_files,
+            output_folder: Some(output.unwrap_or(s.output).to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        self.session().add_torrent(AddTorrent::from_bytes(s.bytes), Some(opts)).await.map_err(backend)?;
+        Ok(())
     }
 
     fn handle(&self, id: &TorrentId) -> Result<Arc<ManagedTorrent>> {
@@ -326,25 +358,26 @@ impl TorrentEngine for RqbitEngine {
     }
 
     async fn recheck(&self, id: &TorrentId) -> Result<()> {
-        let h = self.handle(id)?;
-        // librqbit only hashes the files when a torrent is added, so a recheck is a re-add that keeps the files.
-        let bytes = h.with_metadata(|m| m.torrent_bytes.clone()).map_err(backend)?;
-        if bytes.is_empty() {
-            return Err(EngineError::Backend("torrent file bytes are not available".into()));
-        }
-        let paused = stats_of(&h).state == TorrentState::Paused;
-        let opts = AddTorrentOptions {
-            paused,
-            overwrite: true,
-            only_files: h.only_files(),
-            output_folder: Some(h.output_folder().to_string_lossy().into_owned()),
-            ..Default::default()
-        };
+        let saved = self.saved(id)?;
         let session = self.session();
-        session.delete(TorrentIdOrHash::Hash(h.info_hash()), false).await.map_err(backend)?;
-        drop(h);
-        session.add_torrent(AddTorrent::from_bytes(bytes), Some(opts)).await.map_err(backend)?;
-        Ok(())
+        session.delete(TorrentIdOrHash::Hash(saved.hash), false).await.map_err(backend)?;
+        self.add_saved(saved, None).await
+    }
+
+    async fn relocate(&self, id: &TorrentId, dest: &Path) -> Result<()> {
+        let saved = self.saved(id)?;
+        if saved.output == dest {
+            return Ok(());
+        }
+        let session = self.session();
+        // Deleting from the session (not from disk) closes the files so they can be moved.
+        session.delete(TorrentIdOrHash::Hash(saved.hash), false).await.map_err(backend)?;
+        if let Err(e) = crate::fsmove::move_files(&saved.output, dest, &saved.files) {
+            // Nothing moved: carry on where it was.
+            let _ = self.add_saved(saved, None).await;
+            return Err(EngineError::Backend(e.to_string()));
+        }
+        self.add_saved(saved, Some(dest.to_path_buf())).await
     }
 
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()> {
@@ -685,6 +718,36 @@ mod tests {
         }
         engine.resume(&id).await.unwrap();
         assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Moving a finished torrent: files change folder, the torrent is checked there and is seeding again.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn relocate_moves_the_files_and_the_torrent_follows() {
+        let root = scratch("relocate");
+        let (seed_dir, dl, dest) = (root.join("seed"), root.join("dl"), root.join("done"));
+        for d in [&seed_dir, &dl, &dest] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let sd = seeder(&seed_dir, None).await;
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+        let id = download_from(&engine, &sd).await;
+        assert_eq!(state_after(&engine, &id, 60).await.0, TorrentState::Seeding);
+
+        engine.relocate(&id, &dest).await.unwrap();
+        assert!(dest.join("seedme.bin").exists() && !dl.join("seedme.bin").exists());
+        assert_eq!(std::fs::read(dest.join("seedme.bin")).unwrap(), payload());
+        assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding, "checked at the new place and seeding");
+        assert_eq!(Path::new(&engine.details(&id).await.unwrap().save_path), dest);
+
+        // A file already in the way stops the move and the torrent stays where it was.
+        let back = root.join("elsewhere");
+        std::fs::create_dir_all(&back).unwrap();
+        std::fs::write(back.join("seedme.bin"), b"someone else's").unwrap();
+        assert!(engine.relocate(&id, &back).await.is_err());
+        assert!(dest.join("seedme.bin").exists());
+        assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding);
+        assert_eq!(Path::new(&engine.details(&id).await.unwrap().save_path), dest);
         let _ = std::fs::remove_dir_all(&root);
     }
 

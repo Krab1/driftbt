@@ -56,6 +56,20 @@
     }
   }
 
+  async function moveFiles() {
+    close();
+    if (!t) return;
+    try {
+      const dir = await api.pickFolder(ui.settings?.download_dir ?? null);
+      if (!dir) return;
+      await api.moveTorrent(t.id, dir);
+      await torrents.refresh();
+      ui.toast(`Moved to ${dir}`);
+    } catch (e) {
+      ui.toast(errorText(e), "error");
+    }
+  }
+
   async function play() {
     close();
     if (!t) return;
@@ -151,6 +165,9 @@
   {/if}
   {#if t && t.total_bytes > 0 && t.state !== "checking"}
     <button role="menuitem" onclick={recheck}><Icon name="check" />Check downloaded files</button>
+  {/if}
+  {#if t && t.total_bytes > 0 && t.state !== "checking"}
+    <button role="menuitem" onclick={moveFiles}><Icon name="folder" />Move files…</button>
   {/if}
   <button role="menuitem" onclick={reveal}><Icon name="folder" />Show in folder</button>
   <button role="menuitem" onclick={playlist}><Icon name="list" />Create playlist</button>

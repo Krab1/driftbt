@@ -107,6 +107,7 @@ pub fn router(shared: S) -> Router {
         .route("/torrents/{id}/pause", post(pause))
         .route("/torrents/{id}/resume", post(resume))
         .route("/torrents/{id}/recheck", post(recheck))
+        .route("/torrents/{id}/move", post(move_files))
         .route("/torrents/{id}/category", put(set_category))
         .route("/torrents/{id}/tags", put(set_tags))
         .route("/torrents/{id}/goal", put(set_goal))
@@ -170,6 +171,15 @@ async fn inspect(State(s): State<S>, Json(b): Json<InspectBody>) -> Res<TorrentP
 
 async fn pause(State(s): State<S>, Path(id): Path<String>) -> Res<()> {
     Ok(Json(s.svc.manager.pause(&TorrentId(id)).await?))
+}
+
+#[derive(Deserialize)]
+struct RelocateBody {
+    dest: String,
+}
+
+async fn move_files(State(s): State<S>, Path(id): Path<String>, Json(b): Json<RelocateBody>) -> Res<()> {
+    Ok(Json(s.svc.manager.relocate(&TorrentId(id), std::path::Path::new(b.dest.trim())).await?))
 }
 
 async fn recheck(State(s): State<S>, Path(id): Path<String>) -> Res<()> {
