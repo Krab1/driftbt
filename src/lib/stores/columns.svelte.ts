@@ -1,4 +1,4 @@
-import { formatBytes, formatEta, formatSpeed, formatWhen, percent } from "../../format";
+import { formatBytes, formatDay, formatEta, formatSpeed, percent } from "../../format";
 import type { Torrent } from "../api/types";
 import type { SortKey } from "./view";
 
@@ -18,8 +18,8 @@ export const COLUMNS: Column[] = [
   { key: "size", label: "Size", width: "76px", text: (t) => (t.total_bytes ? formatBytes(t.total_bytes) : "—") },
   { key: "speed", label: "Speed", width: "84px", text: (t) => formatSpeed(t.state === "seeding" ? t.up_bps : t.down_bps) },
   { key: "eta", label: "ETA", width: "64px", text: (t) => (t.state === "downloading" ? formatEta(t.eta_secs) : "—") },
-  { key: "added", label: "Added", width: "128px", text: (t) => formatWhen(t.added_at) },
-  { key: "finished", label: "Finished", width: "128px", text: (t) => formatWhen(t.finished_at) },
+  { key: "added", label: "Added", width: "96px", text: (t) => formatDay(t.added_at) },
+  { key: "finished", label: "Finished", width: "96px", text: (t) => formatDay(t.finished_at) },
   { key: "uploaded", label: "Uploaded", width: "76px", text: (t) => formatBytes(t.uploaded_bytes) },
   { key: "ratio", label: "Ratio", width: "56px", text: (t) => ratio(t).toFixed(2) },
   { key: "peers", label: "Peers", width: "52px", text: (t) => String(t.peers_live) },

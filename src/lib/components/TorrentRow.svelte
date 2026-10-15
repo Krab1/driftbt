@@ -1,6 +1,6 @@
 <script lang="ts">
   import type { Torrent } from "../api";
-  import { percent } from "../../format";
+  import { formatWhen, percent } from "../../format";
   import { columns } from "../stores/columns.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
@@ -79,7 +79,7 @@
     </div>
   </div>
   {#each columns.shown as c (c.key)}
-    <div class="num r cell c-{c.key}" role="gridcell" title={c.key === "added" || c.key === "finished" || c.key === "tracker" ? c.text(t) : undefined}>{c.text(t)}</div>
+    <div class="num r cell c-{c.key}" role="gridcell" title={c.key === "added" ? formatWhen(t.added_at) : c.key === "finished" ? formatWhen(t.finished_at) : c.key === "tracker" ? c.text(t) : undefined}>{c.text(t)}</div>
   {/each}
   <div class="actions" role="gridcell">
     {#if t.state === "error" && t.error_detail}

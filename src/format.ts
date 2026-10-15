@@ -32,6 +32,12 @@ export function percent(progress: number, total: number): number {
   return Math.min(100, Math.floor((progress / total) * 100));
 }
 
+/** Unix seconds as a compact local date for list columns; the full time shows on hover. */
+export function formatDay(secs: number | null): string {
+  if (!secs) return "—";
+  return new Date(secs * 1000).toLocaleDateString(undefined, { dateStyle: "medium" });
+}
+
 /** Unix seconds as a short local date and time; "—" when unknown. */
 export function formatWhen(secs: number | null): string {
   if (!secs) return "—";
