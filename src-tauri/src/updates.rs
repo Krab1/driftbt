@@ -72,8 +72,9 @@ pub async fn install(app: &AppHandle) -> Result<(), String> {
 #[cfg(windows)]
 fn launch_after_exit(version: &str, installer: &[u8]) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
+    // Not DETACHED_PROCESS as well: Windows then ignores CREATE_NO_WINDOW and opens a visible console for the helper.
+    // The helper still outlives Drift without it.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    const DETACHED_PROCESS: u32 = 0x0000_0008;
     // The version comes from a signed manifest, but it still names a folder, so keep it to safe characters.
     let safe: String = version.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-').collect();
     let dir = std::env::temp_dir().join(format!("Drift-{safe}-update"));
@@ -81,7 +82,7 @@ fn launch_after_exit(version: &str, installer: &[u8]) -> std::io::Result<()> {
     let exe = dir.join("Drift-Installer.exe");
     std::fs::write(&exe, installer)?;
     let script = format!("ping -n 4 127.0.0.1 >nul & taskkill /F /PID {} >nul 2>&1 & \"{}\" /P /R /UPDATE", std::process::id(), exe.display());
-    std::process::Command::new("cmd").raw_arg(format!("/C \"{script}\"")).creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS).spawn()?;
+    std::process::Command::new("cmd").raw_arg(format!("/C \"{script}\"")).creation_flags(CREATE_NO_WINDOW).spawn()?;
     Ok(())
 }
 
