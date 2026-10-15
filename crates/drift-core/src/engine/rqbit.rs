@@ -67,6 +67,7 @@ struct Saved {
     only_files: Option<Vec<usize>>,
     output: PathBuf,
     files: Vec<PathBuf>,
+    name: String,
 }
 
 /// `file:///C:/dir/a%20b.txt`, which is how the engine takes a list from disk.
@@ -135,7 +136,7 @@ impl RqbitEngine {
         if bytes.is_empty() {
             return Err(EngineError::Backend("torrent file bytes are not available".into()));
         }
-        Ok(Saved { hash: h.info_hash(), bytes, paused: stats_of(&h).state == TorrentState::Paused, only_files: h.only_files(), output: h.output_folder().to_path_buf(), files })
+        Ok(Saved { hash: h.info_hash(), bytes, paused: stats_of(&h).state == TorrentState::Paused, only_files: h.only_files(), output: h.output_folder().to_path_buf(), files, name: h.name().unwrap_or_default() })
     }
 
     /// Adds a torrent back, existing files being checked rather than refused. `output` overrides the save folder.
@@ -188,6 +189,18 @@ fn to_add(source: AddSource) -> AddTorrent<'static> {
         AddSource::Magnet(s) | AddSource::Url(s) => AddTorrent::Url(Cow::Owned(s)),
         AddSource::FileBytes(b) => AddTorrent::from_bytes(b),
     }
+}
+
+/// The folder a torrent's files go in: a multi-file torrent gets its own folder named after it inside `base`, a
+/// single file goes straight into `base`. (librqbit does this itself only when it chooses the folder; when we give it
+/// one it uses it as is, which used to spill a torrent's `game/`, `lib/`... straight into the save folder.)
+fn torrent_folder(base: &Path, name: &str, files: usize) -> PathBuf {
+    if files <= 1 {
+        return base.to_path_buf();
+    }
+    let clean: String = name.chars().map(|c| if r#"/:*?"<>|"#.contains(c) || c.is_control() { '_' } else { c }).collect();
+    let clean = clean.trim().trim_end_matches('.').trim();
+    base.join(if clean.is_empty() { "torrent" } else { clean })
 }
 
 fn id_of(h: &ManagedTorrent) -> TorrentId {
@@ -246,6 +259,22 @@ impl TorrentEngine for RqbitEngine {
         }
         // Saving the torrent list is a file swap that Windows sometimes refuses for a moment (a virus scanner
         // looking at the new file, say). Trying again almost always works, and the user never sees the hiccup.
+        // Where the files go: needs the torrent's name and file count, which a list-only look gives.
+        let output_folder = match &req.output_dir {
+            None => None,
+            Some(base) => Some(match self.inspect(req.source.clone()).await {
+                Ok(p) => torrent_folder(base, &p.name, p.files.len()),
+                // A magnet nobody answers yet: keep it out of the save folder's root until the name is known.
+                Err(EngineError::Timeout) => {
+                    let hash = match &req.source {
+                        AddSource::Magnet(m) => librqbit::Magnet::parse(m).ok().and_then(|m| m.as_id20()).map(|h| h.as_string()).unwrap_or_default(),
+                        _ => String::new(),
+                    };
+                    base.join(format!("magnet-{}", hash.chars().take(8).collect::<String>()))
+                }
+                Err(e) => return Err(e),
+            }),
+        };
         let mut last = String::new();
         for attempt in 0..4 {
             if attempt > 0 {
@@ -254,7 +283,7 @@ impl TorrentEngine for RqbitEngine {
             let opts = AddTorrentOptions {
                 paused: req.paused,
                 only_files: req.only_files.clone(),
-                output_folder: req.output_dir.clone().map(|p| p.to_string_lossy().into_owned()),
+                output_folder: output_folder.clone().map(|p| p.to_string_lossy().into_owned()),
                 initial_peers: (!req.peers.is_empty()).then(|| req.peers.clone()),
                 ..Default::default()
             };
@@ -381,6 +410,8 @@ impl TorrentEngine for RqbitEngine {
 
     async fn relocate(&self, id: &TorrentId, dest: &Path) -> Result<()> {
         let saved = self.saved(id)?;
+        let dest = torrent_folder(dest, &saved.name, saved.files.len());
+        let dest = dest.as_path();
         if saved.output == dest {
             return Ok(());
         }
@@ -763,6 +794,55 @@ mod tests {
         assert!(dest.join("seedme.bin").exists());
         assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding);
         assert_eq!(Path::new(&engine.details(&id).await.unwrap().save_path), dest);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn multi_file_torrents_get_a_folder_named_after_them_and_single_files_do_not() {
+        let base = Path::new("E:\\hh");
+        assert_eq!(torrent_folder(base, "Game v1.0", 5), PathBuf::from("E:\\hh\\Game v1.0"));
+        assert_eq!(torrent_folder(base, "one.iso", 1), PathBuf::from("E:\\hh"));
+        assert_eq!(torrent_folder(base, "a/b:c*", 2), PathBuf::from("E:\\hh\\a_b_c_"), "characters Windows forbids are replaced");
+        assert_eq!(torrent_folder(base, "  ..  ", 2), PathBuf::from("E:\\hh\\torrent"));
+    }
+
+    /// With a save folder given (a category, or Settings), a multi-file torrent must not spill its folders into the
+    /// save folder's root: its files go in `<save folder>/<torrent name>/`. Moving it keeps that shape.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_multi_file_torrent_lands_in_its_own_folder_and_moves_as_one() {
+        let root = scratch("ownfolder");
+        let (seed_dir, dl, shelf, dest) = (root.join("seed"), root.join("dl"), root.join("shelf"), root.join("done"));
+        let content = seed_dir.join("album");
+        for d in [&content, &dl, &shelf, &dest] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(content.join("a.bin"), payload()).unwrap();
+        std::fs::write(content.join("b.bin"), payload().into_iter().rev().collect::<Vec<u8>>()).unwrap();
+        let torrent = create_torrent(&content, CreateTorrentOptions::default(), &BlockingSpawner::new(1)).await.unwrap().as_bytes().unwrap();
+        let loopback: SocketAddr = ([127, 0, 0, 1], 0).into();
+        let seeder = Session::new_with_opts(
+            seed_dir.clone(),
+            SessionOptions { dht: None, disable_local_service_discovery: true, listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        seeder.add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, ..Default::default() })).await.unwrap();
+        let seeder_addr = SocketAddr::from(([127, 0, 0, 1], seeder.listen_addr().expect("seeder listens").port()));
+
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+        let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
+        req.output_dir = Some(shelf.clone());
+        req.peers = vec![seeder_addr];
+        let id = engine.add(req).await.unwrap();
+        assert_eq!(state_after(&engine, &id, 60).await.0, TorrentState::Seeding);
+        assert!(shelf.join("album").join("a.bin").exists(), "files are inside the torrent's own folder");
+        assert!(!shelf.join("a.bin").exists(), "nothing is spilled into the save folder itself");
+        assert_eq!(Path::new(&engine.details(&id).await.unwrap().save_path), shelf.join("album"));
+
+        engine.relocate(&id, &dest).await.unwrap();
+        assert!(dest.join("album").join("a.bin").exists() && !shelf.join("album").join("a.bin").exists());
+        assert!(!dest.join("a.bin").exists());
+        assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding);
         let _ = std::fs::remove_dir_all(&root);
     }
 
