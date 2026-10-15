@@ -11,7 +11,7 @@ Scope control: anything not here needs approval. "Engine" = comes from librqbit;
 | Torrent list with progress, speed, ETA, size | Ours | Virtualised, sortable, tabular numerals |
 | Filters: All / Downloading / Seeding / Paused / Error | Ours | Counts in the sidebar |
 | Search box filters the list | Ours | Client-side, instant |
-| File selection before and after adding | Engine | Tree with checkboxes, size per file |
+| File selection before and after adding | Engine | Tree with checkboxes, size per file. A file you skip is never downloaded; the few hundred KB it can share with a picked neighbour go into a sparse file that takes almost no disk, also after a move to another drive |
 | Download folder + per-add override | Ours | Free-space check before start |
 | Global speed limits | Engine | Toggle + values in the status bar |
 | Session persistence across restarts and crashes | Engine | |

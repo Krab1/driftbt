@@ -106,7 +106,10 @@ async fn run() -> Result<(), String> {
     let mut settings = store.load();
     if settings.download_dir.is_none() {
         settings.download_dir = Some(data_dir.join("downloads"));
-        let _ = store.save(&settings);
+        // Only a first run writes the file; an unreadable existing one must not be replaced by stand-in values.
+        if !data_dir.join("settings.json").exists() {
+            let _ = store.save(&settings);
+        }
     }
     let download_dir = settings.download_dir.clone().unwrap_or_else(|| data_dir.join("downloads"));
     let net_cfg = netctl::network_config(&settings, IpFilterService::new(data_dir.join("ipfilter")).active_file(&settings.ip_filter));

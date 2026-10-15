@@ -176,7 +176,11 @@ fn main() {
             let mut settings = store.load();
             if settings.download_dir.is_none() {
                 settings.download_dir = app.path().download_dir().ok();
-                let _ = store.save(&settings);
+                // Only a first run writes the file. If it exists but couldn't be read, these are stand-in values and
+                // must not replace what the user chose.
+                if !data_dir.join("settings.json").exists() {
+                    let _ = store.save(&settings);
+                }
             }
             let download_dir = settings.download_dir.clone().unwrap_or_else(|| data_dir.join("downloads"));
 

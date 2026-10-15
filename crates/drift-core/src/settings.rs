@@ -168,11 +168,14 @@ pub trait SettingsStore: Send + Sync {
 
 pub struct JsonFileStore {
     path: PathBuf,
+    /// The file is there but couldn't be read, so what `load` returned are stand-in values: saving them would
+    /// replace the user's real settings.
+    unreadable: std::sync::atomic::AtomicBool,
 }
 
 impl JsonFileStore {
     pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
+        Self { path: path.into(), unreadable: Default::default() }
     }
 }
 
@@ -199,7 +202,19 @@ fn parse(bytes: &[u8]) -> Option<Settings> {
 
 impl SettingsStore for JsonFileStore {
     fn load(&self) -> Settings {
-        let Ok(bytes) = std::fs::read(&self.path) else {
+        // A file that is there but can't be read this instant (a virus scanner or the installer has it) is not "no
+        // settings yet": look again before giving up, so a busy file never costs the user their settings.
+        let mut read = std::fs::read(&self.path);
+        for _ in 0..10 {
+            if !read.as_ref().is_err_and(|e| e.kind() != std::io::ErrorKind::NotFound) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            read = std::fs::read(&self.path);
+        }
+        let missing = read.as_ref().is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound);
+        self.unreadable.store(read.is_err() && !missing, std::sync::atomic::Ordering::Relaxed);
+        let Ok(bytes) = read else {
             return Settings::default();
         };
         parse(&bytes).unwrap_or_else(|| {
@@ -210,6 +225,9 @@ impl SettingsStore for JsonFileStore {
     }
 
     fn save(&self, settings: &Settings) -> std::io::Result<()> {
+        if self.unreadable.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(std::io::Error::other("the settings file couldn't be read when Drift started, so it is left as it is"));
+        }
         crate::jsonfile::write_atomic(&self.path, &serde_json::to_vec_pretty(settings).map_err(std::io::Error::other)?)
     }
 }
@@ -235,6 +253,36 @@ mod tests {
         let s = Settings { download_dir: Some("D:/dl".into()), theme: Theme::Dark, ..Settings::default() };
         store.save(&s).unwrap();
         assert_eq!(store.load(), s);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A settings file that something else has open for a moment (a virus scanner, the installer) is still the
+    /// user's settings: loading waits for it instead of falling back to the defaults.
+    #[cfg(windows)]
+    #[test]
+    fn a_file_that_is_busy_for_a_moment_is_still_loaded() {
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tmp("busy");
+        let path = dir.join("settings.json");
+        let store = JsonFileStore::new(&path);
+        let mine = Settings { download_dir: Some("E:/hh".into()), close_to_tray: true, ..Settings::default() };
+        store.save(&mine).unwrap();
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+        let release = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(400));
+            drop(held);
+        });
+        assert_eq!(store.load(), mine);
+        release.join().unwrap();
+
+        // Held for longer than the wait: the defaults come back, but nothing is allowed to overwrite the real file.
+        let held = std::fs::OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+        assert_eq!(store.load(), Settings::default());
+        assert!(store.save(&Settings::default()).is_err());
+        drop(held);
+        assert_eq!(std::fs::read(&path).map(|b| parse(&b)).unwrap(), Some(mine.clone()));
+        assert_eq!(store.load(), mine, "readable again, saving works again");
+        store.save(&mine).unwrap();
         let _ = std::fs::remove_dir_all(dir);
     }
 

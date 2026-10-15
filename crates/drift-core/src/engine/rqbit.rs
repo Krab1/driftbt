@@ -76,8 +76,139 @@ fn file_url(p: &Path) -> String {
     format!("file:///{}", path.trim_start_matches('/'))
 }
 
+/// A skipped file is only written where it shares a download piece with a file you picked, so it should be a mostly
+/// empty (sparse) file that takes almost no disk. librqbit tries to mark files sparse on Windows but its call to the
+/// OS leaves out an argument the call requires, so it never takes effect and a skipped 600 MB file ends up taking
+/// 600 MB. This wraps librqbit's file storage and marks a file sparse just before its first write, when it is still
+/// empty (files you picked are given their full length up front and are left alone).
+#[cfg(windows)]
+mod sparse_storage {
+    use std::fs::OpenOptions;
+    use std::io::IoSlice;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex, RwLock, Weak};
+
+    use librqbit::api::TorrentIdOrHash;
+    use librqbit::dht::Id20;
+    use librqbit::storage::filesystem::FilesystemStorageFactory;
+    use librqbit::storage::{BoxStorageFactory, StorageFactory, TorrentStorage};
+    use librqbit::{ManagedTorrentShared, Session, TorrentMetadata};
+
+    /// Where to find the session (and so each torrent's folder) once files are written.
+    pub type SessionLink = Arc<RwLock<Weak<Session>>>;
+
+    #[derive(Clone)]
+    pub struct SparseFactory(pub SessionLink);
+
+    impl StorageFactory for SparseFactory {
+        type Storage = Box<dyn TorrentStorage>;
+
+        fn create(&self, shared: &ManagedTorrentShared, metadata: &TorrentMetadata) -> anyhow::Result<Box<dyn TorrentStorage>> {
+            let files: Vec<PathBuf> = metadata.file_infos.iter().map(|f| f.relative_filename.clone()).collect();
+            Ok(Box::new(SparseStorage {
+                inner: Box::new(FilesystemStorageFactory::default().create(shared, metadata)?),
+                hash: shared.info_hash,
+                marked: Arc::new(files.iter().map(|_| Mutex::new(false)).collect()),
+                files: Arc::new(files),
+                link: self.0.clone(),
+            }))
+        }
+
+        /// The session saver only accepts the filesystem storage; this is that storage (same files, same layout).
+        fn is_type_id(&self, type_id: std::any::TypeId) -> bool {
+            type_id == std::any::TypeId::of::<FilesystemStorageFactory>()
+        }
+
+        fn clone_box(&self) -> BoxStorageFactory {
+            Box::new(self.clone())
+        }
+    }
+
+    pub struct SparseStorage {
+        inner: Box<dyn TorrentStorage>,
+        hash: Id20,
+        files: Arc<Vec<PathBuf>>,
+        /// Per file: already looked at. Held while marking, so a second writer waits for the mark before it writes.
+        marked: Arc<Vec<Mutex<bool>>>,
+        link: SessionLink,
+    }
+
+    impl SparseStorage {
+        fn before_write(&self, file_id: usize) {
+            let Some(done) = self.marked.get(file_id) else { return };
+            let mut done = done.lock().unwrap();
+            if *done {
+                return;
+            }
+            let Some(session) = self.link.read().unwrap().upgrade() else { return };
+            let Some(handle) = session.get(TorrentIdOrHash::Hash(self.hash)) else { return };
+            // A file you picked is written whole in the end, and is better off as an ordinary file.
+            if handle.only_files().is_none_or(|only| only.contains(&file_id)) {
+                *done = true;
+                return;
+            }
+            let path: &Path = &handle.output_folder().join(&self.files[file_id]);
+            *done = true;
+            if let Ok(f) = OpenOptions::new().write(true).open(path) {
+                if f.metadata().is_ok_and(|m| m.len() == 0) {
+                    let _ = crate::fsmove::sparse::mark_sparse(&f);
+                }
+            }
+        }
+    }
+
+    impl TorrentStorage for SparseStorage {
+        fn init(&mut self, shared: &ManagedTorrentShared, metadata: &TorrentMetadata) -> anyhow::Result<()> {
+            self.inner.init(shared, metadata)
+        }
+
+        fn pread_exact(&self, file_id: usize, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
+            self.inner.pread_exact(file_id, offset, buf)
+        }
+
+        fn pwrite_all(&self, file_id: usize, offset: u64, buf: &[u8]) -> anyhow::Result<()> {
+            self.before_write(file_id);
+            self.inner.pwrite_all(file_id, offset, buf)
+        }
+
+        fn pwrite_all_vectored(&self, file_id: usize, offset: u64, bufs: [IoSlice<'_>; 2]) -> anyhow::Result<usize> {
+            self.before_write(file_id);
+            // Through the trait object itself: the `Box` impl in librqbit would split this into two writes.
+            (*self.inner).pwrite_all_vectored(file_id, offset, bufs)
+        }
+
+        fn remove_file(&self, file_id: usize, filename: &Path) -> anyhow::Result<()> {
+            self.inner.remove_file(file_id, filename)
+        }
+
+        fn remove_directory_if_empty(&self, path: &Path) -> anyhow::Result<()> {
+            self.inner.remove_directory_if_empty(path)
+        }
+
+        fn ensure_file_length(&self, file_id: usize, length: u64) -> anyhow::Result<()> {
+            self.inner.ensure_file_length(file_id, length)
+        }
+
+        fn take(&self) -> anyhow::Result<Box<dyn TorrentStorage>> {
+            Ok(Box::new(SparseStorage {
+                inner: self.inner.take()?,
+                hash: self.hash,
+                files: self.files.clone(),
+                marked: self.marked.clone(),
+                link: self.link.clone(),
+            }))
+        }
+    }
+}
+
 async fn build_session(cfg: &RqbitConfig) -> Result<Arc<Session>> {
     let mut opts = SessionOptions::default();
+    #[cfg(windows)]
+    let link: sparse_storage::SessionLink = Arc::new(RwLock::new(std::sync::Weak::new()));
+    #[cfg(windows)]
+    {
+        opts.default_storage_factory = Some(Box::new(sparse_storage::SparseFactory(link.clone())));
+    }
     let proxied = cfg.proxy.is_some();
     // Behind a proxy only outgoing TCP can be proxied: DHT (UDP) and listening would expose the real address.
     if !cfg.dht || proxied {
@@ -101,7 +232,12 @@ async fn build_session(cfg: &RqbitConfig) -> Result<Arc<Session>> {
         opts.persistence = Some(SessionPersistenceConfig::Json { folder: Some(dir.clone()) });
         opts.fastresume = true;
     }
-    Session::new_with_opts(cfg.output_dir.clone(), opts).await.map_err(backend)
+    let session = Session::new_with_opts(cfg.output_dir.clone(), opts).await.map_err(backend)?;
+    #[cfg(windows)]
+    {
+        *link.write().unwrap() = Arc::downgrade(&session);
+    }
+    Ok(session)
 }
 
 impl RqbitEngine {
@@ -901,6 +1037,66 @@ mod tests {
         skipped_untouched(&d);
         assert!(d.files[0].selected && !d.files[1].selected && d.files[2].selected && !d.files[3].selected);
         dump("5. after resume and re-download");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Skipped file sandwiched between two picked ones, with sizes that don't line up with the pieces: the pieces on
+    /// the boundaries carry a little of the skipped file. It gets its full length but must not take that space on disk.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_skipped_file_next_to_a_picked_one_takes_almost_no_disk() {
+        let root = scratch("edge");
+        let (seed_dir, dl) = (root.join("seed"), root.join("dl"));
+        let content = seed_dir.join("pack");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::create_dir_all(&dl).unwrap();
+        let sizes = [100_000usize, 3_000_000, 100_000];
+        let names = ["a.bin", "b.bin", "c.bin"];
+        for (i, (n, sz)) in names.iter().zip(sizes).enumerate() {
+            std::fs::write(content.join(n), (0..sz).map(|k| ((k * 31) >> 3) as u8 ^ (i as u8 + 1)).collect::<Vec<u8>>()).unwrap();
+        }
+        let torrent = create_torrent(&content, CreateTorrentOptions { piece_length: Some(64 * 1024), ..Default::default() }, &BlockingSpawner::new(1)).await.unwrap().as_bytes().unwrap();
+        let loopback: SocketAddr = ([127, 0, 0, 1], 0).into();
+        let seeder = Session::new_with_opts(
+            seed_dir.clone(),
+            SessionOptions { dht: None, disable_local_service_discovery: true, listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        seeder.add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, ..Default::default() })).await.unwrap();
+        let port = seeder.listen_addr().expect("seeder listens").port();
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+        let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
+        req.peers = vec![SocketAddr::from(([127, 0, 0, 1], port))];
+        req.only_files = Some(vec![0, 2]);
+        let id = engine.add(req).await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let d = engine.details(&id).await.unwrap();
+            if d.files[0].progress_bytes == d.files[0].size && d.files[2].progress_bytes == d.files[2].size {
+                break;
+            }
+            assert!(Instant::now() < deadline, "timed out");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        let d = engine.details(&id).await.unwrap();
+        for (i, n) in names.iter().enumerate() {
+            let p = dl.join("pack").join(n);
+            match std::fs::read(&p) {
+                Ok(b) => println!("{n}: app progress {:>8}, on disk size {:>8} (torrent size {:>8}), non-zero bytes {:>8}", d.files[i].progress_bytes, b.len(), sizes[i], b.iter().filter(|&&x| x != 0).count()),
+                Err(_) => println!("{n}: app progress {:>8}, NOT on disk", d.files[i].progress_bytes),
+            }
+        }
+        // The skipped file holds only the two boundary pieces' worth of data (under 200 KB), and the disk knows it.
+        let skipped = dl.join("pack").join("b.bin");
+        assert!(d.files[1].progress_bytes < 200_000);
+        #[cfg(windows)]
+        {
+            let used = crate::fsmove::sparse::allocated_bytes(&skipped);
+            println!("b.bin allocated on disk: {used} of {}", sizes[1]);
+            assert!(used < 1_000_000, "the skipped file takes {used} bytes of disk for {} bytes of data", d.files[1].progress_bytes);
+        }
+        assert!(std::fs::metadata(&skipped).is_ok());
         let _ = std::fs::remove_dir_all(&root);
     }
 

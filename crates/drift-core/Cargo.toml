@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 async-trait = "0.1.92"
+# Only for the signatures of librqbit's storage trait (see sparse_storage in engine/rqbit.rs); librqbit already brings it in.
+anyhow = "1"
 flate2 = "1.1.10"
 # http-api-client has no deps; it only exposes the peer-stats filter types we need.
 librqbit = { version = "=9.0.1", default-features = false, features = ["default-tls", "http-api-client"] }
@@ -24,4 +26,4 @@ sha2 = "0.10"
 base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61.2", features = ["Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Foundation", "Win32_NetworkManagement_Ndis", "Win32_System_JobObjects", "Win32_Security"] }
+windows-sys = { version = "0.61.2", features = ["Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Foundation", "Win32_NetworkManagement_Ndis", "Win32_System_JobObjects", "Win32_Security", "Win32_System_IO", "Win32_System_Ioctl", "Win32_Storage_FileSystem"] }
