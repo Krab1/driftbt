@@ -62,6 +62,7 @@ function demo(n: number): Torrent[] {
       category: i % 5 === 0 ? "Linux" : i % 7 === 0 ? "Docs" : null,
       tags: [],
       queue_pos: null,
+      error_detail: state === "error" ? "write failed: There is not enough space on the disk. (os error 112)" : null,
       note: null, added_at: 1_760_000_000 + i * 3600, finished_at: i % 3 === 0 ? 1_760_100_000 + i * 3600 : null,
     };
   });
@@ -255,6 +256,8 @@ export function createMockApi(count = 40): Api {
       return { id: m[1].toLowerCase(), name: "demo-distro-1.0-amd64", total_bytes: files.reduce((a, f) => a + f.size, 0), files } satisfies TorrentPreview;
     },
     add: async (input, category = null) => {
+      // Typing "fail" in the Add dialog shows how a failed add looks, with its technical details.
+      if (input.kind === "magnet" && input.value.includes("fail")) throw { code: "engine", message: "The torrent engine hit a problem. Try again.", detail: "error renaming persistence file: Access is denied. (os error 5)" };
       if (input.kind === "url") {
         const id = [...input.value].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(16).padStart(8, "0").repeat(5);
         if (!torrents.some((t) => t.id === id)) {

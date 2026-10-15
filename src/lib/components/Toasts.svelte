@@ -4,7 +4,10 @@
 
 <div class="toasts" aria-live="polite">
   {#each ui.toasts as t (t.id)}
-    <div class="toast" class:error={t.kind === "error"} role={t.kind === "error" ? "alert" : "status"}>{t.text}</div>
+    <div class="toast" class:error={t.kind === "error"} role={t.kind === "error" ? "alert" : "status"}>
+      <span>{t.text}</span>
+      {#if t.detail}<button class="more" onclick={() => (ui.detailView = { title: t.text, text: t.detail ?? "" })}>More details</button>{/if}
+    </div>
   {/each}
 </div>
 
@@ -25,6 +28,19 @@
     color: var(--bg);
     box-shadow: var(--shadow-menu);
     max-width: 360px;
+  }
+  .more {
+    margin-left: 10px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    text-decoration: underline;
+    cursor: pointer;
+    pointer-events: auto;
+  }
+  .toast {
+    pointer-events: auto;
   }
   .toast.error {
     background: var(--danger);

@@ -115,7 +115,7 @@ pub use drift_core::service::write_playlist;
 pub async fn create_playlist(state: State<'_, AppState>, id: TorrentId) -> ApiResult<String> {
     match write_playlist(state.engine.as_ref(), &id).await? {
         Some(p) => Ok(p.display().to_string()),
-        None => Err(ApiError { code: "no_playlist", message: "A playlist needs at least two video or audio files.".into() }),
+        None => Err(ApiError { code: "no_playlist", message: "A playlist needs at least two video or audio files.".into(), detail: None }),
     }
 }
 
@@ -123,7 +123,7 @@ pub async fn create_playlist(state: State<'_, AppState>, id: TorrentId) -> ApiRe
 /// front of the queue, and the player is pointed at the loopback stream server through a one-line playlist.
 #[tauri::command]
 pub async fn play_torrent(state: State<'_, AppState>, id: TorrentId, file: Option<usize>) -> ApiResult<()> {
-    let no_media = || ApiError { code: "no_media", message: "This torrent has no video or audio files to play.".into() };
+    let no_media = || ApiError { code: "no_media", message: "This torrent has no video or audio files to play.".into(), detail: None };
     let d = state.engine.details(&id).await?;
     let chosen = match file {
         Some(i) => d.files.iter().find(|f| f.index == i),
@@ -142,7 +142,7 @@ pub async fn play_torrent(state: State<'_, AppState>, id: TorrentId, file: Optio
         .await
         .map_err(|e| {
             eprintln!("stream server failed to start: {e}");
-            ApiError { code: "stream", message: "Couldn't start playback. Try again.".into() }
+            ApiError { code: "stream", message: "Couldn't start playback. Try again.".into(), detail: None }
         })?;
     let name = chosen.path.rsplit(['/', '\\']).next().unwrap_or("video");
     let url = server.url(&id, chosen.index, name);
@@ -154,7 +154,7 @@ pub async fn play_torrent(state: State<'_, AppState>, id: TorrentId, file: Optio
 ")))
         .map_err(|e| {
             eprintln!("stream playlist write failed: {e}");
-            ApiError { code: "stream", message: "Couldn't start playback. Try again.".into() }
+            ApiError { code: "stream", message: "Couldn't start playback. Try again.".into(), detail: None }
         })?;
     platform::open_default(&list);
     Ok(())
@@ -229,12 +229,12 @@ pub fn set_caption_rect(state: State<'_, AppState>, rect: Option<[i32; 4]>) {
 
 #[tauri::command]
 pub async fn check_update(app: tauri::AppHandle) -> ApiResult<Option<crate::updates::UpdateInfo>> {
-    crate::updates::check(&app).await.map_err(|message| ApiError { code: "update", message })
+    crate::updates::check(&app).await.map_err(|message| ApiError { code: "update", message, detail: None })
 }
 
 #[tauri::command]
 pub async fn install_update(app: tauri::AppHandle) -> ApiResult<()> {
-    crate::updates::install(&app).await.map_err(|message| ApiError { code: "update", message })
+    crate::updates::install(&app).await.map_err(|message| ApiError { code: "update", message, detail: None })
 }
 
 #[tauri::command]
@@ -248,7 +248,7 @@ pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> Api
     if before.start_with_windows != settings.start_with_windows {
         platform::autostart::set(settings.start_with_windows).map_err(|e| {
             eprintln!("autostart change failed: {e}");
-            ApiError { code: "settings", message: "Couldn't save your settings. Check that the app data folder is writable.".into() }
+            ApiError { code: "settings", message: "Couldn't save your settings. Check that the app data folder is writable.".into(), detail: None }
         })?;
     }
     Ok(settings)

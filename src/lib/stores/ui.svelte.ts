@@ -26,6 +26,8 @@ export interface Toast {
   id: number;
   text: string;
   kind: "info" | "error";
+  /** Technical text shown by the Details button. */
+  detail?: string;
 }
 
 export interface DraftFile {
@@ -74,11 +76,20 @@ class Ui {
     remember("drift.detailTab", tab);
   }
 
-  toast(text: string, kind: Toast["kind"] = "info") {
+  toast(text: string, kind: Toast["kind"] = "info", detail?: string) {
     const id = nextToast++;
-    this.toasts = [...this.toasts, { id, text, kind }];
-    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), kind === "error" ? 6000 : 3500);
+    this.toasts = [...this.toasts, { id, text, kind, detail }];
+    // An error with details stays long enough to reach for the button.
+    setTimeout(() => (this.toasts = this.toasts.filter((t) => t.id !== id)), kind === "error" ? (detail ? 15000 : 6000) : 3500);
   }
+
+  /** Shows a failed call as an error toast, with a Details button when the backend gave technical text. */
+  fail(e: unknown) {
+    this.toast(errorText(e), "error", errorDetail(e));
+  }
+
+  /** The technical text dialog. */
+  detailView = $state<{ title: string; text: string } | null>(null);
 
   openAdd(magnets = "", files: DraftFile[] = []) {
     this.draftMagnets = magnets;
@@ -125,6 +136,11 @@ class Ui {
 }
 
 export const ui = new Ui();
+
+export function errorDetail(e: unknown): string | undefined {
+  const d = (e as { detail?: unknown })?.detail;
+  return typeof d === "string" && d.trim() ? d : undefined;
+}
 
 export function errorText(e: unknown): string {
   const m = (e as { message?: unknown })?.message;

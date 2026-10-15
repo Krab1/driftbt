@@ -11,7 +11,7 @@
       // The installer closes Drift and starts the new version, so on success this page goes away.
       await api.installUpdate!();
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
       busy = false;
     }
   }

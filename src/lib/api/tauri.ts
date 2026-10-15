@@ -12,7 +12,7 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   } catch (e) {
     const err = e as Partial<ApiError>;
     if (err && typeof err.message === "string") throw err as ApiError;
-    throw { code: "unknown", message: "Something went wrong. Try again." } satisfies ApiError;
+    throw { code: "unknown", message: "Something went wrong. Try again.", detail: typeof e === "string" ? e : JSON.stringify(e) } satisfies ApiError;
   }
 }
 

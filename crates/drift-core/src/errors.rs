@@ -28,11 +28,19 @@ pub fn plain_error(raw: Option<&str>) -> Option<String> {
 pub struct ApiError {
     pub code: &'static str,
     pub message: String,
+    /// The technical text behind the message, for a "More details" button. Never needed to use the app.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 impl ApiError {
     pub fn new(code: &'static str, message: &str) -> Self {
-        Self { code, message: message.to_string() }
+        Self { code, message: message.to_string(), detail: None }
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
     }
 }
 
@@ -41,12 +49,12 @@ impl From<crate::engine::EngineError> for ApiError {
         use crate::engine::EngineError as E;
         match e {
             E::NotFound => Self::new("not_found", "That torrent no longer exists."),
-            E::InvalidInput(_) => Self::new("invalid_input", "That isn't a valid magnet link or torrent file."),
+            E::InvalidInput(why) => Self::new("invalid_input", "That isn't a valid magnet link or torrent file.").with_detail(why),
             E::Blocked => Self::new("blocked", "The VPN guard is holding torrents because your VPN isn't connected."),
             E::Timeout => Self::new("timeout", "Couldn't fetch the torrent info. Check the link, or try again in a moment."),
             E::Backend(raw) => {
                 eprintln!("engine error: {raw}");
-                Self::new("engine", "The torrent engine hit a problem. Try again.")
+                Self::new("engine", "The torrent engine hit a problem. Try again.").with_detail(raw)
             }
         }
     }

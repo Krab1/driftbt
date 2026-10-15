@@ -34,7 +34,7 @@ async function act(fn: () => Promise<unknown>) {
     await fn();
     await torrents.refresh();
   } catch (e) {
-    ui.toast(errorText(e), "error");
+    ui.fail(e);
   }
 }
 

@@ -35,7 +35,7 @@
       await torrents.refresh();
       ui.tagTarget = null;
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 </script>

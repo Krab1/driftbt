@@ -24,6 +24,7 @@ mod tests {
             name: id.into(),
             state,
             error: None,
+            error_detail: None,
             total_bytes: 1,
             progress_bytes: 1,
             uploaded_bytes: 0,

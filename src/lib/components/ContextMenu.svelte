@@ -40,7 +40,7 @@
       await (t.state === "paused" ? api.resume(t.id) : api.pause(t.id));
       await torrents.refresh();
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 
@@ -52,7 +52,7 @@
       await torrents.refresh();
       ui.toast("Checking the downloaded files. Anything missing or damaged will be downloaded again.");
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 
@@ -66,7 +66,7 @@
       await torrents.refresh();
       ui.toast(`Moved to ${dir}`);
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 
@@ -77,7 +77,7 @@
       await api.play(t.id);
       await torrents.refresh();
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 
@@ -88,13 +88,13 @@
       const path = await api.createPlaylist(t.id);
       ui.toast(`Playlist saved: ${path}`);
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 
   async function reveal() {
     close();
-    if (t) await api.revealTorrent(t.id).catch((e) => ui.toast(errorText(e), "error"));
+    if (t) await api.revealTorrent(t.id).catch((e) => ui.fail(e));
   }
 
   async function copyMagnet() {
@@ -115,7 +115,7 @@
       await api.moveInQueue(t.id, to);
       await torrents.refresh();
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 
@@ -126,7 +126,7 @@
       await api.setCategory(t.id, name);
       await torrents.refresh();
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 

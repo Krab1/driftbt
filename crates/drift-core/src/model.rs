@@ -52,6 +52,9 @@ pub enum TorrentState {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TorrentStats {
+    /// Raw engine text behind `error`, for a "More details" button.
+    #[serde(default)]
+    pub error_detail: Option<String>,
     pub id: TorrentId,
     pub name: String,
     pub state: TorrentState,

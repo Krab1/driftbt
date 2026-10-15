@@ -2,6 +2,7 @@
   import type { Torrent } from "../api";
   import { percent } from "../../format";
   import { columns } from "../stores/columns.svelte";
+  import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
 
   let {
@@ -81,6 +82,10 @@
     <div class="num r cell c-{c.key}" role="gridcell" title={c.key === "added" || c.key === "finished" || c.key === "tracker" ? c.text(t) : undefined}>{c.text(t)}</div>
   {/each}
   <div class="actions" role="gridcell">
+    {#if t.state === "error" && t.error_detail}
+      <button class="btn ghost retry" onclick={(e) => { e.stopPropagation(); ui.detailView = { title: t.error ?? t.name, text: `${t.name}
+${t.error_detail}` }; }}>Details</button>
+    {/if}
     {#if t.state === "error"}
       <button class="btn ghost retry" onclick={(e) => { e.stopPropagation(); ontoggle(); }}>Retry</button>
     {/if}

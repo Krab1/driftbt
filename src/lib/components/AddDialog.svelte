@@ -2,7 +2,7 @@
   import { api, type AddInput, type TorrentPreview } from "../api";
   import { formatBytes } from "../../format";
   import { torrents } from "../stores/torrents.svelte";
-  import { ui, errorText, type DraftFile } from "../stores/ui.svelte";
+  import { ui, errorText, errorDetail, type DraftFile } from "../stores/ui.svelte";
   import Dialog from "./Dialog.svelte";
   import FileTree from "./FileTree.svelte";
   import Icon from "./Icon.svelte";
@@ -10,6 +10,8 @@
   let magnets = $state(ui.draftMagnets);
   let files = $state<DraftFile[]>([...ui.draftFiles]);
   let error = $state("");
+  /** Technical text behind `error` or `previewError`, shown by the More details button. */
+  let more = $state("");
   let busy = $state(false);
   let picker = $state<HTMLInputElement>();
   let category = $state<string>(torrents.category ?? "");
@@ -35,6 +37,7 @@
     const input = single;
     preview = null;
     previewError = "";
+    more = "";
     if (!input) {
       previewing = false;
       return;
@@ -54,7 +57,7 @@
           preview = p;
           selected = new Set(p.files.map((f) => f.index));
         })
-        .catch((e) => !stale && (previewError = errorText(e)))
+        .catch((e) => !stale && ((previewError = errorText(e)), (more = errorDetail(e) ?? "")))
         .finally(() => !stale && (previewing = false));
     }, 450);
     return () => {
@@ -89,18 +92,20 @@
     }
     busy = true;
     error = "";
+    more = "";
     const only = preview && !allSelected ? [...selected] : undefined;
     let added = 0;
     const failedMagnets: string[] = [];
     const failedFiles: DraftFile[] = [];
     let firstError = "";
+    let firstDetail = "";
     for (const m of magnetLines) {
       try {
         await api.add(lineInput(m, only), category || null);
         added++;
       } catch (e) {
         failedMagnets.push(m);
-        firstError ||= errorText(e);
+        if (!firstError) [firstError, firstDetail] = [errorText(e), errorDetail(e) ?? ""];
       }
     }
     for (const f of files) {
@@ -109,7 +114,7 @@
         added++;
       } catch (e) {
         failedFiles.push(f);
-        firstError ||= `${f.name}: ${errorText(e)}`;
+        if (!firstError) [firstError, firstDetail] = [`${f.name}: ${errorText(e)}`, errorDetail(e) ?? ""];
       }
     }
     busy = false;
@@ -121,6 +126,7 @@
       magnets = failedMagnets.join("\n");
       files = failedFiles;
       error = firstError;
+      more = firstDetail;
     } else {
       ui.addOpen = false;
     }
@@ -149,7 +155,7 @@
   {#if previewing}
     <p class="note" role="status">Fetching torrent info…</p>
   {:else if previewError}
-    <p class="note warn" role="status">{previewError} You can still add it.</p>
+    <p class="note warn" role="status">{previewError} You can still add it.{#if more} <button class="link" onclick={() => (ui.detailView = { title: previewError, text: more })}>More details</button>{/if}</p>
   {:else if preview}
     <div class="field">
       <div class="phead">
@@ -180,7 +186,7 @@
     </div>
   </div>
 
-  {#if error}<p class="err" role="alert">{error}</p>{/if}
+  {#if error}<p class="err" role="alert">{error}{#if more} <button class="link" onclick={() => (ui.detailView = { title: error, text: more })}>More details</button>{/if}</p>{/if}
 
   {#snippet footer()}
     <button class="btn" onclick={() => (ui.addOpen = false)}>Cancel</button>
@@ -189,6 +195,14 @@
 </Dialog>
 
 <style>
+  .link {
+    border: 0;
+    background: none;
+    padding: 0;
+    color: var(--accent-fg);
+    text-decoration: underline;
+    cursor: pointer;
+  }
   .field {
     display: grid;
     gap: 6px;

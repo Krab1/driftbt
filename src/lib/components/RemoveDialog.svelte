@@ -29,7 +29,7 @@
       await torrents.refresh();
       ui.toast(deleteFiles ? "Torrent and files removed" : "Torrent removed");
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
     ui.removeTarget = null;
   }

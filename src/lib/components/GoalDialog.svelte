@@ -29,7 +29,7 @@
       ui.toast(custom ? "Seeding goal saved" : "Using the default seeding goal");
       ui.goalTarget = null;
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 </script>

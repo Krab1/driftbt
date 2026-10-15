@@ -221,6 +221,7 @@ fn stats_of(h: &ManagedTorrent) -> TorrentStats {
         id,
         state,
         error: plain_error(s.error.as_deref()),
+        error_detail: s.error.clone(),
         total_bytes: s.total_bytes,
         progress_bytes: s.progress_bytes,
         uploaded_bytes: s.uploaded_bytes,
@@ -243,18 +244,32 @@ impl TorrentEngine for RqbitEngine {
                 return Ok(id_of(&h));
             }
         }
-        let add = to_add(req.source);
-        let opts = AddTorrentOptions {
-            paused: req.paused,
-            only_files: req.only_files,
-            output_folder: req.output_dir.map(|p| p.to_string_lossy().into_owned()),
-            initial_peers: (!req.peers.is_empty()).then_some(req.peers),
-            ..Default::default()
-        };
-        match self.session().add_torrent(add, Some(opts)).await.map_err(backend)? {
-            AddTorrentResponse::Added(_, h) | AddTorrentResponse::AlreadyManaged(_, h) => Ok(id_of(&h)),
-            AddTorrentResponse::ListOnly(_) => Err(EngineError::Backend("unexpected list-only response".into())),
+        // Saving the torrent list is a file swap that Windows sometimes refuses for a moment (a virus scanner
+        // looking at the new file, say). Trying again almost always works, and the user never sees the hiccup.
+        let mut last = String::new();
+        for attempt in 0..4 {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_millis(300)).await;
+            }
+            let opts = AddTorrentOptions {
+                paused: req.paused,
+                only_files: req.only_files.clone(),
+                output_folder: req.output_dir.clone().map(|p| p.to_string_lossy().into_owned()),
+                initial_peers: (!req.peers.is_empty()).then(|| req.peers.clone()),
+                ..Default::default()
+            };
+            match self.session().add_torrent(to_add(req.source.clone()), Some(opts)).await {
+                Ok(AddTorrentResponse::Added(_, h) | AddTorrentResponse::AlreadyManaged(_, h)) => return Ok(id_of(&h)),
+                Ok(AddTorrentResponse::ListOnly(_)) => return Err(EngineError::Backend("unexpected list-only response".into())),
+                Err(e) => {
+                    last = format!("{e:#}");
+                    if !last.to_lowercase().contains("persistence") {
+                        break;
+                    }
+                }
+            }
         }
+        Err(EngineError::Backend(last))
     }
 
     async fn inspect(&self, source: AddSource) -> Result<TorrentPreview> {

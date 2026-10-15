@@ -14,6 +14,8 @@ export interface TorrentStats {
   up_bps: number;
   peers_live: number;
   eta_secs: number | null;
+  /** Raw engine text behind `error`, for a "More details" button. */
+  error_detail?: string | null;
   /** Host of the first tracker. */
   tracker: string | null;
 }
@@ -274,6 +276,8 @@ export interface Settings {
 export interface ApiError {
   code: string;
   message: string;
+  /** The technical text behind the message, for a "More details" button. */
+  detail?: string;
 }
 
 /** The frameless desktop window's own title-bar controls. Absent in the browser, where the browser draws its frame. */

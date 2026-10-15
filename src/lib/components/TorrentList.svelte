@@ -29,7 +29,7 @@
       await (t.state === "paused" ? api.resume(id) : api.pause(id));
       await torrents.refresh();
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 

@@ -8,6 +8,7 @@
   import SettingsDialog from "./lib/components/SettingsDialog.svelte";
   import StatusBar from "./lib/components/StatusBar.svelte";
   import Toasts from "./lib/components/Toasts.svelte";
+  import ErrorDetails from "./lib/components/ErrorDetails.svelte";
   import TopBar from "./lib/components/TopBar.svelte";
   import TorrentList from "./lib/components/TorrentList.svelte";
   import { api, type OpenPayload } from "./lib/api";
@@ -32,7 +33,7 @@
 
   onMount(() => {
     const stops: (() => void)[] = [];
-    const keep = (p: Promise<() => void>) => p.then((un) => stops.push(un)).catch((e) => ui.toast(errorText(e), "error"));
+    const keep = (p: Promise<() => void>) => p.then((un) => stops.push(un)).catch((e) => ui.fail(e));
     keep(torrents.start());
     const focusSearch = () => topbar?.focusSearch();
     window.addEventListener("drift:focus-search", focusSearch);
@@ -42,7 +43,7 @@
     if (api.onUpdateAvailable) keep(api.onUpdateAvailable((u) => (ui.update = u)));
     if (api.onOpenSettings) keep(api.onOpenSettings(() => (ui.settingsOpen = true)));
     keep(api.onShown(() => torrents.refresh().catch(() => {})));
-    ui.loadSettings().then(() => ui.refreshLimits()).catch((e) => ui.toast(errorText(e), "error"));
+    ui.loadSettings().then(() => ui.refreshLimits()).catch((e) => ui.fail(e));
     api.guardStatus().then((g) => (ui.guard = g)).catch(() => {});
     keep(api.onGuard((g) => (ui.guard = g)));
     keep(api.onWatch((w) => (w.added ? ui.toast(`Added ${w.added} from the watch folder`) : ui.toast(`${w.invalid} isn't a valid torrent file, so it was set aside`, "error"))));
@@ -148,6 +149,7 @@
 {#if ui.paletteOpen}<Palette />{/if}
 {#if ui.ratioOpen}<RatioDialog />{/if}
 {#if ui.searchOpen}<SearchDialog />{/if}
+{#if ui.detailView}<ErrorDetails />{/if}
 <Toasts />
 
 {#if dragging}

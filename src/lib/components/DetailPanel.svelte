@@ -53,7 +53,7 @@
     pending = setTimeout(() => {
       api.setFiles(id, [...next]).catch((e) => {
         override = null;
-        ui.toast(errorText(e), "error");
+        ui.fail(e);
       });
     }, 200);
   }
@@ -64,7 +64,7 @@
       await api.resume(sel.id);
       await torrents.refresh();
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 
@@ -74,12 +74,12 @@
       await api.play(sel.id, file);
       await torrents.refresh();
     } catch (e) {
-      ui.toast(errorText(e), "error");
+      ui.fail(e);
     }
   }
 
   async function reveal() {
-    if (sel) await api.revealTorrent(sel.id).catch((e) => ui.toast(errorText(e), "error"));
+    if (sel) await api.revealTorrent(sel.id).catch((e) => ui.fail(e));
   }
 
   // Drag the top edge to resize.
