@@ -390,6 +390,10 @@ export function createMockApi(count = 40): Api {
       };
     },
     searchKeysSet: async () => keys,
+    testSearchSource: async (id) => {
+      await new Promise((r) => setTimeout(r, 600));
+      return id === "archive_org" ? { id, name: "Internet Archive", outcome: "ok", count: 1, message: null } : { id, name: id, outcome: "failed", count: 0, message: "This source refused the API key. Check it in Settings." };
+    },
     listPlugins: async () => [
       { id: "example", name: "Example search", version: "1.0.0", kinds: ["search"], permissions: { net: ["*"], fs: [] }, enabled: settings.plugins.includes("example"), problem: null },
       { id: "old", name: "Old plugin", version: "0.3.0", kinds: ["search"], permissions: { net: [], fs: [] }, enabled: false, problem: "It was made for plugin protocol 2, and this Drift speaks 1." },

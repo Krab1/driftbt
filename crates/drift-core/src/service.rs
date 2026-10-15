@@ -122,6 +122,18 @@ impl Service {
         Ok(search::search_all(&providers, &q, search::DEFAULT_TIMEOUT).await)
     }
 
+    /// Asks one configured source a sample question so Settings can say whether it answers.
+    pub async fn test_search_source(&self, id: &str) -> Result<search::SourceStatus, ApiError> {
+        let providers = {
+            let s = self.settings.lock().unwrap();
+            search::config::build_providers(&s.search, &self.secrets)
+        };
+        let p = providers.into_iter().find(|p| p.id() == id).ok_or_else(|| ApiError::new("search", "Save the source and turn it on first, then test it."))?;
+        let q = SearchQuery { text: "test".into(), limit: 1 };
+        let mut report = search::search_all(&[p], &q, search::DEFAULT_TIMEOUT).await;
+        Ok(report.sources.remove(0))
+    }
+
     pub fn list_plugins(&self) -> Vec<crate::plugins::PluginInfo> {
         self.plugins.list(&self.settings.lock().unwrap().plugins)
     }

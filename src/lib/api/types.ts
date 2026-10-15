@@ -359,6 +359,8 @@ export interface Api {
   search(text: string): Promise<SearchReport>;
   /** Ids of search sources that have an API key saved. The keys themselves never reach the UI. */
   searchKeysSet(): Promise<string[]>;
+  /** Asks one source a sample question; the result says whether it answered. */
+  testSearchSource(id: string): Promise<SourceStatus>;
   listPlugins(): Promise<PluginInfo[]>;
   /** An empty key removes it. The source must already be saved in settings. */
   setSearchKey(id: string, key: string): Promise<void>;

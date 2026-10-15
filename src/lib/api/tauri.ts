@@ -70,6 +70,7 @@ export const tauriApi: Api = {
   createPlaylist: (id) => call("create_playlist", { id }),
   search: (text) => call("search_torrents", { text }),
   searchKeysSet: () => call("search_keys_set"),
+  testSearchSource: (id) => call("test_search_source", { id }),
   listPlugins: () => call("list_plugins"),
   setSearchKey: (id, key) => call("set_search_key", { id, key }),
   getSettings: () => call("get_settings"),

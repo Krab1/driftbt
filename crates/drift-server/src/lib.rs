@@ -124,6 +124,7 @@ pub fn router(shared: S) -> Router {
         .route("/filter/update", post(filter_update))
         .route("/search", post(search))
         .route("/search/keys", get(search_keys))
+        .route("/search/test/{id}", post(test_search_source))
         .route("/plugins", get(plugins))
         .route("/search/keys/{id}", put(set_search_key))
         .route("/events", get(events))
@@ -302,6 +303,10 @@ async fn search(State(s): State<S>, Json(b): Json<SearchBody>) -> Res<SearchRepo
     Ok(Json(s.svc.search(&b.text).await?))
 }
 
+async fn test_search_source(State(s): State<S>, Path(id): Path<String>) -> Res<drift_core::search::SourceStatus> {
+    Ok(Json(s.svc.test_search_source(&id).await?))
+}
+
 async fn plugins(State(s): State<S>) -> Json<Vec<drift_core::plugins::PluginInfo>> {
     Json(s.svc.list_plugins())
 }
@@ -454,6 +459,8 @@ mod tests {
 
         let (st, e) = call(&app, "POST", "/api/search", Some(TOKEN), Some(serde_json::json!({ "text": "ubuntu" }))).await;
         assert_eq!((st, e["code"].as_str()), (StatusCode::BAD_REQUEST, Some("no_sources")));
+        let (st, e) = call(&app, "POST", "/api/search/test/not-saved", Some(TOKEN), None).await;
+        assert_eq!((st, e["code"].as_str()), (StatusCode::BAD_REQUEST, Some("search")), "an unknown or switched-off source is a plain error");
         std::fs::remove_dir_all(dir).ok();
     }
 }

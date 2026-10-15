@@ -224,6 +224,7 @@ export const httpApi: Api = {
   setSettings: (s) => call("PUT", "/settings", s),
   search: (text) => call("POST", "/search", { text }),
   searchKeysSet: () => call("GET", "/search/keys"),
+  testSearchSource: (id) => call("POST", `/search/test/${enc(id)}`),
   listPlugins: () => call("GET", "/plugins"),
   setSearchKey: (id, key) => call("PUT", `/search/keys/${enc(id)}`, { key }),
   onSnapshot: on<Torrent[]>("snapshot"),

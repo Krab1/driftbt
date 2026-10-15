@@ -367,6 +367,7 @@ fn main() {
             commands::update_ip_lists,
             commands::search_torrents,
             commands::search_keys_set,
+            commands::test_search_source,
             commands::list_plugins,
             commands::set_search_key,
             commands::set_caption_rect,
