@@ -13,7 +13,7 @@ Scope control: anything not here needs approval. "Engine" = comes from librqbit;
 | Search box filters the list | Ours | Client-side, instant |
 | File selection before and after adding | Engine | Tree with checkboxes, size per file. A file you skip is never downloaded; the few hundred KB it can share with a picked neighbour go into a sparse file that takes almost no disk, also after a move to another drive |
 | Download folder + per-add override | Ours | Free-space check before start |
-| Global speed limits | Engine | Toggle + values in the status bar |
+| Global speed limits | Engine | Status-bar menu: Off, three presets that show their values, or Custom (download and upload, KB/s or MB/s); the Speed tab in Settings holds the same values and the schedule |
 | Session persistence across restarts and crashes | Engine | |
 | Detail panel: files, peers, trackers, overview | Ours | Live, selected torrent only |
 | Completion notification + "open folder" | Ours | Native toast |

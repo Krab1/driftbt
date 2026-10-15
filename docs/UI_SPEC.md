@@ -5,14 +5,14 @@ Build with the `ui-ux-pro-max` skill as the base, `taste-skill:minimalist-ui` fo
 
 ## Layout (desktop, min window 900×560)
 ```
-┌ top bar: logo · search · [Add] · settings ───────────────┐
+┌ top bar: settings (gear) · search · [Add] ───────────────┐
 ├ rail 168px ┬ list (virtualised) ──────────────────────────┤
 │ All        │ Name+progress │ Size │ Speed │ ETA │ ⋯      │
 │ Downloading│ …                                            │
 │ Seeding    ├ detail panel (resizable, collapsible) ───────┤
 │ Paused     │ Overview · Files · Peers · Trackers          │
 │ Categories │                                              │
-├ status bar: ↓ speed · ↑ speed · limit toggles · DHT ──────┤
+├ status bar: ↓ speed · ↑ speed · speed-limit menu · DHT ──────┤
 ```
 Window frame: custom title bar integrated with the top bar (Tauri decorations off), draggable region, native caption buttons feel (Windows 11 snap layouts must still work).
 

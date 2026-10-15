@@ -19,6 +19,10 @@
   ];
 
   const stored = () => {
+    // Asked for a particular tab (the status bar's "Edit the schedule"): go there, but don't make it the new default.
+    const wanted = ui.settingsTab as Tab | null;
+    ui.settingsTab = null;
+    if (wanted && tabs.some((x) => x.key === wanted)) return wanted;
     try {
       // A tab that no longer exists (the old Search tab) falls back to the first one.
       const t = localStorage.getItem("drift.settingsTab") as Tab;

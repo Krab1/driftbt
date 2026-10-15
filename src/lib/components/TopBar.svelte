@@ -14,9 +14,7 @@
 </script>
 
 <header data-tauri-drag-region>
-  <div class="logo" aria-hidden="true" data-tauri-drag-region>
-    <svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" fill="none" stroke="var(--accent)" stroke-width="3" /><circle cx="12" cy="12" r="2.6" fill="var(--accent)" /></svg>
-  </div>
+  <button class="btn ghost icon gear" aria-label="Settings" title="Settings" onclick={() => ui.openSettings()}><Icon name="gear" size={18} /></button>
   <label class="search">
     <Icon name="search" />
     <input
@@ -31,7 +29,6 @@
   </label>
   <button class="btn" onclick={() => (ui.searchOpen = true)} title="Search for torrents (Ctrl+Shift+F)"><Icon name="search" />Find online</button>
   <button class="btn primary" onclick={() => ui.openAdd()}><Icon name="plus" />Add torrent</button>
-  <button class="btn ghost icon" aria-label="Settings" onclick={() => (ui.settingsOpen = true)}><Icon name="sliders" size={18} /></button>
   {#if api.chrome}<WindowControls />{/if}
 </header>
 
@@ -44,10 +41,13 @@
     padding: 0 12px;
     border-bottom: 1px solid var(--border);
   }
-  .logo {
-    display: grid;
-    place-items: center;
-    width: 28px;
+  .gear {
+    width: 32px;
+    height: 32px;
+    color: var(--text-secondary);
+  }
+  .gear:hover {
+    color: var(--text-primary);
   }
   .search {
     flex: 1;

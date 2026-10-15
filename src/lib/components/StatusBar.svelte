@@ -3,11 +3,13 @@
   import { torrents } from "../stores/torrents.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
+  import LimitMenu from "./LimitMenu.svelte";
   import Sparkline from "./Sparkline.svelte";
 
   const queued = $derived(torrents.all.filter((t) => t.state === "queued").length);
   const s = $derived(ui.settings);
-  const hasValues = $derived(!!s && (s.down_limit_kib > 0 || s.up_limit_kib > 0));
+  let limitOpen = $state(false);
+  let limitBtn = $state<HTMLButtonElement>();
   const label = $derived.by(() => {
     if (ui.limits.scheduled) {
       const part = (bps: number | null, arrow: string) => (bps ? `${arrow} ${formatBytes(bps)}/s` : "");
@@ -18,23 +20,24 @@
     return `Limit ${[part(s.down_limit_kib, "↓"), part(s.up_limit_kib, "↑")].filter(Boolean).join(" ")}`;
   });
 
-  function toggleLimit() {
-    if (!s) return;
-    // A scheduled slot is in charge right now; the switch would change nothing visible, so show where it is set.
-    if (ui.limits.scheduled) return void (ui.settingsOpen = true);
-    // Turning limits on without any value would do nothing; send the user to set one.
-    if (!s.limits_enabled && !hasValues) ui.settingsOpen = true;
-    else ui.saveSettings({ limits_enabled: !s.limits_enabled });
-  }
 </script>
 
 <footer>
   <span class="num" title="Total download speed"><Icon name="down" size={13} /> {formatSpeed(torrents.totals.down)}</span>
   <span class="num" title="Total upload speed"><Icon name="up" size={13} /> {formatSpeed(torrents.totals.up)}</span>
   <Sparkline down={torrents.history.map((h) => h.d)} up={torrents.history.map((h) => h.u)} label="Transfer speed over the last two minutes: download in blue, upload in green" />
-  <button class="lim" class:on={s?.limits_enabled || ui.limits.scheduled} role="switch" aria-checked={(s?.limits_enabled || ui.limits.scheduled) ?? false} aria-label="Speed limit" onclick={toggleLimit}>
-    <span class="dot" aria-hidden="true"></span>{label}
+  <button
+    bind:this={limitBtn}
+    class="lim"
+    class:on={s?.limits_enabled || ui.limits.scheduled}
+    aria-haspopup="dialog"
+    aria-expanded={limitOpen}
+    title="Choose a speed limit"
+    onclick={() => (limitOpen = !limitOpen)}
+  >
+    <span class="dot" aria-hidden="true"></span>{label}<Icon name="chevronUp" size={12} />
   </button>
+  {#if limitOpen && limitBtn}<LimitMenu anchor={limitBtn} onclose={() => (limitOpen = false)} />{/if}
   <button class="lim" onclick={() => (ui.ratioOpen = true)}>Ratios</button>
   <span class="end num">{torrents.counts.all} {torrents.counts.all === 1 ? "torrent" : "torrents"} · {torrents.counts.downloading - queued} active{#if queued}{" · "}{queued} queued{/if}</span>
 </footer>

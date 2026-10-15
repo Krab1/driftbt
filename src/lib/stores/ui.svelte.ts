@@ -48,6 +48,12 @@ class Ui {
 
   removeTarget = $state<{ id: string; name: string } | null>(null);
   settingsOpen = $state(false);
+  /** A tab the settings dialog should open on (consumed when it opens). */
+  settingsTab = $state<string | null>(null);
+  openSettings(tab?: string) {
+    this.settingsTab = tab ?? null;
+    this.settingsOpen = true;
+  }
   goalTarget = $state<{ id: string; name: string } | null>(null);
   tagTarget = $state<{ id: string; name: string } | null>(null);
   paletteOpen = $state(false);
