@@ -775,6 +775,135 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// Four files in two folders, two picked: only those come down; a deleted picked file is fetched again after a
+    /// recheck, and the files that were never picked stay absent throughout.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn only_picked_files_download_and_a_recheck_refetches_a_deleted_one_but_not_the_skipped() {
+        let root = scratch("pick-recheck");
+        let (seed_dir, dl) = (root.join("seed"), root.join("dl"));
+        let content = seed_dir.join("pack");
+        std::fs::create_dir_all(content.join("docs")).unwrap();
+        std::fs::create_dir_all(content.join("media")).unwrap();
+        std::fs::create_dir_all(&dl).unwrap();
+        // Each file is a whole number of 64 KiB pieces, so no piece straddles two files and "skipped" means untouched.
+        let body = |salt: u8| -> Vec<u8> { (0..256 * 1024u32).map(|i| (i.wrapping_mul(31) >> 3) as u8 ^ salt).collect() };
+        let names = ["docs/a.bin", "docs/b.bin", "media/c.bin", "media/d.bin"];
+        for (n, name) in names.iter().enumerate() {
+            std::fs::write(content.join(name), body(n as u8 + 1)).unwrap();
+        }
+        let torrent = create_torrent(&content, CreateTorrentOptions { piece_length: Some(64 * 1024), ..Default::default() }, &BlockingSpawner::new(1))
+            .await
+            .unwrap()
+            .as_bytes()
+            .unwrap();
+        let loopback: SocketAddr = ([127, 0, 0, 1], 0).into();
+        let seeder_opts = SessionOptions {
+            dht: None,
+            disable_local_service_discovery: true,
+            listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }),
+            ..Default::default()
+        };
+        let seeder = Session::new_with_opts(seed_dir.clone(), seeder_opts).await.unwrap();
+        seeder
+            .add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, ..Default::default() }))
+            .await
+            .unwrap();
+        let seeder_port = seeder.listen_addr().expect("seeder listens").port();
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+
+        // Pick a.bin (docs) and c.bin (media); skip b.bin and d.bin.
+        let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
+        req.peers = vec![SocketAddr::from(([127, 0, 0, 1], seeder_port))];
+        req.only_files = Some(vec![0, 2]);
+        let id = engine.add(req).await.unwrap();
+
+        let wait = |what: &'static str, f: Box<dyn Fn(&TorrentDetails) -> bool + Send>| {
+            let engine = &engine;
+            let id = id.clone();
+            async move {
+                let deadline = Instant::now() + Duration::from_secs(60);
+                loop {
+                    let d = engine.details(&id).await.unwrap();
+                    if f(&d) {
+                        return d;
+                    }
+                    assert!(Instant::now() < deadline, "timed out waiting for: {what}; files: {:?}", d.files.iter().map(|f| (f.path.clone(), f.selected, f.progress_bytes)).collect::<Vec<_>>());
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        };
+        let full = |f: &FileDetails| f.progress_bytes == f.size && f.size > 0;
+        let picked = [0usize, 2];
+
+        // 1) the picked files complete and are on disk with the right bytes
+        let d = wait("picked files complete", Box::new(move |d| picked.iter().all(|&i| d.files.get(i).is_some_and(full)))).await;
+        assert_eq!(d.files.len(), 4);
+        for (i, f) in d.files.iter().enumerate() {
+            assert_eq!(f.path.replace('\\', "/"), names[i].to_string(), "file order");
+            assert_eq!(f.selected, picked.contains(&i));
+        }
+        let on_disk = |i: usize| dl.join("pack").join(names[i]);
+        // What is physically in the download folder: every file with its size, how many bytes are non-zero, and
+        // whether the name is there at all.
+        let dump = |stage: &str| {
+            println!("--- {stage} ---");
+            for (i, n) in names.iter().enumerate() {
+                match std::fs::read(on_disk(i)) {
+                    Ok(b) => println!("  {n:<12} on disk, size {:>7}, non-zero bytes {:>7}, matches original: {}", b.len(), b.iter().filter(|&&x| x != 0).count(), b == body(i as u8 + 1)),
+                    Err(_) => println!("  {n:<12} NOT on disk"),
+                }
+            }
+        };
+        for &i in &picked {
+            assert_eq!(std::fs::read(on_disk(i)).unwrap(), body(i as u8 + 1), "{} content", names[i]);
+        }
+        // 2) the skipped files got nothing: no progress, and no data on disk
+        let skipped_untouched = |dd: &TorrentDetails| {
+            for i in [1usize, 3] {
+                assert_eq!(dd.files[i].progress_bytes, 0, "{} must not download", names[i]);
+                let p = on_disk(i);
+                assert!(!p.exists() || std::fs::read(&p).unwrap().iter().all(|&b| b == 0), "{} has data on disk", p.display());
+            }
+        };
+        skipped_untouched(&d);
+        dump("1. after first download (picked: a.bin, c.bin)");
+        let seeding_state = engine.details(&id).await.unwrap().stats.state;
+        println!("after first download: state {seeding_state:?}, skipped on disk: {:?}", [1usize, 3].map(|i| on_disk(i).exists()));
+
+        // Delete one picked file (c.bin), pause so the files are closed, and recheck.
+        engine.pause(&id).await.unwrap();
+        dump("2. before delete");
+        std::fs::remove_file(on_disk(2)).unwrap();
+        dump("3. after deleting c.bin, before recheck");
+        engine.recheck(&id).await.unwrap();
+        let d = wait("recheck sees c.bin missing", Box::new(|d| d.files.get(2).is_some_and(|f| f.progress_bytes == 0) && d.files.first().is_some_and(full))).await;
+        dump("4. after recheck, paused");
+        assert!(!on_disk(2).exists() || std::fs::metadata(on_disk(2)).unwrap().len() == 0 || d.files[2].progress_bytes == 0);
+        assert!(d.files[0].selected && !d.files[1].selected && d.files[2].selected && !d.files[3].selected, "selection survives the recheck");
+
+        // 3) resume: the deleted file comes back whole; 4) the skipped ones are still not downloaded
+        engine.resume(&id).await.unwrap();
+        // A recheck re-adds the torrent and, with no DHT or tracker on loopback, nothing tells it where a seeder is
+        // (a real swarm finds peers again by itself), so a second seeder dials the downloader instead.
+        let dl_port = engine.network_status().await.unwrap().listen_port.expect("downloader listens");
+        let dialer_opts = SessionOptions { dht: None, disable_local_service_discovery: true, listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }), ..Default::default() };
+        let dialer = Session::new_with_opts(seed_dir.clone(), dialer_opts).await.unwrap();
+        dialer
+            .add_torrent(
+                AddTorrent::from_bytes(torrent.clone()),
+                Some(AddTorrentOptions { overwrite: true, initial_peers: Some(vec![SocketAddr::from(([127, 0, 0, 1], dl_port))]), ..Default::default() }),
+            )
+            .await
+            .unwrap();
+        let d = wait("c.bin downloaded again", Box::new(|d| d.files.get(2).is_some_and(full) && d.files.first().is_some_and(full))).await;
+        assert_eq!(std::fs::read(on_disk(2)).unwrap(), body(3), "c.bin is back, byte for byte");
+        assert_eq!(std::fs::read(on_disk(0)).unwrap(), body(1));
+        skipped_untouched(&d);
+        assert!(d.files[0].selected && !d.files[1].selected && d.files[2].selected && !d.files[3].selected);
+        dump("5. after resume and re-download");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     /// Moving a finished torrent: files change folder, the torrent is checked there and is seeding again.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn relocate_moves_the_files_and_the_torrent_follows() {
