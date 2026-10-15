@@ -58,6 +58,8 @@ export interface PeerInfo {
   transport: string;
   downloaded_bytes: number;
   uploaded_bytes: number;
+  /** Two-letter country code, when known. */
+  country: string | null;
 }
 
 export interface TorrentDetails {

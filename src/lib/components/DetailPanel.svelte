@@ -4,6 +4,7 @@
   import { torrents } from "../stores/torrents.svelte";
   import { ui, errorText, type DetailTab } from "../stores/ui.svelte";
   import FileTree from "./FileTree.svelte";
+  import Flag from "./Flag.svelte";
   import Icon from "./Icon.svelte";
 
   const tabs: { key: DetailTab; label: string }[] = [
@@ -173,7 +174,7 @@
             <thead><tr><th>Address</th><th>Client</th><th>Via</th><th class="r">Downloaded</th><th class="r">Uploaded</th></tr></thead>
             <tbody>
               {#each d.peers as p (p.addr)}
-                <tr><td class="mono">{p.addr}</td><td>{p.client ?? "—"}</td><td>{p.transport.toUpperCase() || "—"}</td><td class="r num">{formatBytes(p.downloaded_bytes)}</td><td class="r num">{formatBytes(p.uploaded_bytes)}</td></tr>
+                <tr><td class="mono"><span class="addr"><Flag code={p.country} />{p.addr}</span></td><td>{p.client ?? "—"}</td><td>{p.transport.toUpperCase() || "—"}</td><td class="r num">{formatBytes(p.downloaded_bytes)}</td><td class="r num">{formatBytes(p.uploaded_bytes)}</td></tr>
               {/each}
             </tbody>
           </table>
@@ -334,6 +335,11 @@
     font-size: 11px;
     color: var(--text-muted);
     padding: 6px 8px 6px 0;
+  }
+  .addr {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
   }
   td {
     padding: 4px 8px 4px 0;

@@ -162,6 +162,7 @@
             {/each}
           </div>
         </div>
+        <small class="credit">Country flags: flag-icons (MIT). Peer countries: IP Geolocation by DB-IP.com (CC BY 4.0), built into the app and used offline.</small>
       {:else if tab === "speed"}
         <div class="field">
           <span>Speed limits</span>

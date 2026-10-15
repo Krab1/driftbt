@@ -4,6 +4,7 @@ pub mod background;
 pub mod engine;
 pub mod errors;
 pub mod events;
+pub mod geoip;
 pub mod guard;
 pub mod ipfilter;
 pub mod ipfilter_source;

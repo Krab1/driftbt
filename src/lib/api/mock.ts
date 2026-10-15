@@ -176,6 +176,7 @@ export function createMockApi(count = 40): Api {
         transport: i % 4 === 0 ? "utp" : "tcp",
         downloaded_bytes: Math.floor(t.progress_bytes / (i + 2)),
         uploaded_bytes: Math.floor(t.uploaded_bytes / (i + 3)),
+        country: ["US", "NL", "DE", "BR", "JP", null][i % 6],
       })),
       trackers: ["https://tracker.example.org/announce", "udp://open.example.net:1337/announce"],
       save_path: settings.download_dir ?? "",

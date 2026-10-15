@@ -219,6 +219,7 @@ impl TorrentEngine for FakeEngine {
                 transport: if i % 4 == 0 { "utp" } else { "tcp" }.to_string(),
                 downloaded_bytes: e.stats.progress_bytes / (u64::from(i) + 2),
                 uploaded_bytes: e.stats.uploaded_bytes / (u64::from(i) + 3),
+                country: Some(["US", "NL", "DE", "BR", "JP"][(i % 5) as usize].to_string()),
             })
             .collect();
         Ok(TorrentDetails {

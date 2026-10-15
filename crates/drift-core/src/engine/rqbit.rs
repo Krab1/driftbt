@@ -56,6 +56,7 @@ pub struct RqbitEngine {
     limits: Mutex<Limits>,
     /// Serialises session rebuilds.
     rebuild: tokio::sync::Mutex<()>,
+    geo: crate::geoip::GeoIp,
 }
 
 /// `file:///C:/dir/a%20b.txt`, which is how the engine takes a list from disk.
@@ -100,6 +101,7 @@ impl RqbitEngine {
             cfg: Mutex::new(cfg),
             limits: Mutex::new(Limits::default()),
             rebuild: tokio::sync::Mutex::new(()),
+            geo: crate::geoip::GeoIp::embedded(),
         })
     }
 
@@ -289,6 +291,7 @@ impl TorrentEngine for RqbitEngine {
                     .peers
                     .into_iter()
                     .map(|(addr, p)| PeerInfo {
+                        country: self.geo.country_of_addr(&addr),
                         addr,
                         client: p.client_name,
                         transport: p.conn_kind.map(|k| format!("{k:?}").to_lowercase()).unwrap_or_default(),

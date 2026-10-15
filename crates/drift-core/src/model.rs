@@ -102,6 +102,8 @@ pub struct PeerInfo {
     pub transport: String,
     pub downloaded_bytes: u64,
     pub uploaded_bytes: u64,
+    /// Two-letter country code when the address is in the built-in database.
+    pub country: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
