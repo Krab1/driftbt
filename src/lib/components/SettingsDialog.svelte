@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, remote, type Theme } from "../api";
+  import { parsePack, warnings } from "../themepack";
   import { auth } from "../stores/auth.svelte";
   import { ui } from "../stores/ui.svelte";
   import Dialog from "./Dialog.svelte";
@@ -42,6 +43,25 @@
     e.preventDefault();
     pick(tabs[(n + tabs.length) % tabs.length].key);
     queueMicrotask(() => document.getElementById(`stab-${tab}`)?.focus());
+  }
+
+  let packInput = $state<HTMLInputElement>();
+  let packNote = $state("");
+  let packBad = $state(false);
+  let packWarnings = $state<string[]>([]);
+  async function importPack(e: Event & { currentTarget: HTMLInputElement }) {
+    const file = e.currentTarget.files?.[0];
+    e.currentTarget.value = "";
+    packWarnings = [];
+    if (!file) return;
+    const { pack, error } = parsePack(file.size > 40_000 ? "x".repeat(40_000) : await file.text());
+    packBad = !pack;
+    if (!pack) {
+      packNote = error ?? "That file can't be used.";
+      return;
+    }
+    packNote = (await ui.saveSettings({ theme_pack: pack })) ? `Using "${pack.name}".` : "";
+    packWarnings = warnings(pack);
   }
 
   const themes: { key: Theme; label: string }[] = [
@@ -177,6 +197,20 @@
             {/each}
           </div>
         </div>
+        <div class="field">
+          <span>Theme pack</span>
+          <div class="row">
+            {#if s.theme_pack}
+              <small>{s.theme_pack.name}</small>
+              <button class="btn" onclick={() => ui.saveSettings({ theme_pack: null })}>Remove</button>
+            {:else}
+              <button class="btn" onclick={() => packInput?.click()}>Import a theme pack…</button>
+            {/if}
+            <input bind:this={packInput} type="file" accept=".json,application/json" hidden onchange={importPack} />
+          </div>
+          {#if packNote}<small role="status" class:bad={packBad}>{packNote}</small>{/if}
+          {#each packWarnings as w}<small class="warn">{w}</small>{/each}
+        </div>
         <small class="credit">Country flags: flag-icons (MIT). Peer countries: IP Geolocation by DB-IP.com (CC BY 4.0), built into the app and used offline.</small>
       {:else if tab === "speed"}
         <div class="field">
@@ -274,6 +308,9 @@
   }
   .bad {
     color: var(--danger-fg);
+  }
+  .warn {
+    color: var(--warning);
   }
   .folder {
     display: flex;

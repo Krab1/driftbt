@@ -28,9 +28,22 @@ Rule of thumb: if it needs engine internals or runs every tick, it is a built-in
 | `postprocess` | v1 | Receives a "torrent completed" event (name, save folder, files, category, tags). Returns actions: move the torrent to a folder (through the engine, so seeding carries on) or show a notice. It may do its own work while it runs; renaming files inside a torrent isn't an action because it would break the data being seeded. |
 | `notifier` | later | Webhooks, Telegram, etc. on events. |
 | `blocklist` | later | Supplies and refreshes IP lists. |
-| Theme packs | data only | JSON of design tokens. **No code**, no process, so no permissions needed. |
+| Theme packs | data only | JSON of colour tokens. **No code**, no process, so no permissions needed. See below. |
 
 Not plugin territory: engine, queue, UI components. UI never runs plugin code.
+
+## Theme packs
+
+A pack is one JSON file (see `docs/theme-pack-example.json`), imported in Settings → General → Theme pack:
+
+```json
+{ "drift_theme": 1, "name": "Midnight", "base": "dark", "tokens": { "bg": "#0b1020", "accent": "#7c9cff" } }
+```
+
+- `base` (`light` or `dark`) is the built-in theme the pack builds on; colours the pack leaves out come from it. An active pack replaces the Light/Dark/System choice until it is removed.
+- `tokens` may only name the colour tokens of `tokens.css` (`bg`, `surface-1`, `surface-2`, `hover`, `selected`, `text-primary`, `text-secondary`, `text-muted`, `border`, `border-strong`, `accent`, `accent-fg`, `on-accent`, `success`, `warning`, `danger`, `danger-fg`, `neutral`, `track`), each with a `#rgb`, `#rrggbb`, `#rrggbbaa` or `rgb()/rgba()` value. Fonts, sizes and anything else are refused, as is any unknown key, a file over 20 KB or invalid JSON; the message says why.
+- A pack that is accepted but has text under 4.5:1 contrast against its background (main, secondary and faint text, links, error text, text on accent buttons) is used anyway and lists each weak pair. Colours with transparency aren't measured.
+- The pack is stored in `settings.json` (`theme_pack`); there's no folder, process or registry entry. `src/lib/themepack.ts` does the checking.
 
 ## Layout and manifest
 

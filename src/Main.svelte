@@ -22,6 +22,7 @@
   import DetailPanel from "./lib/components/DetailPanel.svelte";
   import { torrents } from "./lib/stores/torrents.svelte";
   import { ui, errorText } from "./lib/stores/ui.svelte";
+  import { applyPack } from "./lib/themepack";
 
   let topbar = $state<ReturnType<typeof TopBar>>();
   let dragging = $state(false);
@@ -70,8 +71,12 @@
   // Theme: "system" removes the attribute so the OS setting applies.
   $effect(() => {
     const theme = ui.settings?.theme ?? "system";
-    if (theme === "system") document.documentElement.removeAttribute("data-theme");
+    const pack = ui.settings?.theme_pack ?? null;
+    // A pack brings its own light or dark base and its own colours.
+    if (pack) document.documentElement.dataset.theme = pack.base;
+    else if (theme === "system") document.documentElement.removeAttribute("data-theme");
     else document.documentElement.dataset.theme = theme;
+    applyPack(pack);
   });
 
   function isTyping(t: EventTarget | null) {

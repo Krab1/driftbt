@@ -15,6 +15,15 @@ pub enum Theme {
     Dark,
 }
 
+/// A colour theme imported from a file. Plain data: the UI checks every value and only ever sets colour tokens.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThemePack {
+    pub name: String,
+    /// `light` or `dark`: which built-in theme the missing colours come from.
+    pub base: String,
+    pub tokens: std::collections::BTreeMap<String, String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -22,6 +31,8 @@ pub struct Settings {
     /// `None` until the app resolves the OS Downloads folder on first run.
     pub download_dir: Option<PathBuf>,
     pub theme: Theme,
+    /// Replaces the colours of the chosen theme when set.
+    pub theme_pack: Option<ThemePack>,
     /// Global speed limits apply only while this is on, so the values survive being toggled off.
     pub limits_enabled: bool,
     /// KiB/s; 0 means unlimited for that direction.
@@ -95,6 +106,7 @@ impl Default for Settings {
             schema: CURRENT_SCHEMA,
             download_dir: None,
             theme: Theme::System,
+            theme_pack: None,
             limits_enabled: false,
             down_limit_kib: 0,
             up_limit_kib: 0,

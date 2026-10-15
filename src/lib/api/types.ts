@@ -260,6 +260,8 @@ export interface Settings {
   schema: number;
   download_dir: string | null;
   theme: Theme;
+  /** Imported colours that replace the theme's; null = none. */
+  theme_pack: { name: string; base: "light" | "dark"; tokens: Record<string, string> } | null;
   limits_enabled: boolean;
   /** KiB/s; 0 = unlimited. */
   down_limit_kib: number;

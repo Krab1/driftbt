@@ -1,0 +1,16 @@
+{
+  "drift_theme": 1,
+  "name": "Midnight",
+  "base": "dark",
+  "tokens": {
+    "bg": "#0b1020",
+    "surface-1": "#111833",
+    "surface-2": "#18214a",
+    "text-primary": "#eef1ff",
+    "text-secondary": "#b4bde6",
+    "text-muted": "#98a3d6",
+    "accent": "#7c9cff",
+    "accent-fg": "#9bb2ff",
+    "on-accent": "#0b1020"
+  }
+}

@@ -94,6 +94,7 @@ export function createMockApi(count = 40): Api {
     schema: 1,
     download_dir: "C:\\Users\\you\\Downloads",
     theme: "system",
+    theme_pack: null,
     limits_enabled: false,
     down_limit_kib: 0,
     up_limit_kib: 0,
