@@ -59,7 +59,7 @@ impl From<ApiError> for HttpError {
     fn from(e: ApiError) -> Self {
         let status = match e.code {
             "not_found" => StatusCode::NOT_FOUND,
-            "invalid_input" | "no_playlist" | "no_media" | "search" | "no_sources" | "plugin" => StatusCode::BAD_REQUEST,
+            "invalid_input" | "no_playlist" | "no_media" | "search" | "no_sources" | "plugin" | "registry_off" => StatusCode::BAD_REQUEST,
             "blocked" => StatusCode::CONFLICT,
             "timeout" => StatusCode::GATEWAY_TIMEOUT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,

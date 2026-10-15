@@ -16,6 +16,8 @@ use serde_json::{json, Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
+pub mod registry;
+
 use crate::search::config::Secrets;
 use crate::search::{normalize_hash, ProviderError, SearchProvider, SearchQuery, SearchResult};
 
@@ -328,6 +330,9 @@ pub struct PluginInfo {
     pub fields: Vec<Field>,
     pub values: Map<String, Value>,
     pub secrets_set: Vec<String>,
+    /// A version installed from the registry that takes over at the next start, and the version a rollback would bring back.
+    pub pending: Option<String>,
+    pub previous: Option<String>,
 }
 
 struct Entry {
@@ -339,6 +344,9 @@ struct Entry {
 pub struct Host {
     entries: Vec<Entry>,
     cfg: Arc<Config>,
+    dir: PathBuf,
+    /// Plugins whose registry update arrived at this start and asks for more access (or is new): off until approved.
+    needs_approval: Vec<String>,
 }
 
 fn safe_id(id: &str) -> bool {
@@ -371,19 +379,23 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
 
 impl Host {
     pub fn empty() -> Self {
-        Self { entries: Vec::new(), cfg: Arc::new(Config { path: PathBuf::new(), values: Default::default(), secrets: Secrets::open(PathBuf::new()) }) }
+        Self { entries: Vec::new(), cfg: Arc::new(Config { path: PathBuf::new(), values: Default::default(), secrets: Secrets::open(PathBuf::new()) }), dir: PathBuf::new(), needs_approval: Vec::new() }
     }
 
     /// The plugins under `<data>/plugins`, with default limits and logs in `<data>/plugin-logs`.
     pub fn at(data_dir: &Path) -> Arc<Self> {
-        Arc::new(Self::load(&data_dir.join("plugins"), &data_dir.join("plugin-logs"), Limits::default()))
+        // Updates and rollbacks chosen last time take over now, before anything is running.
+        let needs_approval = registry::apply_pending(&data_dir.join("plugins"));
+        let mut host = Self::load(&data_dir.join("plugins"), &data_dir.join("plugin-logs"), Limits::default());
+        host.needs_approval = needs_approval;
+        Arc::new(host)
     }
 
     /// Reads every `<dir>/<id>/plugin.json`. Broken plugins are listed with the reason instead of being dropped.
     pub fn load(dir: &Path, logs: &Path, limits: Limits) -> Self {
         let mut entries = Vec::new();
         let cfg = Arc::new(Config::open(dir));
-        let Ok(rd) = std::fs::read_dir(dir) else { return Self { entries, cfg } };
+        let Ok(rd) = std::fs::read_dir(dir) else { return Self { entries, cfg, dir: dir.to_path_buf(), needs_approval: Vec::new() } };
         let mut dirs: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect();
         dirs.sort();
         for d in dirs {
@@ -392,17 +404,22 @@ impl Host {
             let m: Manifest = match serde_json::from_slice(crate::jsonfile::strip_bom(&bytes)) {
                 Ok(m) => m,
                 Err(_) => {
-                    let info = PluginInfo { id: folder.clone(), name: folder, version: String::new(), kinds: vec![], permissions: Permissions::default(), enabled: false, problem: Some("Its plugin.json can't be read.".into()), fields: vec![], values: Map::new(), secrets_set: vec![] };
+                    let info = PluginInfo { id: folder.clone(), name: folder, version: String::new(), kinds: vec![], permissions: Permissions::default(), enabled: false, problem: Some("Its plugin.json can't be read.".into()), fields: vec![], values: Map::new(), secrets_set: vec![], pending: None, previous: None };
                     entries.push(Entry { plugin: None, info });
                     continue;
                 }
             };
             let problem = check(&m, &d).err();
-            let info = PluginInfo { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), kinds: m.kinds.clone(), permissions: m.permissions.clone(), enabled: false, problem: problem.clone(), fields: m.settings.clone(), values: Map::new(), secrets_set: vec![] };
+            let info = PluginInfo { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), kinds: m.kinds.clone(), permissions: m.permissions.clone(), enabled: false, problem: problem.clone(), fields: m.settings.clone(), values: Map::new(), secrets_set: vec![], pending: None, previous: None };
             let plugin = problem.is_none().then(|| Plugin::new(m.clone(), d.clone(), logs.join(format!("{}.log", m.id)), limits, cfg.clone()));
             entries.push(Entry { plugin, info });
         }
-        Self { entries, cfg }
+        Self { entries, cfg, dir: dir.to_path_buf(), needs_approval: Vec::new() }
+    }
+
+    /// Plugins that came in through the registry at this start and must be approved again before they run.
+    pub fn needs_approval(&self) -> &[String] {
+        &self.needs_approval
     }
 
     pub fn list(&self, enabled: &[String]) -> Vec<PluginInfo> {
@@ -414,6 +431,8 @@ impl Host {
                 if let Some(p) = &e.plugin {
                     i.values = self.cfg.values(&p.manifest);
                 }
+                i.pending = registry::pending_version(&self.dir, &i.id);
+                i.previous = registry::previous_version(&self.dir, &i.id);
                 i.secrets_set = i.fields.iter().filter(|f| f.kind == "secret" && !self.cfg.secret(&i.id, &f.key).is_empty()).map(|f| f.key.clone()).collect();
                 if let Some(p) = &e.plugin {
                     // `try_lock`: a plugin in the middle of a call is by definition not switched off.

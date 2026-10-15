@@ -139,6 +139,7 @@ async fn run() -> Result<(), String> {
         plugins: drift_core::plugins::Host::at(&data_dir),
         data_dir,
     });
+    svc.switch_off_unapproved_plugins();
     let (tx, _) = broadcast::channel::<Event>(16);
     let shared = Arc::new(Shared { svc, token: token.clone(), events: tx.clone(), guard: Mutex::new(GuardStatus { state: drift_core::guard::Verdict::Off, paused: 0 }), ui_dir: args.ui_dir.clone() });
 

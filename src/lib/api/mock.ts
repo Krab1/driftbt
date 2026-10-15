@@ -116,6 +116,7 @@ export function createMockApi(count = 40): Api {
     vpn_guard: { enabled: false, adapter: null, auto_resume: true },
     search: { archive_org: true, torznab: [] },
     plugins: [],
+    plugin_registry: false,
     categories: [
       { name: "Linux", save_path: "D:\Torrents\Linux" },
       { name: "Docs", save_path: null },
@@ -414,9 +415,23 @@ export function createMockApi(count = 40): Api {
         ],
         values: { ...pluginValues },
         secrets_set: [...pluginSecrets],
+        pending: null,
+        previous: "0.9.0",
       },
-      { id: "old", name: "Old plugin", version: "0.3.0", kinds: ["search"], permissions: { net: [], fs: [] }, enabled: false, problem: "It was made for plugin protocol 2, and this Drift speaks 1.", fields: [], values: {}, secrets_set: [] },
+      { id: "old", name: "Old plugin", version: "0.3.0", kinds: ["search"], permissions: { net: [], fs: [] }, enabled: false, problem: "It was made for plugin protocol 2, and this Drift speaks 1.", fields: [], values: {}, secrets_set: [], pending: null, previous: null },
     ],
+    pluginOffers: async () => {
+      if (!settings.plugin_registry) throw { code: "registry_off", message: "Online plugin lookup is switched off. Turn it on first." };
+      await new Promise((r) => setTimeout(r, 400));
+      return [
+        { id: "example", name: "Example search", summary: "A tiny sample source.", version: "1.1.0", changelog: "Faster results.", installed: "1.0.0" },
+        { id: "nyaa-like", name: "Anime tracker search", summary: "Searches a public anime tracker.", version: "0.4.0", changelog: "First release.", installed: null },
+      ];
+    },
+    installPlugin: async (_id, _version) => {
+      await new Promise((r) => setTimeout(r, 500));
+    },
+    rollbackPlugin: async () => {},
     setPluginSettings: async (_id, values) => {
       pluginValues = { ...values };
     },

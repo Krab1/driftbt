@@ -61,6 +61,8 @@ pub struct Settings {
     pub search: crate::search::config::SearchSettings,
     /// Ids of the plugins the user has turned on.
     pub plugins: Vec<String>,
+    /// Off by default: Drift only contacts the plugin registry (github.com) when this is on.
+    pub plugin_registry: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -117,6 +119,7 @@ impl Default for Settings {
             vpn_guard: crate::guard::VpnGuard::default(),
             search: Default::default(),
             plugins: Vec::new(),
+            plugin_registry: false,
         }
     }
 }

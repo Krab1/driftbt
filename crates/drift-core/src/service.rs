@@ -134,6 +134,63 @@ impl Service {
         Ok(report.sources.remove(0))
     }
 
+    fn plugins_dir(&self) -> std::path::PathBuf {
+        self.data_dir.join("plugins")
+    }
+
+    /// Switches off plugins that a registry update just brought in or gave more access, so they run only after
+    /// the user turns them on again and sees the permission prompt. Call once, right after building the service.
+    pub fn switch_off_unapproved_plugins(&self) {
+        let ids = self.plugins.needs_approval();
+        if ids.is_empty() {
+            return;
+        }
+        let mut s = self.settings.lock().unwrap();
+        let before = s.plugins.len();
+        s.plugins.retain(|p| !ids.contains(p));
+        if s.plugins.len() != before {
+            let _ = self.store.save(&s);
+        }
+    }
+
+    /// The registry's signed index, fetched only when the user has opted in.
+    async fn registry_index(&self) -> Result<crate::plugins::registry::Index, ApiError> {
+        use crate::plugins::registry;
+        if !self.settings.lock().unwrap().plugin_registry {
+            return Err(ApiError::new("registry_off", "Online plugin lookup is switched off. Turn it on first."));
+        }
+        registry::fetch_index(registry::INDEX_URL, registry::PUBKEY).await.map_err(registry_error)
+    }
+
+    /// Plugins the registry offers, each marked with the version installed now.
+    pub async fn plugin_offers(&self) -> Result<Vec<crate::plugins::registry::Offer>, ApiError> {
+        let index = self.registry_index().await?;
+        let installed = self.list_plugins().into_iter().map(|p| (p.id, p.version)).collect();
+        Ok(crate::plugins::registry::offers(&index, &installed))
+    }
+
+    /// Downloads, verifies and parks a plugin (or its update). It takes over at the next start.
+    /// `version` is the one the user was shown; if the list has moved on, nothing is installed.
+    pub async fn install_plugin(&self, id: &str, version: &str) -> Result<(), ApiError> {
+        use crate::plugins::registry;
+        let index = self.registry_index().await?;
+        let (_, v) = registry::pick(&index, id).ok_or_else(|| registry_error(registry::RegistryError::NotFound))?;
+        if v.version != version {
+            return Err(ApiError::new("plugin", "The plugin list changed since you looked. Check again."));
+        }
+        // Never move a plugin backwards from here (an old signed list stays valid forever); rollback is its own action.
+        if self.list_plugins().iter().any(|p| p.id == id && !registry::is_newer(&v.version, &p.version)) {
+            return Err(ApiError::new("plugin", "That version is already installed, or an older one."));
+        }
+        let bytes = registry::download(v).await.map_err(registry_error)?;
+        registry::stage(&self.plugins_dir(), id, v, &bytes).map_err(registry_error)
+    }
+
+    /// Parks the version that was replaced last time; it comes back at the next start.
+    pub fn rollback_plugin(&self, id: &str) -> Result<(), ApiError> {
+        crate::plugins::registry::stage_previous(&self.plugins_dir(), id).map_err(registry_error)
+    }
+
     pub async fn set_plugin_settings(&self, id: &str, values: serde_json::Map<String, serde_json::Value>) -> Result<(), ApiError> {
         self.plugins.set_values(id, values).await.map_err(|m| ApiError::new("plugin", &m))
     }
@@ -173,6 +230,10 @@ impl Service {
             ApiError::new("network", "Couldn't apply the IP filter. Your previous network settings are still in use.")
         })
     }
+}
+
+fn registry_error(e: crate::plugins::registry::RegistryError) -> ApiError {
+    ApiError::new("plugin", &e.to_string())
 }
 
 /// Writes `<save folder>/<name>.m3u8` for a multi-file torrent. Returns the path, or `None` when the

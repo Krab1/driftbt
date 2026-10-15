@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, type PluginInfo } from "../api";
+  import { api, type PluginInfo, type PluginOffer } from "../api";
   import { ui } from "../stores/ui.svelte";
 
   const s = $derived(ui.settings!);
@@ -46,6 +46,50 @@
     await load();
   }
 
+  let offers = $state<PluginOffer[] | null>(null);
+  let looking = $state(false);
+  let busy = $state("");
+
+  async function lookup() {
+    looking = true;
+    try {
+      offers = await api.pluginOffers();
+    } catch (e) {
+      offers = null;
+      ui.fail(e);
+    }
+    looking = false;
+  }
+
+  async function setOnline(on: boolean) {
+    await ui.saveSettings({ plugin_registry: on });
+    if (!on) offers = null;
+  }
+
+  async function install(o: PluginOffer) {
+    if (!confirm(`Download ${o.name} ${o.version}?\n\nDrift checks it against the signed plugin list before keeping it. It starts working after you restart Drift, and a new or updated plugin that asks for more access stays off until you turn it on again.`)) return;
+    busy = o.id;
+    try {
+      await api.installPlugin(o.id, o.version);
+      ui.toast(`${o.name} ${o.version} is ready. Restart Drift to start using it.`);
+    } catch (e) {
+      ui.fail(e);
+    }
+    busy = "";
+    await load();
+  }
+
+  async function rollback(p: PluginInfo) {
+    if (!confirm(`Go back to ${p.name} ${p.previous}? It takes effect when you restart Drift.`)) return;
+    try {
+      await api.rollbackPlugin(p.id);
+      ui.toast(`${p.name} ${p.previous} comes back after you restart Drift.`);
+    } catch (e) {
+      ui.fail(e);
+    }
+    await load();
+  }
+
   async function showLog(p: PluginInfo) {
     try {
       const text = await api.pluginLog(p.id);
@@ -85,6 +129,8 @@
           {:else}
             <small>Talks to: {p.permissions.net.length ? net(p) : "nothing"}</small>
           {/if}
+          {#if p.pending}<small class="note">Version {p.pending} is ready and takes over when you restart Drift.</small>{/if}
+          {#if p.previous && !p.pending}<small>Earlier version {p.previous} is kept. <button class="link" onclick={() => rollback(p)}>Go back to it</button></small>{/if}
           {#if p.enabled || !p.problem}
             <details class="more">
               <summary>{p.fields.length ? "Settings and log" : "Log"}</summary>
@@ -119,6 +165,28 @@
     {:else}
       {#if loaded}<small>No plugins installed.</small>{/if}
     {/each}
+    <div class="online">
+      <label class="check"><input type="checkbox" checked={s.plugin_registry} onchange={(e) => setOnline(e.currentTarget.checked)} /> Look for plugins and updates online <small>contacts github.com when you ask</small></label>
+      {#if s.plugin_registry}<button class="btn" disabled={looking} onclick={lookup}>{looking ? "Looking…" : offers ? "Check again" : "Check now"}</button>{/if}
+    </div>
+    {#if offers}
+      {#each offers as o (o.id)}
+        <div class="item">
+          <div class="meta">
+            <div class="nm">{o.name} <small>{o.version}{#if o.installed}, you have {o.installed}{/if}</small></div>
+            {#if o.summary}<small>{o.summary}</small>{/if}
+            {#if o.changelog}<small>What's new: {o.changelog}</small>{/if}
+          </div>
+          {#if o.installed === o.version}
+            <small>Up to date</small>
+          {:else}
+            <button class="btn" disabled={busy === o.id} onclick={() => install(o)}>{busy === o.id ? "Downloading…" : o.installed ? "Update" : "Install"}</button>
+          {/if}
+        </div>
+      {:else}
+        <small>The registry has no plugins for this version of Drift yet.</small>
+      {/each}
+    {/if}
     <small>
       A plugin is a separate program Drift runs for you, for example another search source. Put its folder in <code>plugins</code> inside Drift's data folder and restart Drift. Plugins can only
       answer questions; they can't add or control torrents.
@@ -159,6 +227,15 @@
     min-width: 0;
     display: grid;
     gap: 2px;
+  }
+  .online {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .note {
+    color: var(--accent-fg);
   }
   .more {
     margin-top: 4px;

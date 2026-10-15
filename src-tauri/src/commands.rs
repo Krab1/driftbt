@@ -212,6 +212,21 @@ pub async fn test_search_source(state: State<'_, AppState>, id: String) -> ApiRe
 }
 
 #[tauri::command]
+pub async fn plugin_offers(state: State<'_, AppState>) -> ApiResult<Vec<drift_core::plugins::registry::Offer>> {
+    state.svc.plugin_offers().await
+}
+
+#[tauri::command]
+pub async fn install_plugin(state: State<'_, AppState>, id: String, version: String) -> ApiResult<()> {
+    state.svc.install_plugin(&id, &version).await
+}
+
+#[tauri::command]
+pub fn rollback_plugin(state: State<'_, AppState>, id: String) -> ApiResult<()> {
+    state.svc.rollback_plugin(&id)
+}
+
+#[tauri::command]
 pub async fn set_plugin_settings(state: State<'_, AppState>, id: String, values: serde_json::Map<String, serde_json::Value>) -> ApiResult<()> {
     state.svc.set_plugin_settings(&id, values).await
 }

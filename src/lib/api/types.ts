@@ -146,6 +146,19 @@ export interface PluginInfo {
   fields: PluginField[];
   values: Record<string, string | number | boolean>;
   secrets_set: string[];
+  /** A version from the registry that takes over at the next start, and the version a rollback would bring back. */
+  pending: string | null;
+  previous: string | null;
+}
+
+/** A plugin the registry offers: its newest version that works with this Drift. */
+export interface PluginOffer {
+  id: string;
+  name: string;
+  summary: string;
+  version: string;
+  changelog: string;
+  installed: string | null;
 }
 
 export interface PluginField {
@@ -281,6 +294,8 @@ export interface Settings {
   search: SearchSettings;
   /** Ids of the plugins that are turned on. */
   plugins: string[];
+  /** Whether Drift may contact the plugin registry (github.com). */
+  plugin_registry: boolean;
 }
 
 /** Already plain-language; show `message` as is. */
@@ -373,6 +388,12 @@ export interface Api {
   /** Asks one source a sample question; the result says whether it answered. */
   testSearchSource(id: string): Promise<SourceStatus>;
   listPlugins(): Promise<PluginInfo[]>;
+  /** Needs `plugin_registry` on. */
+  pluginOffers(): Promise<PluginOffer[]>;
+  /** Downloads and verifies a plugin; it takes over at the next start. */
+  installPlugin(id: string, version: string): Promise<void>;
+  /** Brings back the version that was replaced last time, at the next start. */
+  rollbackPlugin(id: string): Promise<void>;
   setPluginSettings(id: string, values: Record<string, string | number | boolean>): Promise<void>;
   /** An empty value removes the secret. */
   setPluginSecret(id: string, key: string, value: string): Promise<void>;

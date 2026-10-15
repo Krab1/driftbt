@@ -19,6 +19,10 @@ tokio = { version = "1.53.3", features = ["rt-multi-thread", "macros", "sync", "
 zip = { version = "9.0.3", default-features = false, features = ["deflate"] }
 futures-util = { version = "0.3.34", default-features = false, features = ["alloc"] }
 quick-xml = "0.42.0"
+# Plugin registry: verify the signed index (minisign, the format Drift's own updates use), check each download's SHA-256, decode base64.
+minisign-verify = "0.3"
+sha2 = "0.10"
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = ["Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Foundation", "Win32_NetworkManagement_Ndis", "Win32_System_JobObjects", "Win32_Security"] }

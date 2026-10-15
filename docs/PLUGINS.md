@@ -75,8 +75,16 @@ Manifest permissions (`net` host patterns, `fs` paths) are shown to the user on 
 
 ## Registry and updates
 
-- Registry = a static signed `index.json` (plugin id → versions → download URL, sha256, min_app, changelog), hosted on GitHub releases/pages. The app only contacts it if the user opts in to plugin updates.
-- Install/update: download → verify sha256 and Ed25519 signature → unpack to a staging folder → atomic rename → keep the previous version for one-click rollback.
+- Registry = a static `registry/index.json` in the Drift repo (served from raw.githubusercontent.com), with a detached minisign signature `index.json.sig` made with the same key that signs Drift's own updates (`~/.tauri/drift.key`; the public key is baked into the app). Shape: `{"version":1,"plugins":[{"id","name","summary","versions":[{"version","url","sha256","min_app","api","changelog"}]}]}`. `url` must be https (zip with `plugin.json` at its root, hosted e.g. as a GitHub release asset). The signature covers the hashes, so one signature protects every download.
+- The app contacts the registry only when Settings → Plugins → "Look for plugins and updates online" is on (off by default) and the user clicks Check, Install or Update. Nothing runs in the background.
+- Install/update: download (https only, size-capped) → check sha256 against the signed index → unpack with path checks into `<plugins>/.staging/<id>` → check the manifest is the promised id and version and loadable. The live folder is never touched while Drift runs. At the next start `apply_pending` moves the live folder to `<plugins>/.previous/<id>` and the staged one into place; if that fails half way the live version is put back and the update waits for the next start.
+- Rollback = stage `.previous/<id>` again; the swap at the next start keeps the newer one as the new "previous".
+- Installing doesn't turn a plugin on. A plugin that is new, or whose update asks for more `net`/`fs` access than the version it replaces, is switched off when it takes over (`switch_off_unapproved_plugins`) and must be turned on again, which shows the permission prompt. An unpacked folder is checked again before it is swapped in; one that doesn't load is deleted, never swapped in.
+- Zip entries may only have plain names: no `..`, drive letters or `:` (alternate streams), reserved device names, trailing dots or spaces, or characters Windows forbids; at most 1000 files and 128 MB unpacked. An id that differs from an installed plugin's folder only in letter case is refused.
+- Install and Update need the version the user was shown to still be the newest one, and never move a plugin to an older or equal version (an old signed index stays valid forever, so this is how a replayed index is kept from downgrading anyone). Rolling back is the only way to an older version. Known limit: a replayed old index can still hide a newer release until the real one is fetched again.
+- Installing is desktop-only. `drift-server` has no install, update or rollback routes, so a remote token can't bring new code onto the machine.
+- Publishing: edit `registry/index.json` (LF line endings; `.gitattributes` stops git changing them), upload the zip, then sign the index again:
+  `npx tauri signer sign -f %USERPROFILE%\.tauri\drift.key --password= registry\index.json` and commit both files. A unit test fails if the committed index doesn't verify.
 - The app updates separately from plugins. Compatibility is governed by `api` major and `min_app`.
 
 ## First-party plugins (dogfooding)

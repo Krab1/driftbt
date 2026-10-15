@@ -243,6 +243,7 @@ fn main() {
                 plugins: drift_core::plugins::Host::at(&data_dir),
                 data_dir: data_dir.clone(),
             });
+            svc.switch_off_unapproved_plugins();
             let svc_settings = svc.settings.clone();
             app.manage(AppState {
                 manager: manager.clone(),
@@ -369,6 +370,9 @@ fn main() {
             commands::search_keys_set,
             commands::test_search_source,
             commands::list_plugins,
+            commands::plugin_offers,
+            commands::install_plugin,
+            commands::rollback_plugin,
             commands::set_plugin_settings,
             commands::set_plugin_secret,
             commands::plugin_log,
