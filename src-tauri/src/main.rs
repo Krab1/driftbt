@@ -381,8 +381,11 @@ fn main() {
     app.run(|handle, event| {
         if let RunEvent::Exit = event {
             if let Some(rq) = handle.state::<AppState>().rqbit.clone() {
-                tauri::async_runtime::block_on(rq.shutdown());
+                // A stuck engine stop must not leave a hidden Drift running: give it a few seconds, then leave anyway.
+                let _ = tauri::async_runtime::block_on(tokio::time::timeout(std::time::Duration::from_secs(4), rq.shutdown()));
             }
+            // Open connections or helper threads can keep the process alive after the window is gone.
+            std::process::exit(0);
         }
     });
 }
