@@ -121,6 +121,11 @@
     if (t) ui.goalTarget = { id: t.id, name: t.name };
   }
 
+  function tags() {
+    close();
+    if (t) ui.tagTarget = { id: t.id, name: t.name };
+  }
+
   function remove() {
     close();
     if (t) ui.removeTarget = { id: t.id, name: t.name };
@@ -167,6 +172,7 @@
     </div>
   {/if}
   <hr />
+  <button role="menuitem" onclick={tags}><Icon name="file" />Tags…</button>
   <button role="menuitem" onclick={goal}><Icon name="clock" />Seeding goal…</button>
   <button role="menuitem" onclick={remove}><Icon name="trash" />Remove…</button>
 </div>

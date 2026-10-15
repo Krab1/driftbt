@@ -24,6 +24,7 @@ export const COLUMNS: Column[] = [
   { key: "ratio", label: "Ratio", width: "56px", text: (t) => ratio(t).toFixed(2) },
   { key: "peers", label: "Peers", width: "52px", text: (t) => String(t.peers_live) },
   { key: "category", label: "Category", width: "96px", text: (t) => t.category ?? "—" },
+  { key: "tags", label: "Tags", width: "120px", text: (t) => (t.tags.length ? t.tags.join(", ") : "—") },
   { key: "tracker", label: "Tracker", width: "132px", text: (t) => t.tracker ?? "—" },
 ];
 

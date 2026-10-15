@@ -25,3 +25,10 @@ test("sorts by name ignoring case, either direction", () => {
 test("torrents without an ETA sort last when ascending", () => {
   expect(visibleTorrents(all, "all", "", "eta", 1).map((x) => x.id)[0]).toBe("b");
 });
+
+test("tag filter keeps only torrents carrying that tag, and combines with state", () => {
+  const tagged = [{ ...all[0], tags: ["iso", "linux"] }, { ...all[1], tags: ["linux"] }, all[2]];
+  expect(visibleTorrents(tagged, "all", "", "name", 1, null, "linux").map((x) => x.id)).toEqual(["b", "a"]);
+  expect(visibleTorrents(tagged, "seeding", "", "name", 1, null, "linux").map((x) => x.id)).toEqual(["a"]);
+  expect(visibleTorrents(tagged, "all", "", "name", 1, null, null)).toHaveLength(3);
+});

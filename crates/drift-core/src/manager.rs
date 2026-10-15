@@ -74,6 +74,21 @@ fn now_secs() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+pub const MAX_TAGS: usize = 12;
+pub const MAX_TAG_LEN: usize = 32;
+
+fn clean_tags(tags: Vec<String>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for t in tags {
+        let t: String = t.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_TAG_LEN).collect();
+        if !t.is_empty() && !out.iter().any(|o| o.eq_ignore_ascii_case(&t) || o.to_lowercase() == t.to_lowercase()) {
+            out.push(t);
+        }
+    }
+    out.truncate(MAX_TAGS);
+    out
+}
+
 fn next_position(lib: &Library) -> u64 {
     lib.values().map(|m| m.position).max().map_or(1, |p| p + 1)
 }
@@ -257,7 +272,9 @@ impl Manager {
         self.with_meta(id, |m| m.category = category);
     }
 
+    /// Tags are trimmed, de-duplicated ignoring case, and limited in number and length.
     pub fn set_tags(&self, id: &TorrentId, tags: Vec<String>) {
+        let tags = clean_tags(tags);
         self.with_meta(id, |m| m.tags = tags);
     }
 
@@ -471,6 +488,15 @@ mod tests {
         let first = m.tick().await.unwrap()[0].finished_at;
         assert!(first.is_some());
         assert_eq!(m.tick().await.unwrap()[0].finished_at, first, "stays put on later ticks");
+    }
+
+    #[test]
+    fn tags_are_cleaned() {
+        let raw = vec![" iso ".into(), "ISO".into(), "".into(), "two  words".into(), "x".repeat(100)];
+        let c = clean_tags(raw);
+        assert_eq!(c[..2], ["iso".to_string(), "two words".to_string()]);
+        assert_eq!(c[2].len(), MAX_TAG_LEN);
+        assert_eq!(clean_tags((0..50).map(|i| format!("t{i}")).collect()).len(), MAX_TAGS);
     }
 
     #[tokio::test]

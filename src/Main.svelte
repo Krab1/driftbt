@@ -12,6 +12,7 @@
   import TorrentList from "./lib/components/TorrentList.svelte";
   import { api, type OpenPayload } from "./lib/api";
   import GoalDialog from "./lib/components/GoalDialog.svelte";
+  import TagsDialog from "./lib/components/TagsDialog.svelte";
   import UpdateBanner from "./lib/components/UpdateBanner.svelte";
   import GuardBanner from "./lib/components/GuardBanner.svelte";
   import Palette from "./lib/components/Palette.svelte";
@@ -143,6 +144,7 @@
 {#if ui.removeTarget}<RemoveDialog />{/if}
 {#if ui.settingsOpen}<SettingsDialog />{/if}
 {#if ui.goalTarget}<GoalDialog />{/if}
+{#if ui.tagTarget}<TagsDialog />{/if}
 {#if ui.paletteOpen}<Palette />{/if}
 {#if ui.ratioOpen}<RatioDialog />{/if}
 {#if ui.searchOpen}<SearchDialog />{/if}

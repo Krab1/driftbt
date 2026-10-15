@@ -9,13 +9,20 @@ class TorrentStore {
   query = $state("");
   /** null = all categories */
   category = $state<string | null>(null);
+  /** null = all tags */
+  tag = $state<string | null>(null);
   sortKey = $state<SortKey>("name");
   sortDir = $state<1 | -1>(1);
   selectedId = $state<string | null>(null);
   /** Total speeds, one sample per snapshot, newest last (about two minutes). */
   history = $state.raw<{ d: number; u: number }[]>([]);
 
-  visible = $derived(visibleTorrents(this.all, this.filter, this.query, this.sortKey, this.sortDir, this.category));
+  tagCounts = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (const t of this.all) for (const g of t.tags) m.set(g, (m.get(g) ?? 0) + 1);
+    return new Map([...m].sort((a, b) => a[0].localeCompare(b[0])));
+  });
+  visible = $derived(visibleTorrents(this.all, this.filter, this.query, this.sortKey, this.sortDir, this.category, this.tag !== null && this.tagCounts.has(this.tag) ? this.tag : null));
   counts = $derived({
     all: this.all.length,
     downloading: this.all.filter(matches.downloading).length,

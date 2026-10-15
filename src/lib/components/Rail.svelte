@@ -32,6 +32,18 @@
       {/each}
     </div>
   {/if}
+  {#if torrents.tagCounts.size}
+    <div class="group" id="tag-label">Tags</div>
+    <div role="group" aria-labelledby="tag-label" class="cats">
+      {#each [...torrents.tagCounts] as [tag, n] (tag)}
+        <button class="item" class:on={torrents.tag === tag} aria-pressed={torrents.tag === tag} title="{tag} ({n})" onclick={() => (torrents.tag = torrents.tag === tag ? null : tag)}>
+          <Icon name="tag" />
+          <span class="label">{tag}</span>
+          <span class="count num">{n}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
 </nav>
 
 <style>

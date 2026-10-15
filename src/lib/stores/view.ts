@@ -1,7 +1,7 @@
 import type { Torrent } from "../api/types";
 
 export type Filter = "all" | "downloading" | "seeding" | "paused" | "error";
-export type SortKey = "queue" | "name" | "progress" | "size" | "speed" | "eta" | "added" | "finished" | "uploaded" | "ratio" | "peers" | "category" | "tracker";
+export type SortKey = "queue" | "name" | "progress" | "size" | "speed" | "eta" | "added" | "finished" | "uploaded" | "ratio" | "peers" | "category" | "tracker" | "tags";
 
 export const matches: Record<Filter, (t: Torrent) => boolean> = {
   all: () => true,
@@ -27,12 +27,13 @@ const sortValue: Record<SortKey, (t: Torrent) => string | number> = {
   peers: (t) => t.peers_live,
   category: (t) => (t.category ?? "").toLowerCase(),
   tracker: (t) => (t.tracker ?? "").toLowerCase(),
+  tags: (t) => t.tags.join(" ").toLowerCase(),
 };
 
 /** `category`: null shows everything; a name shows only that category. */
-export function visibleTorrents(all: Torrent[], filter: Filter, query: string, key: SortKey, dir: 1 | -1, category: string | null = null): Torrent[] {
+export function visibleTorrents(all: Torrent[], filter: Filter, query: string, key: SortKey, dir: 1 | -1, category: string | null = null, tag: string | null = null): Torrent[] {
   const q = query.trim().toLowerCase();
-  const rows = all.filter((t) => matches[filter](t) && (category === null || t.category === category) && (!q || t.name.toLowerCase().includes(q)));
+  const rows = all.filter((t) => matches[filter](t) && (category === null || t.category === category) && (tag === null || t.tags.includes(tag)) && (!q || t.name.toLowerCase().includes(q)));
   const val = sortValue[key];
   return rows.sort((a, b) => {
     const x = val(a);

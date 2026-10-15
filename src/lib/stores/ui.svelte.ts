@@ -47,6 +47,7 @@ class Ui {
   removeTarget = $state<{ id: string; name: string } | null>(null);
   settingsOpen = $state(false);
   goalTarget = $state<{ id: string; name: string } | null>(null);
+  tagTarget = $state<{ id: string; name: string } | null>(null);
   paletteOpen = $state(false);
   ratioOpen = $state(false);
   searchOpen = $state(false);
