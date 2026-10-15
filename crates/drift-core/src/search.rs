@@ -50,6 +50,8 @@ pub enum ProviderError {
     BadResponse,
     #[error("This source isn't fully set up yet. {0}")]
     Config(String),
+    #[error("This plugin didn't answer. It may have crashed or been switched off.")]
+    Plugin,
 }
 
 #[async_trait]

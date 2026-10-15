@@ -112,14 +112,19 @@ fn create_main_window(app: &tauri::App, start_hidden: bool) -> tauri::Result<()>
 
 fn create_tray(app: &tauri::App) -> tauri::Result<()> {
     let show = MenuItem::with_id(app, "show", "Show Drift", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
     let mut tray = TrayIconBuilder::new()
         .tooltip("Drift")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "show" => show_main(app),
+            "settings" => {
+                show_main(app);
+                let _ = app.emit("open-settings", ());
+            }
             "quit" => app.exit(0),
             _ => {}
         })
@@ -235,6 +240,7 @@ fn main() {
                 store,
                 settings: settings.clone(),
                 secrets: drift_core::search::config::Secrets::open(data_dir.join("secrets.json")),
+                plugins: drift_core::plugins::Host::at(&data_dir),
                 data_dir: data_dir.clone(),
             });
             let svc_settings = svc.settings.clone();
@@ -359,6 +365,7 @@ fn main() {
             commands::update_ip_lists,
             commands::search_torrents,
             commands::search_keys_set,
+            commands::list_plugins,
             commands::set_search_key,
             commands::set_caption_rect,
             commands::check_update,

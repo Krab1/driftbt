@@ -57,6 +57,8 @@ pub struct Settings {
     pub watch_dir: Option<PathBuf>,
     pub vpn_guard: crate::guard::VpnGuard,
     pub search: crate::search::config::SearchSettings,
+    /// Ids of the plugins the user has turned on.
+    pub plugins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -111,6 +113,7 @@ impl Default for Settings {
             watch_dir: None,
             vpn_guard: crate::guard::VpnGuard::default(),
             search: Default::default(),
+            plugins: Vec::new(),
         }
     }
 }

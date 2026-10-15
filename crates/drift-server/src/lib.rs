@@ -122,6 +122,7 @@ pub fn router(shared: S) -> Router {
         .route("/filter/update", post(filter_update))
         .route("/search", post(search))
         .route("/search/keys", get(search_keys))
+        .route("/plugins", get(plugins))
         .route("/search/keys/{id}", put(set_search_key))
         .route("/events", get(events))
         .layer(middleware::from_fn_with_state(shared.clone(), require_token))
@@ -286,6 +287,10 @@ async fn search(State(s): State<S>, Json(b): Json<SearchBody>) -> Res<SearchRepo
     Ok(Json(s.svc.search(&b.text).await?))
 }
 
+async fn plugins(State(s): State<S>) -> Json<Vec<drift_core::plugins::PluginInfo>> {
+    Json(s.svc.list_plugins())
+}
+
 async fn search_keys(State(s): State<S>) -> Json<Vec<String>> {
     Json(s.svc.search_keys_set())
 }
@@ -348,6 +353,7 @@ mod tests {
             store: Arc::new(JsonFileStore::new(dir.join("settings.json"))),
             settings,
             secrets: Secrets::open(dir.join("secrets.json")),
+            plugins: drift_core::plugins::Host::at(&dir),
             data_dir: dir.clone(),
         });
         let (tx, _) = broadcast::channel(8);

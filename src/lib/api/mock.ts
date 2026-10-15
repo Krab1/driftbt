@@ -113,6 +113,7 @@ export function createMockApi(count = 40): Api {
     watch_dir: null,
     vpn_guard: { enabled: false, adapter: null, auto_resume: true },
     search: { archive_org: true, torznab: [] },
+    plugins: [],
     categories: [
       { name: "Linux", save_path: "D:\Torrents\Linux" },
       { name: "Docs", save_path: null },
@@ -376,6 +377,10 @@ export function createMockApi(count = 40): Api {
       };
     },
     searchKeysSet: async () => keys,
+    listPlugins: async () => [
+      { id: "example", name: "Example search", version: "1.0.0", kinds: ["search"], permissions: { net: ["*"], fs: [] }, enabled: settings.plugins.includes("example"), problem: null },
+      { id: "old", name: "Old plugin", version: "0.3.0", kinds: ["search"], permissions: { net: [], fs: [] }, enabled: false, problem: "It was made for plugin protocol 2, and this Drift speaks 1." },
+    ],
     setSearchKey: async (id, key) => {
       keys = key ? [...new Set([...keys, id])] : keys.filter((k) => k !== id);
     },

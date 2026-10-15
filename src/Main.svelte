@@ -39,6 +39,7 @@
     keep(api.onCompleted((c) => ui.toast(`${c.name} finished downloading`)));
     keep(api.onOpenSources(openSources));
     if (api.onUpdateAvailable) keep(api.onUpdateAvailable((u) => (ui.update = u)));
+    if (api.onOpenSettings) keep(api.onOpenSettings(() => (ui.settingsOpen = true)));
     keep(api.onShown(() => torrents.refresh().catch(() => {})));
     ui.loadSettings().then(() => ui.refreshLimits()).catch((e) => ui.toast(errorText(e), "error"));
     api.guardStatus().then((g) => (ui.guard = g)).catch(() => {});

@@ -6,15 +6,17 @@
   import Icon from "./Icon.svelte";
   import NetworkPane from "./NetworkPane.svelte";
   import SearchPane from "./SearchPane.svelte";
+  import PluginsPane from "./PluginsPane.svelte";
   import SchedulePane from "./SchedulePane.svelte";
 
-  type Tab = "general" | "speed" | "queue" | "network" | "search";
+  type Tab = "general" | "speed" | "queue" | "network" | "search" | "plugins";
   const tabs: { key: Tab; label: string }[] = [
     { key: "general", label: "General" },
     { key: "speed", label: "Speed" },
     { key: "queue", label: "Queue and seeding" },
     { key: "network", label: "Network" },
     { key: "search", label: "Search" },
+    { key: "plugins", label: "Plugins" },
   ];
 
   const stored = () => {
@@ -205,6 +207,8 @@
         </div>
       {:else if tab === "search"}
         <SearchPane />
+      {:else if tab === "plugins"}
+        <PluginsPane />
       {:else}
         <NetworkPane />
       {/if}

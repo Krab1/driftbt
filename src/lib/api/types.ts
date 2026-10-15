@@ -126,6 +126,17 @@ export interface SearchSettings {
   torznab: TorznabConfig[];
 }
 
+export interface PluginInfo {
+  id: string;
+  name: string;
+  version: string;
+  kinds: string[];
+  permissions: { net: string[]; fs: string[] };
+  enabled: boolean;
+  /** Why it can't be used; null when it is fine. */
+  problem: string | null;
+}
+
 export interface OpenPayload {
   magnets: string[];
   files: { name: string; bytes: number[] }[];
@@ -248,6 +259,8 @@ export interface Settings {
   watch_dir: string | null;
   vpn_guard: VpnGuardSettings;
   search: SearchSettings;
+  /** Ids of the plugins that are turned on. */
+  plugins: string[];
 }
 
 /** Already plain-language; show `message` as is. */
@@ -282,6 +295,8 @@ export interface Api {
   /** Downloads and installs the version found by the last check; the app restarts. */
   installUpdate?(): Promise<void>;
   onUpdateAvailable?(cb: (u: UpdateInfo) => void): Promise<() => void>;
+  /** The tray menu's Settings item (desktop only). */
+  onOpenSettings?(cb: () => void): Promise<() => void>;
   /** This app's version. */
   version?(): Promise<string>;
   chrome?: WindowChrome;
@@ -329,6 +344,7 @@ export interface Api {
   search(text: string): Promise<SearchReport>;
   /** Ids of search sources that have an API key saved. The keys themselves never reach the UI. */
   searchKeysSet(): Promise<string[]>;
+  listPlugins(): Promise<PluginInfo[]>;
   /** An empty key removes it. The source must already be saved in settings. */
   setSearchKey(id: string, key: string): Promise<void>;
   getSettings(): Promise<Settings>;

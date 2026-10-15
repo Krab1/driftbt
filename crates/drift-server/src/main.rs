@@ -136,6 +136,7 @@ async fn run() -> Result<(), String> {
         store,
         settings: settings.clone(),
         secrets: Secrets::open(data_dir.join("secrets.json")),
+        plugins: drift_core::plugins::Host::at(&data_dir),
         data_dir,
     });
     let (tx, _) = broadcast::channel::<Event>(16);

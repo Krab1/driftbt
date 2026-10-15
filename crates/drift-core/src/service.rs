@@ -21,6 +21,7 @@ pub struct Service {
     pub store: Arc<dyn SettingsStore>,
     pub settings: SharedSettings,
     pub secrets: Secrets,
+    pub plugins: Arc<crate::plugins::Host>,
     pub data_dir: PathBuf,
 }
 
@@ -109,12 +110,20 @@ impl Service {
     }
 
     pub async fn search(&self, text: &str) -> Result<SearchReport, ApiError> {
-        let providers = search::config::build_providers(&self.settings.lock().unwrap().search, &self.secrets);
+        let (mut providers, enabled) = {
+            let s = self.settings.lock().unwrap();
+            (search::config::build_providers(&s.search, &self.secrets), s.plugins.clone())
+        };
+        providers.extend(self.plugins.search_providers(&enabled));
         if providers.is_empty() {
             return Err(ApiError::new("no_sources", "No search sources are turned on. Add one in Settings."));
         }
         let q = SearchQuery { text: text.trim().chars().take(200).collect(), limit: 50 };
         Ok(search::search_all(&providers, &q, search::DEFAULT_TIMEOUT).await)
+    }
+
+    pub fn list_plugins(&self) -> Vec<crate::plugins::PluginInfo> {
+        self.plugins.list(&self.settings.lock().unwrap().plugins)
     }
 
     /// Ids of sources that have a key saved. The keys themselves never leave the backend.

@@ -222,6 +222,7 @@ export const httpApi: Api = {
   setSettings: (s) => call("PUT", "/settings", s),
   search: (text) => call("POST", "/search", { text }),
   searchKeysSet: () => call("GET", "/search/keys"),
+  listPlugins: () => call("GET", "/plugins"),
   setSearchKey: (id, key) => call("PUT", `/search/keys/${enc(id)}`, { key }),
   onSnapshot: on<Torrent[]>("snapshot"),
   pickFolder: async (current) => prompt("Path of the folder on the server", current ?? "")?.trim() || null,

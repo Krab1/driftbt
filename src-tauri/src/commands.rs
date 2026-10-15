@@ -197,6 +197,11 @@ pub async fn search_torrents(state: State<'_, AppState>, text: String) -> ApiRes
 }
 
 #[tauri::command]
+pub fn list_plugins(state: State<'_, AppState>) -> Vec<drift_core::plugins::PluginInfo> {
+    state.svc.list_plugins()
+}
+
+#[tauri::command]
 pub fn search_keys_set(state: State<'_, AppState>) -> Vec<String> {
     state.svc.search_keys_set()
 }

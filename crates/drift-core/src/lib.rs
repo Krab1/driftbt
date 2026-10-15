@@ -15,6 +15,7 @@ pub mod model;
 pub mod netctl;
 pub mod open_args;
 pub mod playlist;
+pub mod plugins;
 pub mod queue;
 pub mod rules;
 pub mod schedule;
