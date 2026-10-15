@@ -29,6 +29,9 @@ pub struct TorrentMeta {
     pub added_at: u64,
     /// Unix seconds when it was seen to complete.
     pub finished_at: Option<u64>,
+    /// This torrent's own speed limits in KiB/s; 0 = none.
+    pub limit_down_kib: u32,
+    pub limit_up_kib: u32,
 }
 
 pub type Library = BTreeMap<TorrentId, TorrentMeta>;

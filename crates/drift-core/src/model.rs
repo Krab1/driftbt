@@ -88,6 +88,9 @@ pub struct TorrentView {
     pub added_at: Option<u64>,
     /// Unix seconds. `None` while incomplete, and for torrents that finished before Drift tracked it.
     pub finished_at: Option<u64>,
+    /// This torrent's own speed limits in KiB/s; 0 = none. The overall limit still applies on top.
+    pub limit_down_kib: u32,
+    pub limit_up_kib: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

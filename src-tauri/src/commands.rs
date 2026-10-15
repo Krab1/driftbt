@@ -77,6 +77,12 @@ pub fn set_torrent_goal(state: State<'_, AppState>, id: TorrentId, goal: Option<
     state.manager.set_goal(&id, goal);
 }
 
+/// This torrent's own speed limits in KiB/s; 0 = none. The overall limit still applies on top.
+#[tauri::command]
+pub async fn set_torrent_limits(state: State<'_, AppState>, id: TorrentId, down_kib: u32, up_kib: u32) -> ApiResult<()> {
+    Ok(state.manager.set_torrent_limits(&id, down_kib, up_kib).await?)
+}
+
 #[tauri::command]
 pub async fn move_in_queue(state: State<'_, AppState>, id: TorrentId, to: Move) -> ApiResult<()> {
     Ok(state.manager.move_in_queue(&id, to).await?)

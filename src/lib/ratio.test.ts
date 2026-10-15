@@ -5,7 +5,7 @@ import { NO_TRACKER, ratioTable } from "./ratio";
 const GB = 1024 ** 3;
 const t = (id: string, tracker: string | null, size: number, uploaded: number, up = 0): Torrent => ({
   id, name: id, state: "seeding", error: null, total_bytes: size, progress_bytes: size, uploaded_bytes: uploaded, down_bps: 0, up_bps: up,
-  peers_live: 0, eta_secs: null, tracker, category: null, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null,
+  peers_live: 0, eta_secs: null, tracker, category: null, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null, limit_down_kib: 0, limit_up_kib: 0,
 });
 
 test("groups by tracker and computes ratio and the real upload still needed", () => {

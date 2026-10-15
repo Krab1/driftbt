@@ -111,6 +111,7 @@ pub fn router(shared: S) -> Router {
         .route("/torrents/{id}/category", put(set_category))
         .route("/torrents/{id}/tags", put(set_tags))
         .route("/torrents/{id}/goal", put(set_goal))
+        .route("/torrents/{id}/limits", put(set_torrent_limits))
         .route("/torrents/{id}/move", put(move_in_queue))
         .route("/torrents/{id}/files", put(set_files))
         .route("/torrents/{id}/details", get(details))
@@ -230,6 +231,17 @@ struct GoalBody {
 async fn set_goal(State(s): State<S>, Path(id): Path<String>, Json(b): Json<GoalBody>) -> Json<()> {
     s.svc.manager.set_goal(&TorrentId(id), b.goal);
     Json(())
+}
+
+#[derive(Deserialize)]
+struct TorrentLimitsBody {
+    down_kib: u32,
+    up_kib: u32,
+}
+
+async fn set_torrent_limits(State(s): State<S>, Path(id): Path<String>, Json(b): Json<TorrentLimitsBody>) -> Res<()> {
+    s.svc.manager.set_torrent_limits(&TorrentId(id), b.down_kib, b.up_kib).await?;
+    Ok(Json(()))
 }
 
 #[derive(Deserialize)]

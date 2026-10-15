@@ -63,6 +63,10 @@ pub trait TorrentEngine: Send + Sync {
     /// Replace the set of files to download.
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()>;
     async fn set_limits(&self, limits: Limits) -> Result<()>;
+    /// Limits for this torrent alone, on top of the overall ones: the slower of the two always wins. Setting the
+    /// same values again does nothing; a change restarts the torrent briefly, and the engine forgets them if it
+    /// rebuilds its session (callers set them again).
+    async fn set_torrent_limits(&self, id: &TorrentId, limits: Limits) -> Result<()>;
     /// Applies networking settings. Anything that changed restarts the engine's session, which briefly
     /// interrupts transfers; unchanged settings are a no-op.
     async fn set_network(&self, cfg: NetworkConfig) -> Result<()>;

@@ -20,6 +20,13 @@ pub type SharedSettings = Arc<Mutex<Settings>>;
 /// Metadata is saved at once when it changes shape, and at most this often for the seeding clock.
 const SAVE_EVERY_SECS: u64 = 30;
 const SEED_GOAL_NOTE: &str = "Seeding goal reached";
+/// Largest speed limit accepted, in KiB/s: the most the engine's 32-bit bytes-per-second can hold.
+const MAX_LIMIT_KIB: u32 = 4_000_000;
+
+fn kib_limits(down_kib: u32, up_kib: u32) -> Limits {
+    let bps = |kib: u32| (kib > 0).then(|| kib.min(MAX_LIMIT_KIB) * 1024);
+    Limits { down_bps: bps(down_kib), up_bps: bps(up_kib) }
+}
 
 /// Local time as (weekday 0 = Monday, minutes after midnight); injectable so schedules can be tested.
 pub type Clock = Arc<dyn Fn() -> (u8, u16) + Send + Sync>;
@@ -385,6 +392,27 @@ impl Manager {
         });
     }
 
+    /// This torrent's own speed limits in KiB/s (0 = none), on top of the overall ones. The engine restarts the
+    /// torrent briefly to take them; `tick` sets them again after anything that makes the engine forget (a restart).
+    pub async fn set_torrent_limits(&self, id: &TorrentId, down_kib: u32, up_kib: u32) -> Result<()> {
+        let (down, up) = (down_kib.min(MAX_LIMIT_KIB), up_kib.min(MAX_LIMIT_KIB));
+        // The stored value goes first, so a tick running meanwhile asks the engine for the new limits, not the old.
+        let before = self.state.lock().unwrap().lib.get(id).map(|m| (m.limit_down_kib, m.limit_up_kib));
+        self.with_meta(id, |m| {
+            m.limit_down_kib = down;
+            m.limit_up_kib = up;
+        });
+        if let Err(e) = self.engine.set_torrent_limits(id, kib_limits(down, up)).await {
+            let (d, u) = before.unwrap_or((0, 0));
+            self.with_meta(id, |m| {
+                m.limit_down_kib = d;
+                m.limit_up_kib = u;
+            });
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// Moves a downloading/queued torrent within the queue and applies the new order straight away.
     pub async fn move_in_queue(&self, id: &TorrentId, mv: Move) -> Result<()> {
         let list = self.engine.list().await?;
@@ -442,6 +470,8 @@ impl Manager {
                     note: moving.or(note),
                     added_at: meta.map(|m| m.added_at).filter(|&a| a > 0),
                     finished_at: meta.and_then(|m| m.finished_at),
+                    limit_down_kib: meta.map_or(0, |m| m.limit_down_kib),
+                    limit_up_kib: meta.map_or(0, |m| m.limit_up_kib),
                     stats,
                 }
             })
@@ -517,6 +547,19 @@ impl Manager {
             }
             (plan, goal_stopped)
         };
+
+        // The engine forgets per-torrent limits when it restarts; setting the same ones again is a no-op.
+        let limited: Vec<(TorrentId, Limits)> = {
+            let st = self.state.lock().unwrap();
+            list.iter()
+                // A torrent still fetching its details, or in error, can't be restarted with a limit yet.
+                .filter(|t| t.total_bytes > 0 && t.state != TorrentState::Error)
+                .filter_map(|t| st.lib.get(&t.id).filter(|m| m.limit_down_kib > 0 || m.limit_up_kib > 0).map(|m| (t.id.clone(), kib_limits(m.limit_down_kib, m.limit_up_kib))))
+                .collect()
+        };
+        for (id, limits) in limited {
+            let _ = self.engine.set_torrent_limits(&id, limits).await;
+        }
 
         for id in goal_stopped.iter().chain(plan.pause.iter()) {
             let _ = self.engine.pause(id).await;
@@ -612,6 +655,33 @@ mod tests {
         assert_eq!(engine.rechecked(), [id(1)]);
         assert_eq!(m.snapshot().await.unwrap()[0].category.as_deref(), Some("Linux"));
         assert!(matches!(m.recheck(&id(9)).await, Err(EngineError::NotFound)));
+    }
+
+    #[tokio::test]
+    async fn a_torrent_keeps_its_own_speed_limits_and_gets_them_back_after_an_engine_restart() {
+        let (engine, m, _) = setup(0);
+        m.add(mag(1), None, vec![]).await.unwrap();
+        m.add(mag(2), None, vec![]).await.unwrap();
+        m.set_torrent_limits(&id(1), 500, 0).await.unwrap();
+        let v = m.snapshot().await.unwrap();
+        assert_eq!((v[0].limit_down_kib, v[0].limit_up_kib), (500, 0));
+        assert_eq!((v[1].limit_down_kib, v[1].limit_up_kib), (0, 0), "other torrents are not touched");
+        assert_eq!(engine.torrent_limits(&id(1)), Limits { down_bps: Some(500 * 1024), up_bps: None });
+
+        // The engine forgets them when its session is rebuilt; the next tick puts them back, only for the torrent that has some.
+        engine.forget_torrent_limits();
+        m.tick().await.unwrap();
+        assert_eq!(engine.torrent_limits(&id(1)), Limits { down_bps: Some(500 * 1024), up_bps: None });
+        assert_eq!(engine.torrent_limits(&id(2)), Limits::default());
+
+        // Huge values are held to what the engine can take; zero on both takes the limits away.
+        m.set_torrent_limits(&id(1), u32::MAX, 10).await.unwrap();
+        assert_eq!(m.snapshot().await.unwrap()[0].limit_down_kib, 4_000_000);
+        m.set_torrent_limits(&id(1), 0, 0).await.unwrap();
+        engine.forget_torrent_limits();
+        m.tick().await.unwrap();
+        assert_eq!(engine.torrent_limits(&id(1)), Limits::default());
+        assert!(matches!(m.set_torrent_limits(&id(9), 100, 100).await, Err(EngineError::NotFound)));
     }
 
     #[tokio::test]

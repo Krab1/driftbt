@@ -1,7 +1,7 @@
 //! Adapter over `librqbit` 9.0.1. This is the ONLY file allowed to use librqbit (CLAUDE.md rule 2).
 
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::net::{Ipv6Addr, SocketAddr};
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -12,6 +12,7 @@ use std::time::Duration;
 use async_trait::async_trait;
 use librqbit::api::TorrentIdOrHash;
 use librqbit::http_api_types::PeerStatsFilter;
+use librqbit::limits::LimitsConfig;
 use librqbit::{
     AddTorrent, AddTorrentOptions, AddTorrentResponse, ConnectionOptions, ListenerOptions, ManagedTorrent, Session,
     SessionOptions, SessionPersistenceConfig, TorrentStatsState,
@@ -56,6 +57,9 @@ pub struct RqbitEngine {
     limits: Mutex<Limits>,
     /// Serialises session rebuilds.
     rebuild: tokio::sync::Mutex<()>,
+    /// Per-torrent speed limits in force, by info hash. librqbit only takes them when a torrent is added, so a change
+    /// re-adds the torrent; a rebuilt session forgets them (they come back when the caller sets them again).
+    torrent_limits: Mutex<HashMap<String, LimitsConfig>>,
     geo: crate::geoip::GeoIp,
 }
 
@@ -248,6 +252,7 @@ impl RqbitEngine {
             cfg: Mutex::new(cfg),
             limits: Mutex::new(Limits::default()),
             rebuild: tokio::sync::Mutex::new(()),
+            torrent_limits: Mutex::new(HashMap::new()),
             geo: crate::geoip::GeoIp::embedded(),
         })
     }
@@ -270,7 +275,7 @@ impl RqbitEngine {
         let h = self.handle(id)?;
         let (bytes, files) = h.with_metadata(|m| (m.torrent_bytes.to_vec(), m.file_infos.iter().map(|f| f.relative_filename.clone()).collect::<Vec<_>>())).map_err(backend)?;
         if bytes.is_empty() {
-            return Err(EngineError::Backend("torrent file bytes are not available".into()));
+            return Err(EngineError::Backend("The torrent's details haven't arrived yet. Try again in a moment.".into()));
         }
         Ok(Saved { hash: h.info_hash(), bytes, paused: stats_of(&h).state == TorrentState::Paused, only_files: h.only_files(), output: h.output_folder().to_path_buf(), files, name: h.name().unwrap_or_default() })
     }
@@ -282,10 +287,16 @@ impl RqbitEngine {
             overwrite: true,
             only_files: s.only_files,
             output_folder: Some(output.unwrap_or(s.output).to_string_lossy().into_owned()),
+            ratelimits: self.torrent_limits.lock().unwrap().get(&s.hash.as_string()).copied().unwrap_or_default(),
             ..Default::default()
         };
         self.session().add_torrent(AddTorrent::from_bytes(s.bytes), Some(opts)).await.map_err(backend)?;
         Ok(())
+    }
+
+    /// Where librqbit keeps which pieces a torrent already has, when the session is saved to disk.
+    fn resume_file(&self, hash: &librqbit::dht::Id20) -> Option<PathBuf> {
+        self.cfg.lock().unwrap().persistence_dir.as_ref().map(|d| d.join(format!("{}.bitv", hash.as_string())))
     }
 
     fn handle(&self, id: &TorrentId) -> Result<Arc<ManagedTorrent>> {
@@ -576,6 +587,32 @@ impl TorrentEngine for RqbitEngine {
         self.session().update_only_files(&h, &set).await.map_err(backend)
     }
 
+    async fn set_torrent_limits(&self, id: &TorrentId, limits: Limits) -> Result<()> {
+        let want = LimitsConfig { download_bps: limits.down_bps.and_then(NonZeroU32::new), upload_bps: limits.up_bps.and_then(NonZeroU32::new) };
+        // One change at a time, and never while the session is being rebuilt: the torrent would be added to a dead one.
+        let _one_at_a_time = self.rebuild.lock().await;
+        if self.torrent_limits.lock().unwrap().get(&id.0).copied().unwrap_or_default() == want {
+            return Ok(());
+        }
+        let saved = self.saved(id)?;
+        {
+            let mut map = self.torrent_limits.lock().unwrap();
+            if want == LimitsConfig::default() {
+                map.remove(&id.0);
+            } else {
+                map.insert(id.0.clone(), want);
+            }
+        }
+        // Taken when the torrent is added, so add it again: same files, same state. Deleting a torrent also deletes its
+        // resume data, and without it the whole torrent would be hashed again, so put that back before adding.
+        let resume = self.resume_file(&saved.hash).and_then(|p| std::fs::read(&p).ok().map(|bytes| (p, bytes)));
+        self.session().delete(TorrentIdOrHash::Hash(saved.hash), false).await.map_err(backend)?;
+        if let Some((path, bytes)) = resume {
+            let _ = std::fs::write(path, bytes);
+        }
+        self.add_saved(saved, None).await
+    }
+
     async fn set_limits(&self, limits: Limits) -> Result<()> {
         *self.limits.lock().unwrap() = limits;
         Self::apply_limits(&self.session(), limits);
@@ -610,12 +647,14 @@ impl TorrentEngine for RqbitEngine {
                 let restored = build_session(&old_cfg).await?;
                 Self::apply_limits(&restored, *self.limits.lock().unwrap());
                 *self.session.write().unwrap() = restored;
+                self.torrent_limits.lock().unwrap().clear();
                 return Err(e);
             }
         };
         Self::apply_limits(&session, *self.limits.lock().unwrap());
         *self.session.write().unwrap() = session;
         *self.cfg.lock().unwrap() = new_cfg;
+        self.torrent_limits.lock().unwrap().clear();
         Ok(())
     }
 
@@ -1097,6 +1136,85 @@ mod tests {
             assert!(used < 1_000_000, "the skipped file takes {used} bytes of disk for {} bytes of data", d.files[1].progress_bytes);
         }
         assert!(std::fs::metadata(&skipped).is_ok());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Downloads a 768 KiB torrent from a seeder over loopback with the given overall and per-torrent limits (bytes
+    /// per second) and says how long the transfer took.
+    async fn timed_download(name: &str, overall: Option<u32>, own: Option<u32>) -> Duration {
+        let root = scratch(name);
+        let (seed_dir, dl) = (root.join("seed"), root.join("dl"));
+        std::fs::create_dir_all(&seed_dir).unwrap();
+        std::fs::create_dir_all(&dl).unwrap();
+        let file = seed_dir.join("limited.bin");
+        std::fs::write(&file, payload().into_iter().take(768 * 1024).collect::<Vec<u8>>()).unwrap();
+        let torrent = create_torrent(&file, CreateTorrentOptions { piece_length: Some(64 * 1024), ..Default::default() }, &BlockingSpawner::new(1)).await.unwrap().as_bytes().unwrap();
+        let loopback: SocketAddr = ([127, 0, 0, 1], 0).into();
+        let seeder_opts = |l: SocketAddr| SessionOptions { dht: None, disable_local_service_discovery: true, listen: Some(ListenerOptions { listen_addr: l, ..Default::default() }), ..Default::default() };
+        let seeder = Session::new_with_opts(seed_dir.clone(), seeder_opts(loopback)).await.unwrap();
+        seeder.add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, ..Default::default() })).await.unwrap();
+
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+        engine.set_limits(Limits { down_bps: overall, up_bps: None }).await.unwrap();
+        let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
+        req.paused = true;
+        let id = engine.add(req).await.unwrap();
+        if own.is_some() {
+            engine.set_torrent_limits(&id, Limits { down_bps: own, up_bps: None }).await.unwrap();
+        }
+        // The torrent was added again to take its limit, which also forgets peers; a second seeder dials in instead.
+        let port = engine.network_status().await.unwrap().listen_port.expect("downloader listens");
+        let dialer = Session::new_with_opts(seed_dir.clone(), seeder_opts(loopback)).await.unwrap();
+        dialer
+            .add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, initial_peers: Some(vec![SocketAddr::from(([127, 0, 0, 1], port))]), ..Default::default() }))
+            .await
+            .unwrap();
+        let started = Instant::now();
+        engine.resume(&id).await.unwrap();
+        assert_eq!(state_after(&engine, &id, 90).await.0, TorrentState::Seeding, "{name} never finished");
+        let took = started.elapsed();
+        let _ = std::fs::remove_dir_all(&root);
+        took
+    }
+
+    /// A torrent's own limit slows that torrent, and the overall limit wins when it is the lower one: 20 MB/s for the
+    /// torrent under a 128 KB/s overall limit still goes at 128 KB/s.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_torrent_limit_slows_it_and_the_overall_limit_still_wins_when_lower() {
+        let free = timed_download("lim-free", None, None).await;
+        let own = timed_download("lim-own", None, Some(128 * 1024)).await;
+        let overall_wins = timed_download("lim-overall", Some(128 * 1024), Some(20 * 1024 * 1024)).await;
+        println!("unlimited {free:?}, own 128 KB/s {own:?}, overall 128 KB/s with own 20 MB/s {overall_wins:?}");
+        assert!(free < Duration::from_secs(3), "unlimited should be quick, took {free:?}");
+        assert!(own >= Duration::from_millis(3500), "128 KB/s on the torrent should take about 5 s for 768 KiB, took {own:?}");
+        assert!(overall_wins >= Duration::from_millis(3500), "the overall 128 KB/s must hold even though the torrent allows 20 MB/s, took {overall_wins:?}");
+    }
+
+    /// Changing a torrent's limit adds it to the engine again, and that must not throw away what the engine knows about
+    /// which pieces are done (deleting a torrent deletes that record, and without it the whole torrent is hashed again).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn changing_a_torrent_limit_keeps_the_record_of_finished_pieces() {
+        let root = scratch("limit-resume");
+        let (seed_dir, dl, state) = (root.join("seed"), root.join("dl"), root.join("state"));
+        for d in [&seed_dir, &dl, &state] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let sd = seeder(&seed_dir, None).await;
+        let engine = RqbitEngine::new(RqbitConfig { persistence_dir: Some(state.clone()), ..engine_cfg(&dl, None) }).await.unwrap();
+        let id = download_from(&engine, &sd).await;
+        assert_eq!(state_after(&engine, &id, 60).await.0, TorrentState::Seeding);
+        let record = state.join(format!("{}.bitv", id.0));
+        assert!(record.exists(), "the record of finished pieces is there before the change");
+
+        engine.set_torrent_limits(&id, Limits { down_bps: Some(1 << 20), up_bps: Some(1 << 20) }).await.unwrap();
+        assert!(record.exists(), "and still there after it");
+        assert!(std::fs::metadata(&record).unwrap().len() > 0);
+        assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding, "the torrent carries on seeding");
+        // The same limits again are a no-op; clearing them works too.
+        engine.set_torrent_limits(&id, Limits { down_bps: Some(1 << 20), up_bps: Some(1 << 20) }).await.unwrap();
+        engine.set_torrent_limits(&id, Limits::default()).await.unwrap();
+        assert!(record.exists());
+        assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding);
         let _ = std::fs::remove_dir_all(&root);
     }
 

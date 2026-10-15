@@ -183,6 +183,7 @@ export const httpApi: Api = {
   setCategory: (id, category) => call("PUT", `/torrents/${enc(id)}/category`, { category }),
   setTags: (id, tags) => call("PUT", `/torrents/${enc(id)}/tags`, { tags }),
   setGoal: (id, goal) => call("PUT", `/torrents/${enc(id)}/goal`, { goal }),
+  setTorrentLimits: (id, downKib, upKib) => call("PUT", `/torrents/${enc(id)}/limits`, { down_kib: downKib, up_kib: upKib }),
   moveInQueue: (id, to) => call("PUT", `/torrents/${enc(id)}/move`, { to }),
   pause: (id) => call("POST", `/torrents/${enc(id)}/pause`),
   resume: (id) => call("POST", `/torrents/${enc(id)}/resume`),

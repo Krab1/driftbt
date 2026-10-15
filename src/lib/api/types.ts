@@ -31,6 +31,9 @@ export interface Torrent extends TorrentStats {
   /** Unix seconds; null when unknown. */
   added_at: number | null;
   finished_at: number | null;
+  /** This torrent's own limits in KiB/s; 0 = none. The overall limit still applies on top. */
+  limit_down_kib: number;
+  limit_up_kib: number;
 }
 
 /** Stop seeding at this share ratio or after this many minutes, whichever comes first. */
@@ -350,6 +353,8 @@ export interface Api {
   setTags(id: string, tags: string[]): Promise<void>;
   /** null goes back to the default goal. */
   setGoal(id: string, goal: Goal | null): Promise<void>;
+  /** KiB/s per direction, 0 = no limit of its own. The torrent restarts briefly to take a change. */
+  setTorrentLimits(id: string, downKib: number, upKib: number): Promise<void>;
   moveInQueue(id: string, to: QueueMove): Promise<void>;
   setFiles(id: string, selected: number[]): Promise<void>;
   /** Choose which torrent's details are pushed (or null). Returns its current details at once. */

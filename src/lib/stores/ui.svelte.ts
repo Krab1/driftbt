@@ -55,6 +55,7 @@ class Ui {
     this.settingsOpen = true;
   }
   goalTarget = $state<{ id: string; name: string } | null>(null);
+  limitTarget = $state<{ id: string; name: string } | null>(null);
   tagTarget = $state<{ id: string; name: string } | null>(null);
   paletteOpen = $state(false);
   ratioOpen = $state(false);

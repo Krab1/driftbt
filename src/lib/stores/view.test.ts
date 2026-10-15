@@ -3,7 +3,7 @@ import type { Torrent } from "../api/types";
 import { visibleTorrents } from "./view";
 
 const t = (id: string, name: string, state: Torrent["state"], size = 100, eta: number | null = null): Torrent => ({
-  id, name, state, error: null, total_bytes: size, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: eta, tracker: null, category: null, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null,
+  id, name, state, error: null, total_bytes: size, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: eta, tracker: null, category: null, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null, limit_down_kib: 0, limit_up_kib: 0,
 });
 
 const all = [t("a", "Zeta.iso", "seeding", 300), t("b", "alpha.iso", "downloading", 100, 50), t("c", "Mid.iso", "paused", 200)];

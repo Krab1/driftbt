@@ -100,6 +100,7 @@ pub trait TorrentEngine: Send + Sync {
     async fn remove(&self, id: TorrentId, delete_files: bool) -> Result<()>;
     async fn set_files(&self, id: TorrentId, selected: Vec<FileIdx>) -> Result<()>;
     async fn set_limits(&self, l: Limits) -> Result<()>;            // down/up bytes/s, 0 = unlimited
+    async fn set_torrent_limits(&self, id: &TorrentId, l: Limits) -> Result<()>; // one torrent; the overall limit still applies, the slower wins
     async fn set_network(&self, n: NetworkConfig) -> Result<()>;    // port, bind iface, proxy, DHT on/off
     async fn set_ip_filter(&self, f: Arc<IpFilter>) -> Result<()>;  // swap the active filter atomically; engine rejects blocked addrs in both directions
     async fn stream_url(&self, id: TorrentId, file: FileIdx) -> Result<Option<Url>>;

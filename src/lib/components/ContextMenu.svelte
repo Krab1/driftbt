@@ -135,6 +135,11 @@
     if (t) ui.goalTarget = { id: t.id, name: t.name };
   }
 
+  function limit() {
+    close();
+    if (t) ui.limitTarget = { id: t.id, name: t.name };
+  }
+
   function tags() {
     close();
     if (t) ui.tagTarget = { id: t.id, name: t.name };
@@ -190,6 +195,7 @@
   {/if}
   <hr />
   <button role="menuitem" onclick={tags}><Icon name="file" />Tags…</button>
+  <button role="menuitem" onclick={limit}><Icon name="sliders" />Speed limit…{#if t && (t.limit_down_kib || t.limit_up_kib)}<span class="cur">on</span>{/if}</button>
   <button role="menuitem" onclick={goal}><Icon name="clock" />Seeding goal…</button>
   <button role="menuitem" onclick={remove}><Icon name="trash" />Remove…</button>
 </div>
@@ -226,6 +232,11 @@
     padding: 4px 10px 2px;
     font-size: 11px;
     color: var(--text-muted);
+  }
+  .cur {
+    margin-left: auto;
+    color: var(--accent-fg);
+    font-size: 11px;
   }
   .tick {
     display: inline-block;

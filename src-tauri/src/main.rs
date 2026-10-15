@@ -366,6 +366,7 @@ fn main() {
             commands::set_torrent_category,
             commands::set_torrent_tags,
             commands::set_torrent_goal,
+            commands::set_torrent_limits,
             commands::move_in_queue,
             commands::watch_details,
             commands::set_visible,

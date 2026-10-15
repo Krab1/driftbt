@@ -19,6 +19,7 @@ struct Inner {
     limits: Limits,
     network: NetworkConfig,
     rechecks: Vec<TorrentId>,
+    torrent_limits: BTreeMap<TorrentId, Limits>,
 }
 
 struct Entry {
@@ -32,6 +33,16 @@ const FAKE_TOTAL: u64 = 1000;
 impl FakeEngine {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Test helper: what a restarted engine looks like, with no per-torrent limits in force.
+    pub fn forget_torrent_limits(&self) {
+        self.inner.lock().unwrap().torrent_limits.clear();
+    }
+
+    /// Test helper: the limits last set for a torrent.
+    pub fn torrent_limits(&self, id: &TorrentId) -> Limits {
+        self.inner.lock().unwrap().torrent_limits.get(id).copied().unwrap_or_default()
     }
 
     /// Test helper: the torrents `recheck` was called for, in order.
@@ -292,6 +303,15 @@ impl TorrentEngine for FakeEngine {
         for f in &mut e.files {
             f.selected = selected.contains(&f.index);
         }
+        Ok(())
+    }
+
+    async fn set_torrent_limits(&self, id: &TorrentId, limits: Limits) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if !g.torrents.contains_key(id) {
+            return Err(EngineError::NotFound);
+        }
+        g.torrent_limits.insert(id.clone(), limits);
         Ok(())
     }
 

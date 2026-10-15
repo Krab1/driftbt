@@ -39,6 +39,7 @@ export const tauriApi: Api = {
   setCategory: (id, category) => call("set_torrent_category", { id, category }),
   setTags: (id, tags) => call("set_torrent_tags", { id, tags }),
   setGoal: (id, goal) => call("set_torrent_goal", { id, goal }),
+  setTorrentLimits: (id, downKib, upKib) => call("set_torrent_limits", { id, downKib, upKib }),
   moveInQueue: (id, to) => call("move_in_queue", { id, to }),
   pause: (id) => call("pause_torrent", { id }),
   resume: (id) => call("resume_torrent", { id }),

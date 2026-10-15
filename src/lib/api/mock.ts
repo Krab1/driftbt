@@ -61,6 +61,8 @@ function demo(n: number): Torrent[] {
       eta_secs: down > 0 ? Math.floor((total - progress) / down) : null,
       tracker: i % 4 === 3 ? null : i % 2 ? "tracker.example.org" : "open.example.net",
       category: i % 5 === 0 ? "Linux" : i % 7 === 0 ? "Docs" : null,
+      limit_down_kib: 0,
+      limit_up_kib: 0,
       tags: [],
       queue_pos: null,
       error_detail: state === "error" ? "write failed: There is not enough space on the disk. (os error 112)" : null,
@@ -268,7 +270,7 @@ export function createMockApi(count = 40): Api {
       if (input.kind === "url") {
         const id = [...input.value].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7).toString(16).padStart(8, "0").repeat(5);
         if (!torrents.some((t) => t.id === id)) {
-          torrents = [{ id, name: input.value.split("/").pop() ?? id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null }, ...torrents];
+          torrents = [{ id, name: input.value.split("/").pop() ?? id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null, limit_down_kib: 0, limit_up_kib: 0 }, ...torrents];
         }
         return id;
       }
@@ -278,7 +280,7 @@ export function createMockApi(count = 40): Api {
         const id = m[1].toLowerCase();
         if (!torrents.some((t) => t.id === id)) {
           torrents = [
-            { id, name: id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null },
+            { id, name: id, state: "checking", error: null, total_bytes: 0, progress_bytes: 0, uploaded_bytes: 0, down_bps: 0, up_bps: 0, peers_live: 0, eta_secs: null, tracker: null, category, tags: [], queue_pos: null, note: null, added_at: null, finished_at: null, limit_down_kib: 0, limit_up_kib: 0 },
             ...torrents,
           ];
           if (input.only_files) selection.set(id, new Set(input.only_files));
@@ -323,6 +325,10 @@ export function createMockApi(count = 40): Api {
       torrents = torrents.map((t) => (t.id === id ? { ...t, tags } : t));
     },
     setGoal: async (id, goal) => void (find(id), goals.set(id, goal)),
+    setTorrentLimits: async (id, downKib, upKib) => {
+      find(id);
+      torrents = torrents.map((t) => (t.id === id ? { ...t, limit_down_kib: downKib, limit_up_kib: upKib } : t));
+    },
     moveInQueue: async (id, to) => {
       find(id);
       const i = order.indexOf(id);
