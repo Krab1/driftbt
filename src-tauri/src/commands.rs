@@ -212,6 +212,21 @@ pub async fn test_search_source(state: State<'_, AppState>, id: String) -> ApiRe
 }
 
 #[tauri::command]
+pub async fn set_plugin_settings(state: State<'_, AppState>, id: String, values: serde_json::Map<String, serde_json::Value>) -> ApiResult<()> {
+    state.svc.set_plugin_settings(&id, values).await
+}
+
+#[tauri::command]
+pub async fn set_plugin_secret(state: State<'_, AppState>, id: String, key: String, value: String) -> ApiResult<()> {
+    state.svc.set_plugin_secret(&id, &key, &value).await
+}
+
+#[tauri::command]
+pub fn plugin_log(state: State<'_, AppState>, id: String) -> ApiResult<String> {
+    state.svc.plugin_log(&id)
+}
+
+#[tauri::command]
 pub fn list_plugins(state: State<'_, AppState>) -> Vec<drift_core::plugins::PluginInfo> {
     state.svc.list_plugins()
 }

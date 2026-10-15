@@ -16,11 +16,22 @@ The folder name must equal `id` (letters, digits, `-`, `_`). `exec[0]` is a path
   "exec": ["example.exe"], "permissions": { "net": ["*"], "fs": [] } }
 ```
 
+Optional `settings` describes a form Drift draws in Settings → Plugins:
+
+```json
+"settings": [
+  { "key": "endpoint", "label": "Server address", "type": "url", "help": "Where it runs." },
+  { "key": "token", "label": "API token", "type": "secret" }
+]
+```
+
+`type` is `text`, `url`, `number`, `bool` or `secret`; `key` follows the same rules as `id` and must be unique. Plain values are sent to the plugin in `initialize` (`settings: {key: value}`). Secrets are never sent that way: the plugin asks for them with `get_secret`. Saving a form replaces all of the plugin's saved plain values, ends the running plugin so it restarts with the new values, and gives a plugin that was switched off after failures another chance. Values for fields the manifest no longer declares, or now declares as `secret`, are never sent. Changing or removing a secret also clears the plugin's log. A form that isn't valid is listed as a problem and the plugin can't be turned on.
+
 `api` must be `1`. A plugin with another value, a missing program or a bad folder name is listed in Settings with the reason and can't be turned on. `permissions` is shown to the user before the first enable. It is not enforced.
 
 ## Transport
 
-One JSON object per line (UTF-8, `\n`) on the plugin's stdin and stdout, JSON-RPC 2.0. A line over 4 MB ends the call. stderr is written to `<data>/plugin-logs/<id>.log` (cleared at each start) and never shown in the UI. Lines without a matching `id` (for example `{"method":"log",...}` notifications) are ignored.
+One JSON object per line (UTF-8, `\n`) on the plugin's stdin and stdout, JSON-RPC 2.0. A line over 4 MB ends the call. stderr is written to `<data>/plugin-logs/<id>.log` (cleared at each start). It is not mixed into the normal UI; Settings → Plugins → View log shows the last 32 KB on request, with the plugin's own secret values blanked out. Lines without a matching `id` (for example `{"method":"log",...}` notifications) are ignored.
 
 ## Calls (app → plugin)
 
@@ -31,6 +42,14 @@ One JSON object per line (UTF-8, `\n`) on the plugin's stdin and stdout, JSON-RP
 | `shutdown` | `{}` | `{}` (then exit) |
 
 `Result`: `title` (required), and at least one of `info_hash` (40 hex or 32 base32), `magnet` (`magnet:?…`), `torrent_url` (http/https). Optional: `size` (bytes), `seeders`, `leechers`, `published` (unix seconds), `category`. Rows without a title or any way to open them are dropped; titles are cut at 300 characters.
+
+## Calls (plugin → app)
+
+| Method | Params | Result |
+|---|---|---|
+| `get_secret` | `{key}` | `{value}` (`null` when unset, or when `key` isn't a `secret` field in the manifest) |
+
+This is the only request a plugin can make. Settings values and secrets live beside the plugin folders in `<data>/plugins/.settings.json` and `.secrets.json`, so updating or replacing a plugin folder keeps them.
 
 ## Lifecycle
 

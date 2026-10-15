@@ -242,6 +242,8 @@ export function createMockApi(count = 40): Api {
   };
 
   let keys: string[] = [];
+  let pluginValues: Record<string, string | number | boolean> = {};
+  let pluginSecrets: string[] = [];
 
   return {
     list: async () => snapshot(),
@@ -395,9 +397,33 @@ export function createMockApi(count = 40): Api {
       return id === "archive_org" ? { id, name: "Internet Archive", outcome: "ok", count: 1, message: null } : { id, name: id, outcome: "failed", count: 0, message: "This source refused the API key. Check it in Settings." };
     },
     listPlugins: async () => [
-      { id: "example", name: "Example search", version: "1.0.0", kinds: ["search"], permissions: { net: ["*"], fs: [] }, enabled: settings.plugins.includes("example"), problem: null },
-      { id: "old", name: "Old plugin", version: "0.3.0", kinds: ["search"], permissions: { net: [], fs: [] }, enabled: false, problem: "It was made for plugin protocol 2, and this Drift speaks 1." },
+      {
+        id: "example",
+        name: "Example search",
+        version: "1.0.0",
+        kinds: ["search"],
+        permissions: { net: ["*"], fs: [] },
+        enabled: settings.plugins.includes("example"),
+        problem: null,
+        fields: [
+          { key: "endpoint", label: "Server address", type: "url", help: "Where the example server runs." },
+          { key: "region", label: "Region", type: "text", help: null },
+          { key: "retries", label: "Retries", type: "number", help: null },
+          { key: "adult", label: "Include adult results", type: "bool", help: null },
+          { key: "token", label: "API token", type: "secret", help: "Stored only on this computer." },
+        ],
+        values: { ...pluginValues },
+        secrets_set: [...pluginSecrets],
+      },
+      { id: "old", name: "Old plugin", version: "0.3.0", kinds: ["search"], permissions: { net: [], fs: [] }, enabled: false, problem: "It was made for plugin protocol 2, and this Drift speaks 1.", fields: [], values: {}, secrets_set: [] },
     ],
+    setPluginSettings: async (_id, values) => {
+      pluginValues = { ...values };
+    },
+    setPluginSecret: async (_id, key, value) => {
+      pluginSecrets = value ? [...new Set([...pluginSecrets, key])] : pluginSecrets.filter((k) => k !== key);
+    },
+    pluginLog: async () => "2026-10-15 starting\nconnected to example server\nsearch 'ubuntu': 12 rows",
     setSearchKey: async (id, key) => {
       keys = key ? [...new Set([...keys, id])] : keys.filter((k) => k !== id);
     },

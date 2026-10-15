@@ -4,6 +4,7 @@
 //! failures in a row it is switched off until the app restarts. Plugins never touch the engine; they only
 //! answer questions (today: search).
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -11,10 +12,11 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 
+use crate::search::config::Secrets;
 use crate::search::{normalize_hash, ProviderError, SearchProvider, SearchQuery, SearchResult};
 
 /// Protocol major version this app speaks.
@@ -33,6 +35,19 @@ pub struct Permissions {
     pub fs: Vec<String>,
 }
 
+/// One entry of a plugin's settings form. `type` is `text`, `url`, `number`, `bool` or `secret`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Field {
+    pub key: String,
+    pub label: String,
+    #[serde(rename = "type")]
+    pub kind: String,
+    #[serde(default)]
+    pub help: Option<String>,
+}
+
+const FIELD_KINDS: [&str; 5] = ["text", "url", "number", "bool", "secret"];
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
     pub id: String,
@@ -44,6 +59,43 @@ pub struct Manifest {
     pub exec: Vec<String>,
     #[serde(default)]
     pub permissions: Permissions,
+    /// The settings form the app draws for this plugin.
+    #[serde(default)]
+    pub settings: Vec<Field>,
+}
+
+/// What the user typed into plugin settings forms. Plain values live in `.settings.json`, secrets in
+/// `.secrets.json` (both beside the plugin folders), so a plugin update never touches them.
+struct Config {
+    path: PathBuf,
+    values: std::sync::Mutex<HashMap<String, Map<String, Value>>>,
+    secrets: Secrets,
+}
+
+impl Config {
+    fn open(dir: &Path) -> Self {
+        let path = dir.join(".settings.json");
+        let values = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice(crate::jsonfile::strip_bom(&b)).ok()).unwrap_or_default();
+        Self { path, values: std::sync::Mutex::new(values), secrets: Secrets::open(dir.join(".secrets.json")) }
+    }
+
+    /// The saved plain values, limited to what the manifest still declares as a non-secret field. A field that
+    /// was removed, or became a secret in a newer version, never reaches the plugin or the UI from here.
+    fn values(&self, m: &Manifest) -> Map<String, Value> {
+        let mut v = self.values.lock().unwrap().get(&m.id).cloned().unwrap_or_default();
+        v.retain(|k, _| m.settings.iter().any(|f| &f.key == k && f.kind != "secret"));
+        v
+    }
+
+    fn secret(&self, id: &str, key: &str) -> String {
+        self.secrets.get(&format!("{id}:{key}"))
+    }
+}
+
+/// A secret field's value, and only for keys the manifest declares as secrets.
+fn plugin_secret(m: &Manifest, cfg: &Config, key: &str) -> Option<String> {
+    let declared = m.settings.iter().any(|f| f.key == key && f.kind == "secret");
+    declared.then(|| cfg.secret(&m.id, key)).filter(|v| !v.is_empty())
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -83,7 +135,8 @@ struct Running {
 }
 
 impl Running {
-    async fn rpc(&mut self, method: &str, params: Value) -> Result<Value, CallError> {
+    /// `secret` answers the plugin's own `get_secret` requests while it works on this call.
+    async fn rpc(&mut self, method: &str, params: Value, secret: &(dyn Fn(&str) -> Option<String> + Send + Sync)) -> Result<Value, CallError> {
         self.next_id += 1;
         let id = self.next_id;
         let mut line = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}).to_string();
@@ -98,7 +151,18 @@ impl Running {
                 return Err(CallError::Failed);
             }
             let Ok(v) = serde_json::from_str::<Value>(&buf) else { return Err(CallError::Failed) };
-            // Notifications (e.g. `log`) and replies to older calls carry no matching id.
+            if let Some(m) = v.get("method").and_then(Value::as_str) {
+                // The one thing a plugin may ask of the host. Everything else it sends is a notification.
+                if let ("get_secret", Some(rid)) = (m, v.get("id")) {
+                    let value = v["params"]["key"].as_str().and_then(secret);
+                    let mut reply = json!({"jsonrpc": "2.0", "id": rid, "result": {"value": value}}).to_string();
+                    reply.push('\n');
+                    self.stdin.write_all(reply.as_bytes()).await.map_err(|_| CallError::Failed)?;
+                    self.stdin.flush().await.map_err(|_| CallError::Failed)?;
+                }
+                continue;
+            }
+            // Replies to older calls carry no matching id.
             if v.get("id").and_then(Value::as_u64) != Some(id) {
                 continue;
             }
@@ -123,12 +187,22 @@ pub struct Plugin {
     dir: PathBuf,
     log: PathBuf,
     limits: Limits,
+    cfg: Arc<Config>,
     state: tokio::sync::Mutex<State>,
 }
 
 impl Plugin {
-    fn new(manifest: Manifest, dir: PathBuf, log: PathBuf, limits: Limits) -> Arc<Self> {
-        Arc::new(Self { manifest, dir, log, limits, state: Default::default() })
+    fn new(manifest: Manifest, dir: PathBuf, log: PathBuf, limits: Limits, cfg: Arc<Config>) -> Arc<Self> {
+        Arc::new(Self { manifest, dir, log, limits, cfg, state: Default::default() })
+    }
+
+    /// Ends the running process so the next call starts it with the current settings.
+    async fn restart(&self) {
+        let mut st = self.state.lock().await;
+        st.running = None;
+        st.failures = 0;
+        st.retry_at = None;
+        st.disabled = false;
     }
 
     async fn start(&self) -> Result<Running, CallError> {
@@ -162,8 +236,8 @@ impl Plugin {
             #[cfg(windows)]
             _job,
         };
-        let init = json!({"api": API, "app_version": env!("CARGO_PKG_VERSION"), "settings": {}});
-        tokio::time::timeout(self.limits.call_timeout, r.rpc("initialize", init)).await.map_err(|_| CallError::Failed)??;
+        let init = json!({"api": API, "app_version": env!("CARGO_PKG_VERSION"), "settings": self.cfg.values(&self.manifest)});
+        tokio::time::timeout(self.limits.call_timeout, r.rpc("initialize", init, &|k| plugin_secret(&self.manifest, &self.cfg, k))).await.map_err(|_| CallError::Failed)??;
         Ok(r)
     }
 
@@ -198,7 +272,7 @@ impl Plugin {
             }
         }
         let r = st.running.as_mut().expect("started above");
-        match tokio::time::timeout(self.limits.call_timeout, r.rpc(method, params)).await {
+        match tokio::time::timeout(self.limits.call_timeout, r.rpc(method, params, &|k| plugin_secret(&self.manifest, &self.cfg, k))).await {
             Ok(Ok(v)) => {
                 r.last_used = Instant::now();
                 st.failures = 0;
@@ -230,7 +304,7 @@ async fn idle_watch(p: std::sync::Weak<Plugin>) {
         match st.running.as_mut() {
             None => return,
             Some(r) if r.last_used.elapsed() >= idle => {
-                let _ = tokio::time::timeout(Duration::from_millis(500), r.rpc("shutdown", json!({}))).await;
+                let _ = tokio::time::timeout(Duration::from_millis(500), r.rpc("shutdown", json!({}), &|_| None)).await;
                 st.running = None;
                 return;
             }
@@ -250,6 +324,10 @@ pub struct PluginInfo {
     pub enabled: bool,
     /// Why it can't be used (wrong protocol version, missing program, switched off after crashes).
     pub problem: Option<String>,
+    /// The settings form, the current plain values, and which secret fields already hold a value (never the values).
+    pub fields: Vec<Field>,
+    pub values: Map<String, Value>,
+    pub secrets_set: Vec<String>,
 }
 
 struct Entry {
@@ -260,6 +338,7 @@ struct Entry {
 /// The plugins found at start-up. Which of them are on is the user's choice and lives in settings.
 pub struct Host {
     entries: Vec<Entry>,
+    cfg: Arc<Config>,
 }
 
 fn safe_id(id: &str) -> bool {
@@ -280,6 +359,10 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
     if m.api != API {
         return Err(format!("It was made for plugin protocol {}, and this Drift speaks {API}.", m.api));
     }
+    let mut seen = std::collections::HashSet::new();
+    if !m.settings.iter().all(|f| safe_id(&f.key) && FIELD_KINDS.contains(&f.kind.as_str()) && seen.insert(f.key.as_str())) {
+        return Err("Its settings form isn't valid.".into());
+    }
     if m.exec.is_empty() || !inside(&m.exec[0]) || !dir.join(&m.exec[0]).is_file() {
         return Err("Its program is missing.".into());
     }
@@ -288,7 +371,7 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
 
 impl Host {
     pub fn empty() -> Self {
-        Self { entries: Vec::new() }
+        Self { entries: Vec::new(), cfg: Arc::new(Config { path: PathBuf::new(), values: Default::default(), secrets: Secrets::open(PathBuf::new()) }) }
     }
 
     /// The plugins under `<data>/plugins`, with default limits and logs in `<data>/plugin-logs`.
@@ -299,7 +382,8 @@ impl Host {
     /// Reads every `<dir>/<id>/plugin.json`. Broken plugins are listed with the reason instead of being dropped.
     pub fn load(dir: &Path, logs: &Path, limits: Limits) -> Self {
         let mut entries = Vec::new();
-        let Ok(rd) = std::fs::read_dir(dir) else { return Self { entries } };
+        let cfg = Arc::new(Config::open(dir));
+        let Ok(rd) = std::fs::read_dir(dir) else { return Self { entries, cfg } };
         let mut dirs: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect();
         dirs.sort();
         for d in dirs {
@@ -308,17 +392,17 @@ impl Host {
             let m: Manifest = match serde_json::from_slice(crate::jsonfile::strip_bom(&bytes)) {
                 Ok(m) => m,
                 Err(_) => {
-                    let info = PluginInfo { id: folder.clone(), name: folder, version: String::new(), kinds: vec![], permissions: Permissions::default(), enabled: false, problem: Some("Its plugin.json can't be read.".into()) };
+                    let info = PluginInfo { id: folder.clone(), name: folder, version: String::new(), kinds: vec![], permissions: Permissions::default(), enabled: false, problem: Some("Its plugin.json can't be read.".into()), fields: vec![], values: Map::new(), secrets_set: vec![] };
                     entries.push(Entry { plugin: None, info });
                     continue;
                 }
             };
             let problem = check(&m, &d).err();
-            let info = PluginInfo { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), kinds: m.kinds.clone(), permissions: m.permissions.clone(), enabled: false, problem: problem.clone() };
-            let plugin = problem.is_none().then(|| Plugin::new(m.clone(), d.clone(), logs.join(format!("{}.log", m.id)), limits));
+            let info = PluginInfo { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), kinds: m.kinds.clone(), permissions: m.permissions.clone(), enabled: false, problem: problem.clone(), fields: m.settings.clone(), values: Map::new(), secrets_set: vec![] };
+            let plugin = problem.is_none().then(|| Plugin::new(m.clone(), d.clone(), logs.join(format!("{}.log", m.id)), limits, cfg.clone()));
             entries.push(Entry { plugin, info });
         }
-        Self { entries }
+        Self { entries, cfg }
     }
 
     pub fn list(&self, enabled: &[String]) -> Vec<PluginInfo> {
@@ -328,14 +412,89 @@ impl Host {
                 let mut i = e.info.clone();
                 i.enabled = e.plugin.is_some() && enabled.contains(&i.id);
                 if let Some(p) = &e.plugin {
+                    i.values = self.cfg.values(&p.manifest);
+                }
+                i.secrets_set = i.fields.iter().filter(|f| f.kind == "secret" && !self.cfg.secret(&i.id, &f.key).is_empty()).map(|f| f.key.clone()).collect();
+                if let Some(p) = &e.plugin {
                     // `try_lock`: a plugin in the middle of a call is by definition not switched off.
                     if p.state.try_lock().is_ok_and(|s| s.disabled) {
-                        i.problem = Some("It stopped responding and was switched off. Restart Drift to try it again.".into());
+                        i.problem = Some("It stopped responding and was switched off. Save its settings or restart Drift to try it again.".into());
                     }
                 }
                 i
             })
             .collect()
+    }
+
+    fn find(&self, id: &str) -> Result<&Arc<Plugin>, String> {
+        self.entries.iter().find_map(|e| e.plugin.as_ref().filter(|p| p.manifest.id == id)).ok_or_else(|| "That plugin isn't available.".to_string())
+    }
+
+    /// Saves the plain (non-secret) values of a plugin's form and restarts it so it sees them.
+    pub async fn set_values(&self, id: &str, values: Map<String, Value>) -> Result<(), String> {
+        let p = self.find(id)?;
+        for (k, v) in &values {
+            let f = p.manifest.settings.iter().find(|f| &f.key == k && f.kind != "secret").ok_or("That setting doesn't exist.")?;
+            let ok = match (f.kind.as_str(), v) {
+                ("text", Value::String(s)) => s.chars().count() <= 500,
+                ("url", Value::String(s)) => s.is_empty() || ((s.starts_with("http://") || s.starts_with("https://")) && s.len() <= 2048 && !s.contains(char::is_whitespace)),
+                ("number", Value::Number(_)) | ("bool", Value::Bool(_)) => true,
+                _ => false,
+            };
+            if !ok {
+                return Err(format!("\"{}\" doesn't have a valid value.", f.label));
+            }
+        }
+        {
+            let mut all = self.cfg.values.lock().unwrap();
+            all.insert(id.to_string(), values);
+            let bytes = serde_json::to_vec_pretty(&*all).map_err(|e| e.to_string())?;
+            crate::jsonfile::write_atomic(&self.cfg.path, &bytes).map_err(|_| "Couldn't save. Check that the app data folder is writable.".to_string())?;
+        }
+        p.restart().await;
+        Ok(())
+    }
+
+    /// Saves one secret field. An empty value removes it.
+    pub async fn set_secret(&self, id: &str, key: &str, value: &str) -> Result<(), String> {
+        let p = self.find(id)?;
+        if !p.manifest.settings.iter().any(|f| f.key == key && f.kind == "secret") {
+            return Err("That isn't a secret setting.".into());
+        }
+        // The old value may be in the log; the log is only rewritten when the plugin next starts.
+        let _ = std::fs::remove_file(&p.log);
+        self.cfg.secrets.set(&format!("{id}:{key}"), value.trim()).map_err(|_| "Couldn't save. Check that the app data folder is writable.".to_string())?;
+        p.restart().await;
+        Ok(())
+    }
+
+    /// The end of what the plugin wrote to its error output, with its secrets blanked out. Empty if it never ran.
+    pub fn log(&self, id: &str) -> Result<String, String> {
+        const TAIL: u64 = 32 * 1024;
+        let p = self.find(id)?;
+        let mut text = match std::fs::File::open(&p.log) {
+            Ok(mut f) => {
+                use std::io::{Read, Seek, SeekFrom};
+                let len = f.metadata().map(|m| m.len()).unwrap_or(0);
+                let _ = f.seek(SeekFrom::Start(len.saturating_sub(TAIL)));
+                let mut b = Vec::new();
+                let _ = f.take(TAIL).read_to_end(&mut b);
+                let mut t = String::from_utf8_lossy(&b).into_owned();
+                if len > TAIL {
+                    // Start at a line boundary so a secret can't be cut in two and slip past the blanking below.
+                    t = t.split_once('\n').map(|x| x.1.to_string()).unwrap_or_default();
+                }
+                t
+            }
+            Err(_) => String::new(),
+        };
+        for f in p.manifest.settings.iter().filter(|f| f.kind == "secret") {
+            let v = self.cfg.secret(id, &f.key);
+            if !v.is_empty() {
+                text = text.replace(&v, "••••");
+            }
+        }
+        Ok(text)
     }
 
     /// Whether the plugin's process is alive right now (it starts on first use and ends when idle).

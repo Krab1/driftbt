@@ -51,11 +51,11 @@ Not plugin territory: engine, queue, UI components. UI never runs plugin code.
   "exec": ["torznab.exe"],
   "min_app": "1.0.0",
   "permissions": { "net": ["*"], "fs": [] },
-  "settings_schema": { "endpoints": "list<{name:string,url:url,apikey:secret}>" }
+  "settings": [{ "key": "endpoint", "label": "Server address", "type": "url" }, { "key": "apikey", "label": "API key", "type": "secret" }]
 }
 ```
 
-`api` is the protocol major version. The host refuses plugins whose `api` it doesn't support. `settings_schema` lets the app render the plugin's settings form generically, with `secret` fields going to Credential Manager.
+`api` is the protocol major version. The host refuses plugins whose `api` it doesn't support. `settings` lets the app render the plugin's settings form generically. Secret fields are kept in a separate file and handed to the plugin only when it asks (`get_secret`); see `PLUGIN_PROTOCOL.md`.
 
 ## Protocol v1
 

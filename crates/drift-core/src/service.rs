@@ -134,6 +134,18 @@ impl Service {
         Ok(report.sources.remove(0))
     }
 
+    pub async fn set_plugin_settings(&self, id: &str, values: serde_json::Map<String, serde_json::Value>) -> Result<(), ApiError> {
+        self.plugins.set_values(id, values).await.map_err(|m| ApiError::new("plugin", &m))
+    }
+
+    pub async fn set_plugin_secret(&self, id: &str, key: &str, value: &str) -> Result<(), ApiError> {
+        self.plugins.set_secret(id, key, value).await.map_err(|m| ApiError::new("plugin", &m))
+    }
+
+    pub fn plugin_log(&self, id: &str) -> Result<String, ApiError> {
+        self.plugins.log(id).map_err(|m| ApiError::new("plugin", &m))
+    }
+
     pub fn list_plugins(&self) -> Vec<crate::plugins::PluginInfo> {
         self.plugins.list(&self.settings.lock().unwrap().plugins)
     }

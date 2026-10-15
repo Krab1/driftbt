@@ -59,7 +59,7 @@ impl From<ApiError> for HttpError {
     fn from(e: ApiError) -> Self {
         let status = match e.code {
             "not_found" => StatusCode::NOT_FOUND,
-            "invalid_input" | "no_playlist" | "no_media" | "search" | "no_sources" => StatusCode::BAD_REQUEST,
+            "invalid_input" | "no_playlist" | "no_media" | "search" | "no_sources" | "plugin" => StatusCode::BAD_REQUEST,
             "blocked" => StatusCode::CONFLICT,
             "timeout" => StatusCode::GATEWAY_TIMEOUT,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
@@ -126,6 +126,9 @@ pub fn router(shared: S) -> Router {
         .route("/search/keys", get(search_keys))
         .route("/search/test/{id}", post(test_search_source))
         .route("/plugins", get(plugins))
+        .route("/plugins/{id}/settings", put(set_plugin_settings))
+        .route("/plugins/{id}/secrets/{key}", put(set_plugin_secret))
+        .route("/plugins/{id}/log", get(plugin_log))
         .route("/search/keys/{id}", put(set_search_key))
         .route("/events", get(events))
         .layer(middleware::from_fn_with_state(shared.clone(), require_token))
@@ -305,6 +308,18 @@ async fn search(State(s): State<S>, Json(b): Json<SearchBody>) -> Res<SearchRepo
 
 async fn test_search_source(State(s): State<S>, Path(id): Path<String>) -> Res<drift_core::search::SourceStatus> {
     Ok(Json(s.svc.test_search_source(&id).await?))
+}
+
+async fn set_plugin_settings(State(s): State<S>, Path(id): Path<String>, Json(values): Json<serde_json::Map<String, serde_json::Value>>) -> Res<()> {
+    Ok(Json(s.svc.set_plugin_settings(&id, values).await?))
+}
+
+async fn set_plugin_secret(State(s): State<S>, Path((id, key)): Path<(String, String)>, Json(b): Json<KeyBody>) -> Res<()> {
+    Ok(Json(s.svc.set_plugin_secret(&id, &key, &b.key).await?))
+}
+
+async fn plugin_log(State(s): State<S>, Path(id): Path<String>) -> Res<String> {
+    Ok(Json(s.svc.plugin_log(&id)?))
 }
 
 async fn plugins(State(s): State<S>) -> Json<Vec<drift_core::plugins::PluginInfo>> {

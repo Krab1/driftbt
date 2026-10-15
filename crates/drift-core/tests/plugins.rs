@@ -126,3 +126,98 @@ async fn idle_plugins_are_shut_down_and_restart_on_demand() {
     assert_eq!(p.search(&q()).await.unwrap().len(), 2);
     std::fs::remove_dir_all(root).ok();
 }
+
+fn install_with_form(root: &Path, id: &str) {
+    install(root, id, "settings", 1);
+    let form = r#""settings":[{"key":"greeting","label":"Greeting","type":"text"},{"key":"retries","label":"Retries","type":"number"},{"key":"token","label":"Token","type":"secret"}]"#;
+    let m = std::fs::read_to_string(root.join(id).join("plugin.json")).unwrap();
+    std::fs::write(root.join(id).join("plugin.json"), m.replacen('{', &format!("{{{form},"), 1)).unwrap();
+}
+
+fn obj(v: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
+    v.as_object().unwrap().clone()
+}
+
+#[tokio::test]
+async fn the_settings_form_reaches_the_plugin_and_secrets_only_when_declared() {
+    let root = scratch("form");
+    install_with_form(&root, "ex");
+    let h = host(&root);
+    let on = vec!["ex".to_string()];
+    let info = &h.list(&on)[0];
+    assert_eq!(info.fields.len(), 3);
+    assert!(info.secrets_set.is_empty());
+
+    h.set_values("ex", obj(serde_json::json!({"greeting": "hi", "retries": 2}))).await.unwrap();
+    h.set_secret("ex", "token", "s3cret").await.unwrap();
+    let info = &h.list(&on)[0];
+    assert_eq!(info.values["greeting"], "hi");
+    assert_eq!(info.secrets_set, ["token"], "the list says a secret is set, never what it is");
+    assert!(!serde_json::to_string(info).unwrap().contains("s3cret"));
+
+    let title = h.search_providers(&on)[0].search(&q()).await.unwrap()[0].title.clone();
+    assert!(title.contains(r#"greeting="hi""#) && title.contains(r#"token="s3cret""#), "{title}");
+    assert!(title.contains("other=null"), "a key the manifest doesn't declare as a secret is never handed out: {title}");
+
+    // Changing a value restarts the plugin so it sees it, and the values survive a restart of the app.
+    h.set_values("ex", obj(serde_json::json!({"greeting": "yo"}))).await.unwrap();
+    assert!(!h.is_running("ex").await);
+    let title = h.search_providers(&on)[0].search(&q()).await.unwrap()[0].title.clone();
+    assert!(title.contains(r#"greeting="yo""#), "{title}");
+    assert_eq!(host(&root).list(&on)[0].values["greeting"], "yo");
+
+    h.set_secret("ex", "token", "").await.unwrap();
+    assert!(h.list(&on)[0].secrets_set.is_empty());
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn bad_settings_are_refused_with_a_plain_reason() {
+    let root = scratch("badform");
+    install_with_form(&root, "ex");
+    let h = host(&root);
+    assert!(h.set_values("ex", obj(serde_json::json!({"retries": "lots"}))).await.unwrap_err().contains("Retries"));
+    assert!(h.set_values("ex", obj(serde_json::json!({"nope": "x"}))).await.is_err(), "unknown field");
+    assert!(h.set_values("ex", obj(serde_json::json!({"token": "x"}))).await.is_err(), "secrets don't go through plain values");
+    assert!(h.set_secret("ex", "greeting", "x").await.is_err(), "only secret fields take secrets");
+    assert!(h.set_values("ghost", obj(serde_json::json!({}))).await.is_err());
+    assert!(h.log("ghost").is_err());
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn the_log_view_shows_what_the_plugin_wrote_without_its_secrets() {
+    let root = scratch("log");
+    install_with_form(&root, "ex");
+    let h = host(&root);
+    assert_eq!(h.log("ex").unwrap(), "", "nothing yet");
+    h.set_secret("ex", "token", "s3cret").await.unwrap();
+    std::fs::create_dir_all(root.join("logs")).unwrap();
+    std::fs::write(root.join("logs").join("ex.log"), "started\nusing token s3cret\n").unwrap();
+    let log = h.log("ex").unwrap();
+    assert!(log.contains("started") && !log.contains("s3cret") && log.contains("••••"), "{log}");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn old_values_and_logs_never_outlive_a_field_change() {
+    let root = scratch("stale");
+    install_with_form(&root, "ex");
+    let h = host(&root);
+    let on = vec!["ex".to_string()];
+    h.set_values("ex", obj(serde_json::json!({"greeting": "hi"}))).await.unwrap();
+    h.set_secret("ex", "token", "abc123").await.unwrap();
+    std::fs::create_dir_all(root.join("logs")).unwrap();
+    std::fs::write(root.join("logs").join("ex.log"), "token=abc123\n").unwrap();
+    h.set_secret("ex", "token", "").await.unwrap();
+    assert_eq!(h.log("ex").unwrap(), "", "a removed secret can't be read back from the log");
+
+    // The next version of the plugin turns "greeting" into a secret: its saved plain value must not leak.
+    let m = std::fs::read_to_string(root.join("ex").join("plugin.json")).unwrap();
+    std::fs::write(root.join("ex").join("plugin.json"), m.replace(r#""key":"greeting","label":"Greeting","type":"text""#, r#""key":"greeting","label":"Greeting","type":"secret""#)).unwrap();
+    let h2 = host(&root);
+    assert!(h2.list(&on)[0].values.is_empty());
+    let title = h2.search_providers(&on)[0].search(&q()).await.unwrap()[0].title.clone();
+    assert!(title.contains("greeting=null"), "not sent in initialize: {title}");
+    std::fs::remove_dir_all(root).ok();
+}

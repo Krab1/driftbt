@@ -142,6 +142,17 @@ export interface PluginInfo {
   enabled: boolean;
   /** Why it can't be used; null when it is fine. */
   problem: string | null;
+  /** The settings form the plugin asks for, the current plain values, and which secret fields already hold a value. */
+  fields: PluginField[];
+  values: Record<string, string | number | boolean>;
+  secrets_set: string[];
+}
+
+export interface PluginField {
+  key: string;
+  label: string;
+  type: "text" | "url" | "number" | "bool" | "secret";
+  help: string | null;
 }
 
 export interface OpenPayload {
@@ -362,6 +373,11 @@ export interface Api {
   /** Asks one source a sample question; the result says whether it answered. */
   testSearchSource(id: string): Promise<SourceStatus>;
   listPlugins(): Promise<PluginInfo[]>;
+  setPluginSettings(id: string, values: Record<string, string | number | boolean>): Promise<void>;
+  /** An empty value removes the secret. */
+  setPluginSecret(id: string, key: string, value: string): Promise<void>;
+  /** The end of the plugin's error output, with its secrets blanked. */
+  pluginLog(id: string): Promise<string>;
   /** An empty key removes it. The source must already be saved in settings. */
   setSearchKey(id: string, key: string): Promise<void>;
   getSettings(): Promise<Settings>;
