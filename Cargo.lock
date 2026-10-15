@@ -1236,7 +1236,7 @@ dependencies = [
 
 [[package]]
 name = "drift"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "auto-launch",
  "drift-core",
@@ -1254,7 +1254,7 @@ dependencies = [
 
 [[package]]
 name = "drift-core"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -1276,7 +1276,7 @@ dependencies = [
 
 [[package]]
 name = "drift-server"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "axum",
  "drift-core",
