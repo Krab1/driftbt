@@ -78,7 +78,7 @@ fn launch_after_exit(version: &str, installer: &[u8]) -> std::io::Result<()> {
     let safe: String = version.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '.' || *c == '-').collect();
     let dir = std::env::temp_dir().join(format!("Drift-{safe}-update"));
     std::fs::create_dir_all(&dir)?;
-    let exe = dir.join("Drift-setup.exe");
+    let exe = dir.join("Drift-Installer.exe");
     std::fs::write(&exe, installer)?;
     let script = format!("ping -n 4 127.0.0.1 >nul & taskkill /F /PID {} >nul 2>&1 & \"{}\" /P /R /UPDATE", std::process::id(), exe.display());
     std::process::Command::new("cmd").raw_arg(format!("/C \"{script}\"")).creation_flags(CREATE_NO_WINDOW | DETACHED_PROCESS).spawn()?;
