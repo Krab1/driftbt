@@ -178,6 +178,7 @@
           <label class="check"><input type="checkbox" checked={s.close_to_tray} onchange={(e) => ui.saveSettings({ close_to_tray: e.currentTarget.checked })} /> Keep running in the tray when the window is closed</label>
           <label class="check"><input type="checkbox" checked={s.start_with_windows} onchange={(e) => ui.saveSettings({ start_with_windows: e.currentTarget.checked })} /> Start Drift when Windows starts</label>
           <label class="check sub"><input type="checkbox" checked={s.start_minimized} onchange={(e) => ui.saveSettings({ start_minimized: e.currentTarget.checked })} /> Start minimized to the tray</label>
+          <label class="check"><input type="checkbox" checked={s.folder_for_single_files} onchange={(e) => ui.saveSettings({ folder_for_single_files: e.currentTarget.checked })} /> Save a single-file torrent in a folder of its own</label>
           <label class="check"><input type="checkbox" checked={s.playlist_on_complete} onchange={(e) => ui.saveSettings({ playlist_on_complete: e.currentTarget.checked })} /> Create a playlist when a multi-file download finishes</label>
           {#if api.checkUpdate}
             <label class="check"><input type="checkbox" checked={s.check_updates} onchange={(e) => ui.saveSettings({ check_updates: e.currentTarget.checked })} /> Check for updates once a day (contacts GitHub)</label>

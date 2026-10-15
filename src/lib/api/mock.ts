@@ -115,6 +115,7 @@ export function createMockApi(count = 40): Api {
     schedule: { enabled: false, slots: [] },
     watch_dir: null,
     move_on_complete: null,
+    folder_for_single_files: false,
     vpn_guard: { enabled: false, adapter: null, auto_resume: true },
     search: { archive_org: true, torznab: [] },
     plugins: [],

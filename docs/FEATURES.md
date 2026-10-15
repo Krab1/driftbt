@@ -44,6 +44,7 @@ Scope control: anything not here needs approval. "Engine" = comes from librqbit;
 | **Remote web UI** for headless mode | Ours | `drift-server` serves the same Svelte UI over HTTP (token login, localhost by default, TLS option for LAN). Same screens as desktop; the front-end `api` layer has two transports (Tauri IPC, HTTP + event stream). |
 | **Ratio assistant** (real seeding help) | Ours | Per-tracker upload/download totals and ratio, seed-until goals, minimum seed time (avoids hit-and-run), and a "seed where it helps" mode that gives upload priority to swarms with the most leechers and fewest seeds. Reports only true numbers. |
 | **Playlist** (`.m3u8`) for multi-file torrents | Ours | Natural-sorted, relative paths; auto on completion or on demand |
+| **Folder for single files** (setting, off by default) | Ours | A single-file torrent is saved in `<save folder>/<name>/` like a multi-file one; moving it keeps the folder |
 
 ## Later (post-v1, only if asked)
 RSS auto-download · torrent creation · mobile companion · sequential-only ordering for non-media · scheduling per torrent · tracker status history · localisation.

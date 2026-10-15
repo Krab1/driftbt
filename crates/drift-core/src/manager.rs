@@ -208,6 +208,7 @@ impl Manager {
             .and_then(|c| s.categories.iter().find(|x| &x.name == c))
             .and_then(|c| c.save_path.clone());
         req.output_dir = category_dir.or(req.output_dir).or(s.download_dir.clone());
+        req.folder_for_single = s.folder_for_single_files;
 
         if self.guard_tripped() {
             req.paused = true;

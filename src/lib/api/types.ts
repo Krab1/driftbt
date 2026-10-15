@@ -293,6 +293,8 @@ export interface Settings {
   watch_dir: string | null;
   /** Finished downloads are moved here; null leaves them where they were saved. */
   move_on_complete: string | null;
+  /** A single-file torrent is saved in a folder named after it. */
+  folder_for_single_files: boolean;
   vpn_guard: VpnGuardSettings;
   search: SearchSettings;
   /** Ids of the plugins that are turned on. */

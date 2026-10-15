@@ -191,16 +191,22 @@ fn to_add(source: AddSource) -> AddTorrent<'static> {
     }
 }
 
-/// The folder a torrent's files go in: a multi-file torrent gets its own folder named after it inside `base`, a
-/// single file goes straight into `base`. (librqbit does this itself only when it chooses the folder; when we give it
-/// one it uses it as is, which used to spill a torrent's `game/`, `lib/`... straight into the save folder.)
-fn torrent_folder(base: &Path, name: &str, files: usize) -> PathBuf {
-    if files <= 1 {
-        return base.to_path_buf();
-    }
+/// The folder name a torrent gets: its name with the characters Windows forbids replaced.
+fn folder_name(name: &str) -> String {
     let clean: String = name.chars().map(|c| if r#"/:*?"<>|"#.contains(c) || c.is_control() { '_' } else { c }).collect();
     let clean = clean.trim().trim_end_matches('.').trim();
-    base.join(if clean.is_empty() { "torrent" } else { clean })
+    if clean.is_empty() { "torrent".into() } else { clean.into() }
+}
+
+/// The folder a torrent's files go in: a multi-file torrent gets its own folder named after it inside `base`, a
+/// single file goes straight into `base` unless `nest_single` asks for a folder too. (librqbit does this itself only
+/// when it chooses the folder; when we give it one it uses it as is, which used to spill a torrent's `game/`,
+/// `lib/`... straight into the save folder.)
+fn torrent_folder(base: &Path, name: &str, files: usize, nest_single: bool) -> PathBuf {
+    if files <= 1 && !nest_single {
+        return base.to_path_buf();
+    }
+    base.join(folder_name(name))
 }
 
 fn id_of(h: &ManagedTorrent) -> TorrentId {
@@ -263,7 +269,7 @@ impl TorrentEngine for RqbitEngine {
         let output_folder = match &req.output_dir {
             None => None,
             Some(base) => Some(match self.inspect(req.source.clone()).await {
-                Ok(p) => torrent_folder(base, &p.name, p.files.len()),
+                Ok(p) => torrent_folder(base, &p.name, p.files.len(), req.folder_for_single),
                 // A magnet nobody answers yet: keep it out of the save folder's root until the name is known.
                 Err(EngineError::Timeout) => {
                     let hash = match &req.source {
@@ -410,7 +416,9 @@ impl TorrentEngine for RqbitEngine {
 
     async fn relocate(&self, id: &TorrentId, dest: &Path) -> Result<()> {
         let saved = self.saved(id)?;
-        let dest = torrent_folder(dest, &saved.name, saved.files.len());
+        // A single file that already sits in a folder of its own stays in one at the new place.
+        let nested = saved.files.len() == 1 && saved.output.file_name().is_some_and(|f| *f == *folder_name(&saved.name));
+        let dest = torrent_folder(dest, &saved.name, saved.files.len(), nested);
         let dest = dest.as_path();
         if saved.output == dest {
             return Ok(());
@@ -800,10 +808,11 @@ mod tests {
     #[test]
     fn multi_file_torrents_get_a_folder_named_after_them_and_single_files_do_not() {
         let base = Path::new("E:\\hh");
-        assert_eq!(torrent_folder(base, "Game v1.0", 5), PathBuf::from("E:\\hh\\Game v1.0"));
-        assert_eq!(torrent_folder(base, "one.iso", 1), PathBuf::from("E:\\hh"));
-        assert_eq!(torrent_folder(base, "a/b:c*", 2), PathBuf::from("E:\\hh\\a_b_c_"), "characters Windows forbids are replaced");
-        assert_eq!(torrent_folder(base, "  ..  ", 2), PathBuf::from("E:\\hh\\torrent"));
+        assert_eq!(torrent_folder(base, "Game v1.0", 5, false), PathBuf::from("E:\\hh\\Game v1.0"));
+        assert_eq!(torrent_folder(base, "one.iso", 1, false), PathBuf::from("E:\\hh"));
+        assert_eq!(torrent_folder(base, "one.iso", 1, true), PathBuf::from("E:\\hh\\one.iso"), "a single file gets a folder when asked");
+        assert_eq!(torrent_folder(base, "a/b:c*", 2, false), PathBuf::from("E:\\hh\\a_b_c_"), "characters Windows forbids are replaced");
+        assert_eq!(torrent_folder(base, "  ..  ", 2, false), PathBuf::from("E:\\hh\\torrent"));
     }
 
     /// With a save folder given (a category, or Settings), a multi-file torrent must not spill its folders into the
@@ -842,6 +851,42 @@ mod tests {
         engine.relocate(&id, &dest).await.unwrap();
         assert!(dest.join("album").join("a.bin").exists() && !shelf.join("album").join("a.bin").exists());
         assert!(!dest.join("a.bin").exists());
+        assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// With "folder for single files" on, one file lands in `<save folder>/<name>/` and moving keeps that; with it
+    /// off (the default) it goes straight into the save folder.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn a_single_file_gets_its_own_folder_only_when_asked() {
+        let root = scratch("singlefolder");
+        let (seed_dir, dl, shelf, dest) = (root.join("seed"), root.join("dl"), root.join("shelf"), root.join("done"));
+        for d in [&seed_dir, &dl, &shelf, &dest] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let file = seed_dir.join("one.bin");
+        std::fs::write(&file, payload()).unwrap();
+        let torrent = create_torrent(&file, CreateTorrentOptions::default(), &BlockingSpawner::new(1)).await.unwrap().as_bytes().unwrap();
+        let loopback: SocketAddr = ([127, 0, 0, 1], 0).into();
+        let seeder = Session::new_with_opts(
+            seed_dir.clone(),
+            SessionOptions { dht: None, disable_local_service_discovery: true, listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        seeder.add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, ..Default::default() })).await.unwrap();
+        let seeder_addr = SocketAddr::from(([127, 0, 0, 1], seeder.listen_addr().expect("seeder listens").port()));
+
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+        let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
+        req.output_dir = Some(shelf.clone());
+        req.peers = vec![seeder_addr];
+        req.folder_for_single = true;
+        let id = engine.add(req).await.unwrap();
+        assert_eq!(state_after(&engine, &id, 60).await.0, TorrentState::Seeding);
+        assert!(shelf.join("one.bin").join("one.bin").exists(), "inside a folder named after the torrent");
+        engine.relocate(&id, &dest).await.unwrap();
+        assert!(dest.join("one.bin").join("one.bin").exists() && !dest.join("one.bin").is_file(), "moving keeps the folder");
         assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding);
         let _ = std::fs::remove_dir_all(&root);
     }

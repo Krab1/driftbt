@@ -29,11 +29,13 @@ pub struct AddRequest {
     pub paused: bool,
     /// Extra peers to try immediately (also used by loopback tests).
     pub peers: Vec<SocketAddr>,
+    /// A single-file torrent goes in a folder named after it instead of straight into the save folder.
+    pub folder_for_single: bool,
 }
 
 impl AddRequest {
     pub fn new(source: AddSource) -> Self {
-        Self { source, output_dir: None, only_files: None, paused: false, peers: Vec::new() }
+        Self { source, output_dir: None, only_files: None, paused: false, peers: Vec::new(), folder_for_single: false }
     }
 }
 
