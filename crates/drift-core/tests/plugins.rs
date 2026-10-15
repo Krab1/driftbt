@@ -221,3 +221,103 @@ async fn old_values_and_logs_never_outlive_a_field_change() {
     assert!(title.contains("greeting=null"), "not sent in initialize: {title}");
     std::fs::remove_dir_all(root).ok();
 }
+
+#[tokio::test]
+async fn a_plugin_can_say_why_a_search_failed_and_label_its_own_rows() {
+    for (mode, expect) in [("auth", ProviderError::Auth), ("network", ProviderError::Network)] {
+        let root = scratch(mode);
+        install(&root, "ex", mode, 1);
+        let err = host(&root).search_providers(&["ex".into()])[0].search(&q()).await.unwrap_err();
+        assert_eq!(err, expect, "{mode}");
+        assert!(!err.to_string().contains("never shows"), "the plugin's own text is never shown");
+        std::fs::remove_dir_all(root).ok();
+    }
+    let root = scratch("config");
+    install(&root, "ex", "config", 1);
+    assert!(matches!(host(&root).search_providers(&["ex".into()])[0].search(&q()).await.unwrap_err(), ProviderError::Config(_)));
+    std::fs::remove_dir_all(root).ok();
+
+    // Rows that carry a label keep it; the aggregator doesn't add the plugin's name on top.
+    let root = scratch("labels");
+    install(&root, "ex", "labels", 1);
+    let ps = host(&root).search_providers(&["ex".into()]);
+    let rep = drift_core::search::search_all(&ps, &q(), Duration::from_secs(3)).await;
+    let by_title: Vec<_> = rep.results.iter().map(|r| (r.title.as_str(), r.sources.clone())).collect();
+    assert!(by_title.contains(&("ubuntu (example one)", vec!["Indexer A".to_string()])), "{by_title:?}");
+    assert!(by_title.contains(&("ubuntu (example two)", vec!["Indexer B".to_string()])), "{by_title:?}");
+    std::fs::remove_dir_all(root).ok();
+}
+
+fn install_with_list(root: &Path, id: &str) {
+    install(root, id, "", 1);
+    let form = r#""settings":[{"key":"indexers","label":"Indexers","type":"list","item":[{"key":"name","label":"Name","type":"text"},{"key":"url","label":"Address","type":"url"},{"key":"apikey","label":"API key","type":"secret"},{"key":"on","label":"On","type":"bool"}]}]"#;
+    let m = std::fs::read_to_string(root.join(id).join("plugin.json")).unwrap();
+    std::fs::write(root.join(id).join("plugin.json"), m.replacen('{', &format!("{{{form},"), 1)).unwrap();
+}
+
+#[tokio::test]
+async fn list_fields_keep_rows_and_their_secrets_together() {
+    let root = scratch("list");
+    install_with_list(&root, "ex");
+    let h = host(&root);
+    let on = vec!["ex".to_string()];
+    assert!(h.list(&on)[0].problem.is_none());
+
+    let rows = serde_json::json!({"indexers": [{"id": "a1", "name": "A", "url": "http://localhost:9117/api", "on": true}, {"id": "b2", "name": "B", "url": "", "on": false}]});
+    h.set_values("ex", obj(rows)).await.unwrap();
+    assert_eq!(h.list(&on)[0].values["indexers"][0]["name"], "A");
+
+    // A secret needs a row that exists, and only a secret field of that list.
+    assert!(h.set_secret("ex", "indexers.zz.apikey", "k").await.is_err(), "no such row");
+    assert!(h.set_secret("ex", "indexers.a1.name", "k").await.is_err(), "not a secret field");
+    assert!(h.set_secret("ex", "indexers.a1.apikey.extra", "k").await.is_err());
+    h.set_secret("ex", "indexers.a1.apikey", "KEY-A").await.unwrap();
+    h.set_secret("ex", "indexers.b2.apikey", "KEY-B").await.unwrap();
+    let mut set = h.list(&on)[0].secrets_set.clone();
+    set.sort();
+    assert_eq!(set, ["indexers.a1.apikey", "indexers.b2.apikey"]);
+    assert!(!serde_json::to_string(&h.list(&on)[0]).unwrap().contains("KEY-"), "values never leave the host");
+
+    // Removing a row removes its secret; a new row with the same id doesn't inherit it.
+    let a1 = "http://localhost:9117/api";
+    h.set_values("ex", obj(serde_json::json!({"indexers": [{"id": "a1", "name": "A", "url": a1, "on": true}]}))).await.unwrap();
+    assert_eq!(h.list(&on)[0].secrets_set, ["indexers.a1.apikey"]);
+    h.set_values("ex", obj(serde_json::json!({"indexers": [{"id": "a1", "url": a1}, {"id": "b2"}]}))).await.unwrap();
+    assert_eq!(h.list(&on)[0].secrets_set, ["indexers.a1.apikey"], "b2's old key is gone");
+
+    // A key saved for one server is never sent to another: changing a row's address clears it.
+    h.set_values("ex", obj(serde_json::json!({"indexers": [{"id": "a1", "url": "http://other.example/api"}]}))).await.unwrap();
+    assert!(h.list(&on)[0].secrets_set.is_empty(), "the key stayed with the old address");
+
+    // Bad rows are refused with the field's name.
+    for bad in [
+        serde_json::json!({"indexers": "not a list"}),
+        serde_json::json!({"indexers": [{"name": "no id"}]}),
+        serde_json::json!({"indexers": [{"id": "x y"}]}),
+        serde_json::json!({"indexers": [{"id": "a"}, {"id": "a"}]}),
+        serde_json::json!({"indexers": [{"id": "a", "apikey": "secrets don't go in rows"}]}),
+        serde_json::json!({"indexers": [{"id": "a", "url": "ftp://x"}]}),
+        serde_json::json!({"indexers": [{"id": "a", "extra": 1}]}),
+    ] {
+        assert!(h.set_values("ex", obj(bad.clone())).await.unwrap_err().contains("Indexers") || bad["indexers"].is_string(), "{bad}");
+    }
+    let too_many: Vec<_> = (0..51).map(|i| serde_json::json!({"id": format!("r{i}")})).collect();
+    assert!(h.set_values("ex", obj(serde_json::json!({"indexers": too_many}))).await.is_err());
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn a_list_inside_a_list_or_a_list_without_fields_is_not_a_valid_form() {
+    let root = scratch("badlist");
+    install(&root, "nested", "", 1);
+    install(&root, "empty", "", 1);
+    let put = |id: &str, form: &str| {
+        let m = std::fs::read_to_string(root.join(id).join("plugin.json")).unwrap();
+        std::fs::write(root.join(id).join("plugin.json"), m.replacen('{', &format!("{{{form},"), 1)).unwrap();
+    };
+    put("nested", r#""settings":[{"key":"a","label":"A","type":"list","item":[{"key":"b","label":"B","type":"list","item":[{"key":"c","label":"C","type":"text"}]}]}]"#);
+    put("empty", r#""settings":[{"key":"a","label":"A","type":"list","item":[]}]"#);
+    let h = host(&root);
+    assert!(h.list(&[]).iter().all(|p| p.problem.as_deref() == Some("Its settings form isn't valid.")));
+    std::fs::remove_dir_all(root).ok();
+}

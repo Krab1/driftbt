@@ -102,36 +102,32 @@ impl Service {
                 return Err(ApiError::new("network", why));
             }
         }
-        if before.search != new.search {
-            let ids: Vec<&str> = new.search.torznab.iter().map(|t| t.id.as_str()).collect();
-            let _ = self.secrets.retain(&ids);
-        }
         Ok(before)
     }
 
     pub async fn search(&self, text: &str) -> Result<SearchReport, ApiError> {
-        let (mut providers, enabled) = {
-            let s = self.settings.lock().unwrap();
-            (search::config::build_providers(&s.search, &self.secrets), s.plugins.clone())
-        };
-        providers.extend(self.plugins.search_providers(&enabled));
+        let enabled = self.settings.lock().unwrap().plugins.clone();
+        let providers = self.plugins.search_providers(&enabled);
         if providers.is_empty() {
-            return Err(ApiError::new("no_sources", "No search sources are turned on. Add one in Settings."));
+            return Err(ApiError::new("no_sources", "No search sources are turned on. Turn one on in Settings, under Plugins."));
         }
         let q = SearchQuery { text: text.trim().chars().take(200).collect(), limit: 50 };
         Ok(search::search_all(&providers, &q, search::DEFAULT_TIMEOUT).await)
     }
 
-    /// Asks one configured source a sample question so Settings can say whether it answers.
+    /// Asks one search plugin a sample question so Settings can say whether it answers.
     pub async fn test_search_source(&self, id: &str) -> Result<search::SourceStatus, ApiError> {
-        let providers = {
-            let s = self.settings.lock().unwrap();
-            search::config::build_providers(&s.search, &self.secrets)
-        };
-        let p = providers.into_iter().find(|p| p.id() == id).ok_or_else(|| ApiError::new("search", "Save the source and turn it on first, then test it."))?;
+        let enabled = self.settings.lock().unwrap().plugins.clone();
+        let p = self.plugins.search_providers(&enabled).into_iter().find(|p| p.id() == id).ok_or_else(|| ApiError::new("search", "Turn the plugin on first, then test it."))?;
         let q = SearchQuery { text: "test".into(), limit: 1 };
         let mut report = search::search_all(&[p], &q, search::DEFAULT_TIMEOUT).await;
         Ok(report.sources.remove(0))
+    }
+
+    /// Moves the old built-in search settings (Internet Archive switch, Torznab indexers and their keys) into the
+    /// plugins that replaced them. Safe to call on every start: once moved, there is nothing left to move.
+    pub async fn migrate_search_to_plugins(&self) {
+        search::migrate::run(&self.settings, self.store.as_ref(), &self.plugins, &self.secrets).await;
     }
 
     fn plugins_dir(&self) -> std::path::PathBuf {
@@ -205,22 +201,6 @@ impl Service {
 
     pub fn list_plugins(&self) -> Vec<crate::plugins::PluginInfo> {
         self.plugins.list(&self.settings.lock().unwrap().plugins)
-    }
-
-    /// Ids of sources that have a key saved. The keys themselves never leave the backend.
-    pub fn search_keys_set(&self) -> Vec<String> {
-        let s = self.settings.lock().unwrap();
-        s.search.torznab.iter().filter(|t| self.secrets.has(&t.id)).map(|t| t.id.clone()).collect()
-    }
-
-    pub fn set_search_key(&self, id: &str, key: &str) -> Result<(), ApiError> {
-        if !self.settings.lock().unwrap().search.torznab.iter().any(|t| t.id == id) {
-            return Err(ApiError::new("search", "Save the source first, then add its key."));
-        }
-        self.secrets.set(id, key.trim()).map_err(|e| {
-            eprintln!("saving a search key failed: {e}");
-            ApiError::new("settings", "Couldn't save the key. Check that the app data folder is writable.")
-        })
     }
 
     pub async fn update_ip_lists(&self) -> Result<crate::netctl::FilterStatus, ApiError> {

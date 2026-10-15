@@ -123,13 +123,11 @@ pub fn router(shared: S) -> Router {
         .route("/filter", get(filter))
         .route("/filter/update", post(filter_update))
         .route("/search", post(search))
-        .route("/search/keys", get(search_keys))
         .route("/search/test/{id}", post(test_search_source))
         .route("/plugins", get(plugins))
         .route("/plugins/{id}/settings", put(set_plugin_settings))
         .route("/plugins/{id}/secrets/{key}", put(set_plugin_secret))
         .route("/plugins/{id}/log", get(plugin_log))
-        .route("/search/keys/{id}", put(set_search_key))
         .route("/events", get(events))
         .layer(middleware::from_fn_with_state(shared.clone(), require_token))
         // Torrent files arrive as JSON number arrays, so allow generous bodies.
@@ -326,17 +324,9 @@ async fn plugins(State(s): State<S>) -> Json<Vec<drift_core::plugins::PluginInfo
     Json(s.svc.list_plugins())
 }
 
-async fn search_keys(State(s): State<S>) -> Json<Vec<String>> {
-    Json(s.svc.search_keys_set())
-}
-
 #[derive(Deserialize)]
 struct KeyBody {
     key: String,
-}
-
-async fn set_search_key(State(s): State<S>, Path(id): Path<String>, Json(b): Json<KeyBody>) -> Res<()> {
-    Ok(Json(s.svc.set_search_key(&id, &b.key)?))
 }
 
 /// Snapshots every tick plus `completed`, `guard` and `watch` events. A client that falls behind skips ahead:

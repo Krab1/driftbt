@@ -136,10 +136,12 @@ async fn run() -> Result<(), String> {
         store,
         settings: settings.clone(),
         secrets: Secrets::open(data_dir.join("secrets.json")),
-        plugins: drift_core::plugins::Host::at(&data_dir),
+        // Next to the program: the first-party search sources, installed into the data folder at start.
+        plugins: drift_core::plugins::Host::at_with_bundled(&data_dir, std::env::current_exe().ok().and_then(|e| e.parent().map(|p| p.join("bundled-plugins"))).as_deref()),
         data_dir,
     });
     svc.switch_off_unapproved_plugins();
+    svc.migrate_search_to_plugins().await;
     let (tx, _) = broadcast::channel::<Event>(16);
     let shared = Arc::new(Shared { svc, token: token.clone(), events: tx.clone(), guard: Mutex::new(GuardStatus { state: drift_core::guard::Verdict::Off, paused: 0 }), ui_dir: args.ui_dir.clone() });
 

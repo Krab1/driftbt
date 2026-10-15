@@ -3,3 +3,5 @@ dist/
 target/
 src-tauri/gen/
 *.log
+
+src-tauri/bundled-plugins/*/

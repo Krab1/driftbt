@@ -1,6 +1,6 @@
 //! Reference search plugin: the smallest thing that speaks protocol v1 (docs/PLUGIN_PROTOCOL.md). It answers every
 //! search with two fixed results. The first argument picks a misbehaviour so the host can be tested against it:
-//! `crash` (exits on the first search), `hang` (never answers a search), `noise` (junk before each reply), `settings` (puts its settings and secrets into the result titles, to test the form).
+//! `crash` (exits on the first search), `hang` (never answers a search), `noise` (junk before each reply), `settings` (puts its settings and secrets into the result titles, to test the form), `auth` / `network` / `config` (answer a search with that error reason), `labels` (tags each row with its own `source`).
 
 use std::io::{BufRead, Write};
 
@@ -24,6 +24,11 @@ fn main() {
                 match mode.as_str() {
                     "crash" => std::process::exit(1),
                     "hang" => std::thread::sleep(std::time::Duration::from_secs(3600)),
+                    "auth" | "network" | "config" => {
+                        let _ = writeln!(out, "{}", json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": "a message the app never shows", "data": {"reason": mode}}}));
+                        let _ = out.flush();
+                        continue;
+                    }
                     _ => {}
                 }
                 let mut q = req["params"]["query"].as_str().unwrap_or("").to_string();
@@ -38,9 +43,10 @@ fn main() {
                     let (token, other) = (ask("token"), ask("undeclared"));
                     q = format!("{q} greeting={} token={token} other={other}", settings["greeting"]);
                 }
+                let tag = |row: Value, label: &str| if mode == "labels" { let mut r = row; r["source"] = json!(label); r } else { row };
                 json!({"results": [
-                    {"title": format!("{q} (example one)"), "info_hash": "0123456789abcdef0123456789abcdef01234567", "size": 1048576, "seeders": 5},
-                    {"title": format!("{q} (example two)"), "magnet": "magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef"}
+                    tag(json!({"title": format!("{q} (example one)"), "info_hash": "0123456789abcdef0123456789abcdef01234567", "size": 1048576, "seeders": 5}), "Indexer A"),
+                    tag(json!({"title": format!("{q} (example two)"), "magnet": "magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef"}), "Indexer B")
                 ]})
             }
             Some("shutdown") => {

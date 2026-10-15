@@ -37,7 +37,8 @@ pub struct Permissions {
     pub fs: Vec<String>,
 }
 
-/// One entry of a plugin's settings form. `type` is `text`, `url`, `number`, `bool` or `secret`.
+/// One entry of a plugin's settings form. `type` is `text`, `url`, `number`, `bool`, `secret` or `list`.
+/// A `list` is a set of rows the user can add and remove; `item` describes the fields of one row (no nested lists).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Field {
     pub key: String,
@@ -46,9 +47,45 @@ pub struct Field {
     pub kind: String,
     #[serde(default)]
     pub help: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub item: Vec<Field>,
 }
 
-const FIELD_KINDS: [&str; 5] = ["text", "url", "number", "bool", "secret"];
+const FIELD_KINDS: [&str; 6] = ["text", "url", "number", "bool", "secret", "list"];
+const MAX_ROWS: usize = 50;
+/// The most rows one plugin call may hand back, whatever limit was asked for.
+const MAX_PLUGIN_ROWS: usize = 500;
+
+/// Whether `v` is acceptable for a plain field of this kind.
+fn valid_value(kind: &str, v: &Value) -> bool {
+    match (kind, v) {
+        ("text", Value::String(s)) => s.chars().count() <= 500,
+        ("url", Value::String(s)) => s.is_empty() || (is_http_url(s) && s.len() <= 2048 && !s.contains(char::is_whitespace)),
+        ("number", Value::Number(_)) | ("bool", Value::Bool(_)) => true,
+        _ => false,
+    }
+}
+
+/// `http://` or `https://`, in any letter case (a scheme is case-insensitive).
+pub(crate) fn is_http_url(s: &str) -> bool {
+    let l = s.get(..8).unwrap_or(s).to_ascii_lowercase();
+    l.starts_with("http://") || l.starts_with("https://")
+}
+
+/// A row is an object with a plain `id` plus only the non-secret fields the list declares.
+fn valid_row(f: &Field, row: &Value) -> bool {
+    let Some(o) = row.as_object() else { return false };
+    o.get("id").and_then(Value::as_str).is_some_and(safe_id) && o.iter().all(|(k, v)| k == "id" || f.item.iter().any(|i| &i.key == k && i.kind != "secret" && valid_value(&i.kind, v)))
+}
+
+/// The form is well formed: known kinds, unique plain keys, lists only one level deep.
+fn form_ok(fields: &[Field], nested: bool) -> bool {
+    let mut seen = std::collections::HashSet::new();
+    fields.iter().all(|f| {
+        let shape = if f.kind == "list" { !nested && !f.item.is_empty() && form_ok(&f.item, true) } else { f.item.is_empty() };
+        safe_id(&f.key) && FIELD_KINDS.contains(&f.kind.as_str()) && shape && seen.insert(f.key.as_str())
+    })
+}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -86,6 +123,13 @@ impl Config {
     fn values(&self, m: &Manifest) -> Map<String, Value> {
         let mut v = self.values.lock().unwrap().get(&m.id).cloned().unwrap_or_default();
         v.retain(|k, _| m.settings.iter().any(|f| &f.key == k && f.kind != "secret"));
+        for f in m.settings.iter().filter(|f| f.kind == "list") {
+            if let Some(Value::Array(rows)) = v.get_mut(&f.key) {
+                for row in rows.iter_mut().filter_map(Value::as_object_mut) {
+                    row.retain(|k, _| k == "id" || f.item.iter().any(|i| &i.key == k && i.kind != "secret"));
+                }
+            }
+        }
         v
     }
 
@@ -94,10 +138,34 @@ impl Config {
     }
 }
 
-/// A secret field's value, and only for keys the manifest declares as secrets.
+/// Whether `key` names a secret the manifest declares: a top-level secret field, or `<list>.<row id>.<field>` for
+/// a secret field of a row that exists in the saved list.
+fn declared_secret(m: &Manifest, cfg: &Config, key: &str) -> bool {
+    if m.settings.iter().any(|f| f.key == key && f.kind == "secret") {
+        return true;
+    }
+    let parts: Vec<&str> = key.split('.').collect();
+    let [list, row, sub] = parts[..] else { return false };
+    let Some(f) = m.settings.iter().find(|f| f.key == list && f.kind == "list") else { return false };
+    f.item.iter().any(|i| i.key == sub && i.kind == "secret") && cfg.values(m).get(list).and_then(Value::as_array).is_some_and(|rows| rows.iter().any(|r| r["id"] == row))
+}
+
+/// A secret's value, and only for keys the manifest declares as secrets.
 fn plugin_secret(m: &Manifest, cfg: &Config, key: &str) -> Option<String> {
-    let declared = m.settings.iter().any(|f| f.key == key && f.kind == "secret");
-    declared.then(|| cfg.secret(&m.id, key)).filter(|v| !v.is_empty())
+    declared_secret(m, cfg, key).then(|| cfg.secret(&m.id, key)).filter(|v| !v.is_empty())
+}
+
+/// Every secret key the saved form can hold a value for, whether or not one is set.
+fn secret_keys(m: &Manifest, cfg: &Config) -> Vec<String> {
+    let mut keys: Vec<String> = m.settings.iter().filter(|f| f.kind == "secret").map(|f| f.key.clone()).collect();
+    let v = cfg.values(m);
+    for f in m.settings.iter().filter(|f| f.kind == "list") {
+        for row in v.get(&f.key).and_then(Value::as_array).into_iter().flatten() {
+            let Some(id) = row["id"].as_str() else { continue };
+            keys.extend(f.item.iter().filter(|i| i.kind == "secret").map(|i| format!("{}.{id}.{}", f.key, i.key)));
+        }
+    }
+    keys
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -110,7 +178,7 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Self { call_timeout: Duration::from_secs(5), idle: Duration::from_secs(300), backoff: Duration::from_secs(2) }
+        Self { call_timeout: Duration::from_secs(7), idle: Duration::from_secs(300), backoff: Duration::from_secs(2) }
     }
 }
 
@@ -122,8 +190,30 @@ enum CallError {
     Backoff,
     #[error("no answer")]
     Failed,
+    /// The plugin answered with an error. `reason` is one of the fixed words it may give in `error.data.reason`.
     #[error("the plugin reported an error")]
-    Rpc,
+    Rpc(Option<Reason>),
+}
+
+/// Why a plugin says a call failed. The app words the message itself; plugin text is never shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reason {
+    Network,
+    Auth,
+    BadResponse,
+    Config,
+}
+
+impl Reason {
+    fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "network" => Self::Network,
+            "auth" => Self::Auth,
+            "bad_response" => Self::BadResponse,
+            "config" => Self::Config,
+            _ => return None,
+        })
+    }
 }
 
 struct Running {
@@ -170,7 +260,7 @@ impl Running {
             }
             return match v.get("result") {
                 Some(r) if v.get("error").is_none() => Ok(r.clone()),
-                _ => Err(CallError::Rpc),
+                _ => Err(CallError::Rpc(v["error"]["data"]["reason"].as_str().and_then(Reason::parse))),
             };
         }
     }
@@ -281,9 +371,9 @@ impl Plugin {
                 Ok(v)
             }
             // The plugin answered, just not usefully: it is alive, so this isn't a crash.
-            Ok(Err(CallError::Rpc)) => {
+            Ok(Err(CallError::Rpc(reason))) => {
                 r.last_used = Instant::now();
-                Err(CallError::Rpc)
+                Err(CallError::Rpc(reason))
             }
             _ => {
                 self.failed(&mut st);
@@ -367,8 +457,7 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
     if m.api != API {
         return Err(format!("It was made for plugin protocol {}, and this Drift speaks {API}.", m.api));
     }
-    let mut seen = std::collections::HashSet::new();
-    if !m.settings.iter().all(|f| safe_id(&f.key) && FIELD_KINDS.contains(&f.kind.as_str()) && seen.insert(f.key.as_str())) {
+    if !form_ok(&m.settings, false) {
         return Err("Its settings form isn't valid.".into());
     }
     if m.exec.is_empty() || !inside(&m.exec[0]) || !dir.join(&m.exec[0]).is_file() {
@@ -384,6 +473,14 @@ impl Host {
 
     /// The plugins under `<data>/plugins`, with default limits and logs in `<data>/plugin-logs`.
     pub fn at(data_dir: &Path) -> Arc<Self> {
+        Self::at_with_bundled(data_dir, None)
+    }
+
+    /// Like `at`, and first installs or upgrades the plugins that ship inside the app (see `registry::provision`).
+    pub fn at_with_bundled(data_dir: &Path, bundled: Option<&Path>) -> Arc<Self> {
+        if let Some(b) = bundled {
+            registry::provision(b, &data_dir.join("plugins"));
+        }
         // Updates and rollbacks chosen last time take over now, before anything is running.
         let needs_approval = registry::apply_pending(&data_dir.join("plugins"));
         let mut host = Self::load(&data_dir.join("plugins"), &data_dir.join("plugin-logs"), Limits::default());
@@ -433,7 +530,9 @@ impl Host {
                 }
                 i.pending = registry::pending_version(&self.dir, &i.id);
                 i.previous = registry::previous_version(&self.dir, &i.id);
-                i.secrets_set = i.fields.iter().filter(|f| f.kind == "secret" && !self.cfg.secret(&i.id, &f.key).is_empty()).map(|f| f.key.clone()).collect();
+                if let Some(p) = &e.plugin {
+                    i.secrets_set = secret_keys(&p.manifest, &self.cfg).into_iter().filter(|k| !self.cfg.secret(&i.id, k).is_empty()).collect();
+                }
                 if let Some(p) = &e.plugin {
                     // `try_lock`: a plugin in the middle of a call is by definition not switched off.
                     if p.state.try_lock().is_ok_and(|s| s.disabled) {
@@ -455,13 +554,29 @@ impl Host {
         for (k, v) in &values {
             let f = p.manifest.settings.iter().find(|f| &f.key == k && f.kind != "secret").ok_or("That setting doesn't exist.")?;
             let ok = match (f.kind.as_str(), v) {
-                ("text", Value::String(s)) => s.chars().count() <= 500,
-                ("url", Value::String(s)) => s.is_empty() || ((s.starts_with("http://") || s.starts_with("https://")) && s.len() <= 2048 && !s.contains(char::is_whitespace)),
-                ("number", Value::Number(_)) | ("bool", Value::Bool(_)) => true,
-                _ => false,
+                ("list", Value::Array(rows)) => {
+                    let ids: std::collections::HashSet<_> = rows.iter().filter_map(|r| r["id"].as_str()).collect();
+                    rows.len() <= MAX_ROWS && ids.len() == rows.len() && rows.iter().all(|r| valid_row(f, r))
+                }
+                (kind, v) => valid_value(kind, v),
             };
             if !ok {
                 return Err(format!("\"{}\" doesn't have a valid value.", f.label));
+            }
+        }
+        // A row whose address was edited loses its saved secrets: a key stored for one server must not be sent to another.
+        let old = self.cfg.values(&p.manifest);
+        for f in p.manifest.settings.iter().filter(|f| f.kind == "list") {
+            let before = old.get(&f.key).and_then(Value::as_array);
+            for row in values.get(&f.key).and_then(Value::as_array).into_iter().flatten() {
+                let Some(rid) = row["id"].as_str() else { continue };
+                let prev = before.and_then(|b| b.iter().find(|r| r["id"] == rid));
+                let moved = prev.is_some_and(|pr| f.item.iter().filter(|i| i.kind == "url").any(|i| pr[&i.key] != row[&i.key]));
+                if moved {
+                    for i in f.item.iter().filter(|i| i.kind == "secret") {
+                        let _ = self.cfg.secrets.set(&format!("{id}:{}.{rid}.{}", f.key, i.key), "");
+                    }
+                }
             }
         }
         {
@@ -470,6 +585,12 @@ impl Host {
             let bytes = serde_json::to_vec_pretty(&*all).map_err(|e| e.to_string())?;
             crate::jsonfile::write_atomic(&self.cfg.path, &bytes).map_err(|_| "Couldn't save. Check that the app data folder is writable.".to_string())?;
         }
+        // Rows the user removed take their secrets with them.
+        let live = secret_keys(&p.manifest, &self.cfg);
+        let prefix = format!("{id}:");
+        let keep: Vec<String> = self.cfg.secrets.keys().into_iter().filter(|k| !k.starts_with(&prefix) || !k.contains('.') || live.contains(&k[prefix.len()..].to_string())).collect();
+        let keep: Vec<&str> = keep.iter().map(String::as_str).collect();
+        let _ = self.cfg.secrets.retain(&keep);
         p.restart().await;
         Ok(())
     }
@@ -477,8 +598,8 @@ impl Host {
     /// Saves one secret field. An empty value removes it.
     pub async fn set_secret(&self, id: &str, key: &str, value: &str) -> Result<(), String> {
         let p = self.find(id)?;
-        if !p.manifest.settings.iter().any(|f| f.key == key && f.kind == "secret") {
-            return Err("That isn't a secret setting.".into());
+        if !declared_secret(&p.manifest, &self.cfg, key) {
+            return Err("That isn't a secret setting. Save the list first if this is a new row.".into());
         }
         // The old value may be in the log; the log is only rewritten when the plugin next starts.
         let _ = std::fs::remove_file(&p.log);
@@ -507,11 +628,8 @@ impl Host {
             }
             Err(_) => String::new(),
         };
-        for f in p.manifest.settings.iter().filter(|f| f.kind == "secret") {
-            let v = self.cfg.secret(id, &f.key);
-            if !v.is_empty() {
-                text = text.replace(&v, "••••");
-            }
+        for v in self.cfg.secrets.values_with_prefix(&format!("{id}:")) {
+            text = text.replace(&v, "••••");
         }
         Ok(text)
     }
@@ -559,6 +677,9 @@ struct RawResult {
     published: Option<i64>,
     #[serde(default)]
     category: Option<String>,
+    /// A label for this row's badge when one plugin searches several places (for example several indexers).
+    #[serde(default)]
+    source: Option<String>,
 }
 
 /// Plugin output is untrusted: keep only usable rows and clamp what the UI will show.
@@ -574,7 +695,7 @@ fn sanitize(raw: Vec<RawResult>, source: &str, limit: usize) -> Vec<SearchResult
             }
             Some(SearchResult {
                 title,
-                sources: vec![source.to_string()],
+                sources: vec![r.source.map(|s| s.trim().chars().take(60).collect::<String>()).filter(|s| !s.is_empty()).unwrap_or_else(|| source.to_string())],
                 info_hash,
                 magnet,
                 torrent_url,
@@ -585,7 +706,9 @@ fn sanitize(raw: Vec<RawResult>, source: &str, limit: usize) -> Vec<SearchResult
                 category: r.category.map(|c| c.chars().take(60).collect()),
             })
         })
-        .take(limit)
+        // Not cut to the search limit here: a plugin that searches several places sends each place's best rows,
+        // and the aggregator ranks everything together before trimming to the limit.
+        .take(limit.max(MAX_PLUGIN_ROWS))
         .collect()
 }
 
@@ -601,7 +724,10 @@ impl SearchProvider for ExternalSearchProvider {
 
     async fn search(&self, q: &SearchQuery) -> Result<Vec<SearchResult>, ProviderError> {
         let v = self.plugin.call("search", json!({"query": q.text, "limit": q.limit})).await.map_err(|e| match e {
-            CallError::Rpc => ProviderError::BadResponse,
+            CallError::Rpc(Some(Reason::Network)) => ProviderError::Network,
+            CallError::Rpc(Some(Reason::Auth)) => ProviderError::Auth,
+            CallError::Rpc(Some(Reason::Config)) => ProviderError::Config("Check this plugin's settings.".into()),
+            CallError::Rpc(_) => ProviderError::BadResponse,
             _ => ProviderError::Plugin,
         })?;
         let raw: Vec<RawResult> = serde_json::from_value(v.get("results").cloned().unwrap_or(Value::Null)).map_err(|_| ProviderError::BadResponse)?;
@@ -664,7 +790,7 @@ mod tests {
     #[test]
     fn plugin_rows_are_cleaned() {
         let good = "0123456789abcdef0123456789abcdef01234567";
-        let raw = |t: &str, h: Option<&str>, m: Option<&str>, u: Option<&str>| RawResult { title: t.into(), info_hash: h.map(Into::into), magnet: m.map(Into::into), torrent_url: u.map(Into::into), size: None, seeders: None, leechers: None, published: None, category: None };
+        let raw = |t: &str, h: Option<&str>, m: Option<&str>, u: Option<&str>| RawResult { title: t.into(), info_hash: h.map(Into::into), magnet: m.map(Into::into), torrent_url: u.map(Into::into), size: None, seeders: None, leechers: None, published: None, category: None, source: None };
         let rows = vec![
             raw("ok", Some(&good.to_uppercase()), None, None),
             raw("", Some(good), None, None),

@@ -223,7 +223,6 @@ export const httpApi: Api = {
   getSettings: () => call("GET", "/settings"),
   setSettings: (s) => call("PUT", "/settings", s),
   search: (text) => call("POST", "/search", { text }),
-  searchKeysSet: () => call("GET", "/search/keys"),
   testSearchSource: (id) => call("POST", `/search/test/${enc(id)}`),
   listPlugins: () => call("GET", "/plugins"),
   // Installing runs code on the host, so it is only offered in the desktop app, never over the remote API.
@@ -233,7 +232,6 @@ export const httpApi: Api = {
   setPluginSettings: (id, values) => call("PUT", `/plugins/${enc(id)}/settings`, values),
   setPluginSecret: (id, key, value) => call("PUT", `/plugins/${enc(id)}/secrets/${enc(key)}`, { key: value }),
   pluginLog: (id) => call("GET", `/plugins/${enc(id)}/log`),
-  setSearchKey: (id, key) => call("PUT", `/search/keys/${enc(id)}`, { key }),
   onSnapshot: on<Torrent[]>("snapshot"),
   pickFolder: async (current) => prompt("Path of the folder on the server", current ?? "")?.trim() || null,
 };

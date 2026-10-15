@@ -246,16 +246,6 @@ pub fn list_plugins(state: State<'_, AppState>) -> Vec<drift_core::plugins::Plug
     state.svc.list_plugins()
 }
 
-#[tauri::command]
-pub fn search_keys_set(state: State<'_, AppState>) -> Vec<String> {
-    state.svc.search_keys_set()
-}
-
-#[tauri::command]
-pub fn set_search_key(state: State<'_, AppState>, id: String, key: String) -> ApiResult<()> {
-    state.svc.set_search_key(&id, &key)
-}
-
 /// The maximize button's rectangle in physical window pixels (left, top, right, bottom); `None` hides it.
 #[tauri::command]
 pub fn set_caption_rect(state: State<'_, AppState>, rect: Option<[i32; 4]>) {

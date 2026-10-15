@@ -89,7 +89,15 @@ Manifest permissions (`net` host patterns, `fs` paths) are shown to the user on 
 
 ## First-party plugins (dogfooding)
 
-`torznab` and `archive_org` ship **bundled in the installer as plugins**, not as in-tree providers, once the protocol exists. That is the proof the protocol is good enough, and it lets search sources be fixed without an app release. Until M7 they are built in-tree behind `SearchProvider` (M6), then moved; the in-tree copies are then deleted.
+`torznab` and `archive_org` ship **bundled in the installer as plugins** (`crates/drift-search-plugin`; `scripts/bundle-plugins.ps1` lays them out in `src-tauri/bundled-plugins` and the installer carries them). That is the proof the protocol is good enough, and it lets search sources be fixed without an app release.
+
+- **Install and upgrade.** At every start `registry::provision` copies a bundled plugin into `<data>/plugins/<id>` if it is missing, and stages it to take over at the swap if it is older than the bundled copy. A copy that is the same or newer (say, updated from the registry) is left alone, and so is a rollback to an older version as long as the app's bundled copy isn't newer. Bundled folders are the app's own files, so they need no signature check, only to be loadable.
+- **Versions.** The bundled plugins take the app's version number (`scripts/bundle-plugins.ps1` writes it into each `plugin.json`), so an app release that changes the program always upgrades installed copies. A newer staged registry update is never replaced by an older bundled copy.
+- **Both plugins are the same program** (`drift-search.exe`, about 1 MB each in the installer) with a different argument in `plugin.json`. They don't depend on `drift-core`, so they carry no torrent engine.
+- **Updating one without an app release** means publishing a new version of that plugin's zip to the registry (`docs/PLUGINS.md`, Registry and updates); the app's bundled copy only matters on a fresh install or when the app itself carries a newer version.
+- **Migration.** Older versions kept search settings in the app's settings (`search.archive_org`, `search.torznab`) and keys in `secrets.json`. `search::migrate` moves them once: each indexer becomes a row of the `torznab` plugin, its key becomes that row's secret, and the plugins are switched on if they were on. The old values are cleared only after their plugin has taken them; a missing plugin loses nothing.
+- **Editing an indexer's address clears its saved key** (a key stored for one server is never sent to another). Add the key again after changing the address.
+- **Known differences from the built-in sources.** A Torznab indexer's own status (refused key, unreachable) is no longer reported per indexer: the plugin reports one result for all its indexers, and only reports a failure when every indexer failed (the most telling reason: a refused key, then a network error, then unreadable data). The Test button tests the plugin, not one indexer.
 
 ## What we deliberately do not build
 

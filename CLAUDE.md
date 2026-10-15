@@ -38,6 +38,9 @@ Read this file first, then the doc for your task. Do not skim.
 - Test torrents: only legal ones (Linux distro ISOs). Never commit downloaded data.
 - Commits: small, one task ID each (`M2-04: …`). Update the task status in `docs/ROADMAP.md` in the same commit.
 
+## First-party plugins
+The search sources are the plugin in `crates/drift-search-plugin`. Run `scripts\bundle-plugins.ps1` before `tauri dev` or a local `tauri build` (release.ps1 does it itself) so `src-tauri/bundled-plugins` has the plugin folders; without them the app starts with no search sources. `node scripts/e2e-search-plugins.mjs` runs headless Drift with old-style settings against a fake indexer.
+
 ## Driving the real app in tests
 Debug builds open a DevTools-protocol port on the webview when `DRIFT_CDP_PORT` is set (`src-tauri/src/main.rs`, compiled out of release). With the Vite dev server running (`npm run dev`) and `cargo build -p drift`:
 ```powershell

@@ -6,6 +6,7 @@ import type {
   Completed,
   FileDetails,
   OpenPayload,
+  PluginValue,
   Settings,
   TorrentDetails,
   TorrentPreview,
@@ -242,9 +243,10 @@ export function createMockApi(count = 40): Api {
     return () => void set.delete(cb);
   };
 
-  let keys: string[] = [];
-  let pluginValues: Record<string, string | number | boolean> = {};
+  let pluginValues: Record<string, PluginValue> = {};
   let pluginSecrets: string[] = [];
+  let torznabValues: Record<string, PluginValue> = {};
+  let torznabSecrets: string[] = [];
 
   return {
     list: async () => snapshot(),
@@ -392,7 +394,6 @@ export function createMockApi(count = 40): Api {
         ],
       };
     },
-    searchKeysSet: async () => keys,
     testSearchSource: async (id) => {
       await new Promise((r) => setTimeout(r, 600));
       return id === "archive_org" ? { id, name: "Internet Archive", outcome: "ok", count: 1, message: null } : { id, name: id, outcome: "failed", count: 0, message: "This source refused the API key. Check it in Settings." };
@@ -418,6 +419,33 @@ export function createMockApi(count = 40): Api {
         pending: null,
         previous: "0.9.0",
       },
+      {
+        id: "torznab",
+        name: "Torznab indexers",
+        version: "1.0.0",
+        kinds: ["search"],
+        permissions: { net: ["*"], fs: [] },
+        enabled: settings.plugins.includes("torznab"),
+        problem: null,
+        fields: [
+          {
+            key: "indexers",
+            label: "Indexers",
+            type: "list",
+            help: "Torznab is the search API that Jackett and Prowlarr offer.",
+            item: [
+              { key: "name", label: "Name", type: "text", help: null },
+              { key: "url", label: "Address", type: "url", help: null },
+              { key: "apikey", label: "API key", type: "secret", help: null },
+              { key: "enabled", label: "Use this indexer", type: "bool", help: null },
+            ],
+          },
+        ],
+        values: { ...torznabValues },
+        secrets_set: [...torznabSecrets],
+        pending: null,
+        previous: null,
+      },
       { id: "old", name: "Old plugin", version: "0.3.0", kinds: ["search"], permissions: { net: [], fs: [] }, enabled: false, problem: "It was made for plugin protocol 2, and this Drift speaks 1.", fields: [], values: {}, secrets_set: [], pending: null, previous: null },
     ],
     pluginOffers: async () => {
@@ -432,16 +460,15 @@ export function createMockApi(count = 40): Api {
       await new Promise((r) => setTimeout(r, 500));
     },
     rollbackPlugin: async () => {},
-    setPluginSettings: async (_id, values) => {
-      pluginValues = { ...values };
+    setPluginSettings: async (id, values) => {
+      if (id === "torznab") torznabValues = { ...values };
+      else pluginValues = { ...values };
     },
-    setPluginSecret: async (_id, key, value) => {
-      pluginSecrets = value ? [...new Set([...pluginSecrets, key])] : pluginSecrets.filter((k) => k !== key);
+    setPluginSecret: async (id, key, value) => {
+      if (id === "torznab") torznabSecrets = value ? [...new Set([...torznabSecrets, key])] : torznabSecrets.filter((k) => k !== key);
+      else pluginSecrets = value ? [...new Set([...pluginSecrets, key])] : pluginSecrets.filter((k) => k !== key);
     },
     pluginLog: async () => "2026-10-15 starting\nconnected to example server\nsearch 'ubuntu': 12 rows",
-    setSearchKey: async (id, key) => {
-      keys = key ? [...new Set([...keys, id])] : keys.filter((k) => k !== id);
-    },
     getSettings: async () => ({ ...settings }),
     setSettings: async (s) => (settings = { ...s }),
     onSnapshot: sub(snapSubs),

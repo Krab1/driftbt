@@ -31,6 +31,8 @@ $cargo = [regex]::Replace($cargo, '(?m)^(version\s*=\s*")[^"]+(")', "`${1}$Versi
 
 $env:TAURI_SIGNING_PRIVATE_KEY = $KeyPath
 $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
+& "$PSScriptRoot\bundle-plugins.ps1"
+if ($LASTEXITCODE -ne 0) { throw "bundling the plugins failed" }
 npm run tauri build -- --bundles nsis
 if ($LASTEXITCODE -ne 0) { throw "build failed" }
 

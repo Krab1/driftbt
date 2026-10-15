@@ -1,0 +1,9 @@
+{
+  "id": "archive_org",
+  "name": "Internet Archive",
+  "version": "1.0.0",
+  "api": 1,
+  "kinds": ["search"],
+  "exec": ["drift-search.exe", "archive_org"],
+  "permissions": { "net": ["archive.org"], "fs": [] }
+}

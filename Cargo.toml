@@ -1,9 +1,9 @@
 [workspace]
 resolver = "2"
-members = ["crates/drift-core", "crates/drift-server", "src-tauri"]
+members = ["crates/drift-core", "crates/drift-server", "crates/drift-search-plugin", "src-tauri"]
 
 [workspace.package]
-version = "0.1.13"
+version = "0.1.14"
 edition = "2021"
 license = "MIT"
 

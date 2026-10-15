@@ -240,10 +240,13 @@ fn main() {
                 store,
                 settings: settings.clone(),
                 secrets: drift_core::search::config::Secrets::open(data_dir.join("secrets.json")),
-                plugins: drift_core::plugins::Host::at(&data_dir),
+                // The first-party search sources ship inside the app and are installed into the data folder here.
+                plugins: drift_core::plugins::Host::at_with_bundled(&data_dir, app.path().resource_dir().ok().map(|d| d.join("bundled-plugins")).as_deref()),
                 data_dir: data_dir.clone(),
             });
             svc.switch_off_unapproved_plugins();
+            // Moves the old built-in search settings (Internet Archive, Torznab indexers and keys) into their plugins.
+            tauri::async_runtime::block_on(svc.migrate_search_to_plugins());
             let svc_settings = svc.settings.clone();
             app.manage(AppState {
                 manager: manager.clone(),
@@ -367,7 +370,6 @@ fn main() {
             commands::filter_status,
             commands::update_ip_lists,
             commands::search_torrents,
-            commands::search_keys_set,
             commands::test_search_source,
             commands::list_plugins,
             commands::plugin_offers,
@@ -376,7 +378,6 @@ fn main() {
             commands::set_plugin_settings,
             commands::set_plugin_secret,
             commands::plugin_log,
-            commands::set_search_key,
             commands::set_caption_rect,
             commands::check_update,
             commands::install_update,

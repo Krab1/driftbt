@@ -1,0 +1,23 @@
+{
+  "id": "torznab",
+  "name": "Torznab indexers",
+  "version": "1.0.0",
+  "api": 1,
+  "kinds": ["search"],
+  "exec": ["drift-search.exe", "torznab"],
+  "permissions": { "net": ["*"], "fs": [] },
+  "settings": [
+    {
+      "key": "indexers",
+      "label": "Indexers",
+      "type": "list",
+      "help": "Torznab is the search API that Jackett and Prowlarr offer. Run one of them yourself and point Drift at it, so what gets searched is your choice. Keys are stored only on this computer and are never shown again.",
+      "item": [
+        { "key": "name", "label": "Name", "type": "text" },
+        { "key": "url", "label": "Address", "type": "url", "help": "For example http://localhost:9117/api/v2.0/indexers/all/results/torznab/" },
+        { "key": "apikey", "label": "API key", "type": "secret" },
+        { "key": "enabled", "label": "Use this indexer", "type": "bool" }
+      ]
+    }
+  ]
+}

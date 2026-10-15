@@ -9,9 +9,8 @@ use std::time::Duration;
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
-pub mod archive_org;
 pub mod config;
-pub mod torznab;
+pub mod migrate;
 
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(6);
 
@@ -182,10 +181,9 @@ pub async fn search_all(providers: &[Arc<dyn SearchProvider>], q: &SearchQuery, 
     for (id, name, r) in futures_util::future::join_all(runs).await {
         let (outcome, count, message) = match r {
             Ok(Ok(mut found)) => {
-                for f in &mut found {
-                    if !f.sources.contains(&name) {
-                        f.sources.push(name.clone());
-                    }
+                // A source that already labelled its rows (a plugin searching several places) keeps its labels.
+                for f in found.iter_mut().filter(|f| f.sources.is_empty()) {
+                    f.sources.push(name.clone());
                 }
                 let n = found.len();
                 all.extend(found);

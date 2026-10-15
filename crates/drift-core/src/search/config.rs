@@ -1,16 +1,13 @@
-//! Which search sources are on, and the secrets they need. Keys live in their own file, never in settings,
-//! so the settings the UI reads and writes can't leak them.
+//! The secrets file, and the shape of the old built-in search settings. Search sources are plugins now; the old
+//! settings are only read once, by `search::migrate`, to move them over. Keys live in their own file, never in
+//! settings, so the settings the UI reads and writes can't leak them.
 // ponytail: plain file in the per-user app-data folder; move to Windows Credential Manager if keys need OS-level protection.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
-
-use super::archive_org::ArchiveOrg;
-use super::torznab::Torznab;
-use super::SearchProvider;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
@@ -56,6 +53,16 @@ impl Secrets {
         self.map.lock().unwrap().get(id).cloned().unwrap_or_default()
     }
 
+    /// Every stored key (never the values).
+    pub fn keys(&self) -> Vec<String> {
+        self.map.lock().unwrap().keys().cloned().collect()
+    }
+
+    /// The stored values whose key starts with `prefix`; used to blank them out of logs.
+    pub fn values_with_prefix(&self, prefix: &str) -> Vec<String> {
+        self.map.lock().unwrap().iter().filter(|(k, v)| k.starts_with(prefix) && !v.is_empty()).map(|(_, v)| v.clone()).collect()
+    }
+
     pub fn has(&self, id: &str) -> bool {
         !self.get(id).is_empty()
     }
@@ -82,42 +89,9 @@ impl Secrets {
     }
 }
 
-/// Enabled, valid sources only; a source with a bad address is left out rather than failing every search.
-pub fn build_providers(s: &SearchSettings, secrets: &Secrets) -> Vec<Arc<dyn SearchProvider>> {
-    let mut out: Vec<Arc<dyn SearchProvider>> = Vec::new();
-    if s.archive_org {
-        out.push(Arc::new(ArchiveOrg::new()));
-    }
-    for t in s.torznab.iter().filter(|t| t.enabled && t.id_is_valid()) {
-        if let Ok(p) = Torznab::new(&t.id, &t.name, &t.url, &secrets.get(&t.id)) {
-            out.push(Arc::new(p));
-        }
-    }
-    out
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn tz(id: &str, url: &str, enabled: bool) -> TorznabConfig {
-        TorznabConfig { id: id.into(), name: id.to_uppercase(), url: url.into(), enabled }
-    }
-
-    #[test]
-    fn only_enabled_valid_sources_are_built() {
-        let dir = std::env::temp_dir().join(format!("drift-sec-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let sec = Secrets::open(dir.join("secrets.json"));
-        let s = SearchSettings {
-            archive_org: true,
-            torznab: vec![tz("ok", "http://localhost:9117/api", true), tz("off", "http://localhost:9117/api", false), tz("bad", "nonsense", true), tz("bad id!", "http://x/", true)],
-        };
-        let ids: Vec<_> = build_providers(&s, &sec).iter().map(|p| p.id().to_string()).collect();
-        assert_eq!(ids, ["archive_org", "ok"]);
-        assert!(build_providers(&SearchSettings { archive_org: false, torznab: vec![] }, &sec).is_empty());
-        std::fs::remove_dir_all(dir).ok();
-    }
 
     #[test]
     fn secrets_persist_clear_and_prune() {

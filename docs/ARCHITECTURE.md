@@ -69,13 +69,11 @@ pub trait SearchProvider: Send + Sync {
 
 `core::search::Aggregator` fans out to all enabled providers in parallel with a per-provider timeout (default 6 s), reports per-provider status (ok / failed / timed out) alongside results, de-duplicates by info-hash (merging seeder counts and source badges), and ranks by seeders. One provider failing never fails the search. No result caching beyond the current query.
 
-Shipped providers (no scrapers for third-party indexes are bundled — see D-8):
-- `torznab` — any Torznab/Newznab-style endpoint the user configures (Jackett, Prowlarr, and similar). This is how users bring their own sources. API key is stored in the Windows Credential Manager, not in the settings JSON.
+Search sources shipped with Drift (no scrapers for third-party indexes are bundled — see D-8) are **bundled plugins**, built from `crates/drift-search-plugin` (one small program, started with the source's name):
+- `torznab` — any Torznab/Newznab-style endpoint the user configures (Jackett, Prowlarr, and similar), as a list of indexers in the plugin's settings form. Each indexer's API key is a secret of its row, kept in the plugin secrets file, not in the settings JSON. Results carry the indexer's name as their badge.
 - `archive_org` — Internet Archive advanced search, torrents of public items.
 
-Providers are user-toggleable; the user can add several Torznab endpoints.
-
-Plugins (out-of-process, independently updatable) plug into this same registry through an `ExternalSearchProvider` adapter; see `docs/PLUGINS.md`. The trait does not change when a source moves from built-in to plugin.
+The app itself has no built-in provider any more: `core::plugins` wraps every enabled search plugin as a `SearchProvider` (`ExternalSearchProvider`), and the aggregator can't tell them from any other source. See `docs/PLUGINS.md` and `docs/PLUGIN_PROTOCOL.md`.
 
 ## Headless server (`drift-server`)
 

@@ -359,6 +359,40 @@ pub fn apply_pending(plugins: &Path) -> Vec<String> {
     needs_approval
 }
 
+/// Installs the plugins that ship inside the app (the first-party search sources) into the plugins folder: a
+/// plugin that isn't there is copied in, one that is older than the bundled copy is staged to take over at the
+/// next swap, and one that is the same or newer (say, updated from the registry) is left alone. The bundled folders
+/// are the app's own files, so unlike downloads they need no signature check, only to be loadable.
+pub fn provision(bundled: &Path, plugins: &Path) {
+    let Ok(rd) = std::fs::read_dir(bundled) else { return };
+    for e in rd.filter_map(|e| e.ok()).filter(|e| e.path().is_dir()) {
+        let id = e.file_name().to_string_lossy().into_owned();
+        let Some(m) = read_manifest(&e.path()) else { continue };
+        if !safe_id(&id) || m.id != id || check(&m, &e.path()).is_err() {
+            continue;
+        }
+        let live = plugins.join(&id);
+        let tmp = plugins.join(".staging").join(".tmp").join(format!("bundled-{id}"));
+        let _ = std::fs::remove_dir_all(&tmp);
+        match read_manifest(&live) {
+            None if !live.exists() => {
+                if copy_dir(&e.path(), &tmp).is_err() || std::fs::rename(&tmp, &live).is_err() {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                }
+            }
+            // Staged only when it beats both the live copy and anything already waiting (a newer registry update stays).
+            Some(l) if newer(&m.version, &l.version) && pending_version(plugins, &id).is_none_or(|p| newer(&m.version, &p)) => {
+                let staged = plugins.join(".staging").join(&id);
+                let _ = std::fs::remove_dir_all(&staged);
+                if copy_dir(&e.path(), &tmp).is_err() || std::fs::rename(&tmp, &staged).is_err() {
+                    let _ = std::fs::remove_dir_all(&tmp);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 fn version_in(dir: &Path) -> Option<String> {
     let v: serde_json::Value = serde_json::from_slice(crate::jsonfile::strip_bom(&std::fs::read(dir.join("plugin.json")).ok()?)).ok()?;
     v["version"].as_str().map(str::to_string)
@@ -532,6 +566,45 @@ mod tests {
         std::fs::write(root.join(".staging").join("fresh").join("plugin.json"), manifest("fresh", "1.0.0")).unwrap();
         assert_eq!(apply_pending(&root), ["fresh"]);
         std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn bundled_plugins_are_installed_once_and_upgraded_only_when_the_app_has_a_newer_one() {
+        let (app, data) = (scratch("bundled-app"), scratch("bundled-data"));
+        let put = |dir: &Path, version: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("p.exe"), version).unwrap();
+            std::fs::write(dir.join("plugin.json"), manifest("ex", version)).unwrap();
+        };
+        put(&app.join("ex"), "1.0.0");
+        std::fs::create_dir_all(app.join("not-a-plugin")).unwrap();
+        std::fs::write(app.join("readme.txt"), "x").unwrap();
+
+        provision(&app, &data);
+        assert_eq!(version_in(&data.join("ex")).as_deref(), Some("1.0.0"), "a missing plugin is installed");
+        assert!(!data.join("not-a-plugin").exists());
+
+        // The user's copy is newer (from the registry): the app's older one never replaces it.
+        put(&data.join("ex"), "1.5.0");
+        provision(&app, &data);
+        assert_eq!(version_in(&data.join("ex")).as_deref(), Some("1.5.0"));
+
+        // A newer app brings a newer plugin: it is staged, then swapped in, keeping the old one for rollback.
+        put(&app.join("ex"), "2.0.0");
+        provision(&app, &data);
+        assert_eq!(pending_version(&data, "ex").as_deref(), Some("2.0.0"));
+        assert_eq!(version_in(&data.join("ex")).as_deref(), Some("1.5.0"), "nothing changes until the swap");
+        assert!(apply_pending(&data).is_empty(), "same access as before, so no new approval");
+        assert_eq!((version_in(&data.join("ex")).as_deref(), previous_version(&data, "ex").as_deref()), (Some("2.0.0"), Some("1.5.0")));
+        provision(&app, &data);
+        assert!(pending_version(&data, "ex").is_none(), "already current: nothing staged again");
+
+        // A registry update waiting to take over is newer than what the app carries: it is not replaced.
+        put(&data.join(".staging").join("ex"), "3.0.0");
+        provision(&app, &data);
+        assert_eq!(pending_version(&data, "ex").as_deref(), Some("3.0.0"));
+        std::fs::remove_dir_all(app).ok();
+        std::fs::remove_dir_all(data).ok();
     }
 
     #[test]

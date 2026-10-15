@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { api, type PluginInfo, type PluginOffer } from "../api";
+  import { api, type PluginField, type PluginInfo, type PluginOffer, type PluginRow, type PluginValue } from "../api";
   import { ui } from "../stores/ui.svelte";
 
   const s = $derived(ui.settings!);
@@ -8,31 +8,81 @@
   let loaded = $state(false);
 
   // What is typed into each plugin's form, until it is saved.
-  let drafts = $state<Record<string, Record<string, string | number | boolean | null>>>({});
+  let drafts = $state<Record<string, Record<string, PluginValue | null>>>({});
 
   async function load() {
     list = await api.listPlugins().catch(() => list);
-    for (const p of list) if (!drafts[p.id]) drafts[p.id] = { ...p.values };
+    for (const p of list) if (!drafts[p.id]) drafts[p.id] = structuredClone($state.snapshot(p.values));
   }
 
-  async function save(p: PluginInfo) {
+  /** A typed-in value turned into what the plugin stores for a field of this kind. */
+  function clean(kind: string, v: unknown): string | number | boolean | undefined {
+    if (kind === "bool") return !!v;
+    if (kind === "number") return typeof v === "number" ? v : undefined;
+    return String(v ?? "").trim();
+  }
+
+  const rowsOf = (p: PluginInfo, f: PluginField) => (drafts[p.id]?.[f.key] as PluginRow[] | undefined) ?? [];
+
+  /** Saves the form. Returns whether it worked. */
+  async function save(p: PluginInfo, quiet = false): Promise<boolean> {
     const d = drafts[p.id] ?? {};
-    const values: Record<string, string | number | boolean> = {};
+    const values: Record<string, PluginValue> = {};
     for (const f of p.fields) {
       if (f.type === "secret") continue;
-      const v = d[f.key];
-      if (f.type === "bool") values[f.key] = !!v;
-      else if (f.type === "number") {
-        if (typeof v === "number") values[f.key] = v;
-      } else values[f.key] = String(v ?? "").trim();
+      if (f.type === "list") {
+        values[f.key] = rowsOf(p, f).map((r) => {
+          const o: PluginRow = { id: String(r.id) };
+          for (const i of f.item ?? []) {
+            if (i.type === "secret") continue;
+            const v = clean(i.type, r[i.key]);
+            if (v !== undefined) o[i.key] = v;
+          }
+          return o;
+        });
+        continue;
+      }
+      const v = clean(f.type, d[f.key]);
+      if (v !== undefined) values[f.key] = v;
     }
+    let ok = true;
     try {
       await api.setPluginSettings(p.id, values);
-      ui.toast(`${p.name} settings saved.`);
+      if (!quiet) ui.toast(`${p.name} settings saved.`);
     } catch (e) {
       ui.fail(e);
+      ok = false;
     }
     await load();
+    return ok;
+  }
+
+  function addRow(p: PluginInfo, f: PluginField) {
+    const row: PluginRow = { id: "r" + Math.random().toString(36).slice(2, 8) };
+    for (const i of f.item ?? []) if (i.type === "bool") row[i.key] = true;
+    drafts[p.id][f.key] = [...rowsOf(p, f), row];
+  }
+
+  function removeRow(p: PluginInfo, f: PluginField, id: string) {
+    drafts[p.id][f.key] = rowsOf(p, f).filter((r) => r.id !== id);
+  }
+
+  /** A row's secret needs the row to exist, so the form is saved first. */
+  async function rowSecret(p: PluginInfo, f: PluginField, row: PluginRow, item: PluginField, clear = false) {
+    if (!(await save(p, true))) return;
+    await secret(p, `${f.key}.${row.id}.${item.key}`, item.label, clear);
+  }
+
+  let tests = $state<Record<string, { busy: boolean; ok?: boolean; text?: string }>>({});
+
+  async function test(id: string) {
+    tests[id] = { busy: true };
+    try {
+      const r = await api.testSearchSource(id);
+      tests[id] = r.outcome === "ok" ? { busy: false, ok: true, text: r.count > 0 ? "Working. It answered the sample search." : "Working, though the sample search found nothing." } : { busy: false, ok: false, text: r.message ?? "It didn't answer." };
+    } catch (e) {
+      tests[id] = { busy: false, ok: false, text: e instanceof Error ? e.message : "The test couldn't run." };
+    }
   }
 
   async function secret(p: PluginInfo, key: string, label: string, clear = false) {
@@ -129,6 +179,12 @@
           {:else}
             <small>Talks to: {p.permissions.net.length ? net(p) : "nothing"}</small>
           {/if}
+          {#if p.kinds.includes("search") && p.enabled && !p.problem}
+            <span class="test">
+              <button class="btn ghost" type="button" disabled={tests[p.id]?.busy} title="Send one sample search to this source" onclick={() => test(p.id)}>{tests[p.id]?.busy ? "Testing…" : "Test"}</button>
+              {#if tests[p.id]?.text}<small class:bad={!tests[p.id].ok} class:good={tests[p.id].ok} role="status">{tests[p.id].text}</small>{/if}
+            </span>
+          {/if}
           {#if p.pending}<small class="note">Version {p.pending} is ready and takes over when you restart Drift.</small>{/if}
           {#if p.previous && !p.pending}<small>Earlier version {p.previous} is kept. <button class="link" onclick={() => rollback(p)}>Go back to it</button></small>{/if}
           {#if p.enabled || !p.problem}
@@ -147,6 +203,28 @@
                           <button type="button" class="link" onclick={() => secret(p, f.key, f.label)}>{p.secrets_set.includes(f.key) ? "Change" : "Set"}</button>
                           {#if p.secrets_set.includes(f.key)}<button type="button" class="link" onclick={() => secret(p, f.key, f.label, true)}>Remove</button>{/if}
                         </span>
+                      {:else if f.type === "list"}
+                        <span class="lbl">{f.label}</span>
+                        {#each rowsOf(p, f) as row (row.id)}
+                          <div class="rowbox">
+                            {#each f.item ?? [] as i (i.key)}
+                              {#if i.type === "bool"}
+                                <label class="check"><input type="checkbox" checked={!!row[i.key]} onchange={(e) => (row[i.key] = e.currentTarget.checked)} /> {i.label}</label>
+                              {:else if i.type === "secret"}
+                                {@const saved = p.secrets_set.includes(`${f.key}.${row.id}.${i.key}`)}
+                                <span class="sec">
+                                  <small>{i.label}: {saved ? "saved" : "not set"}</small>
+                                  <button type="button" class="link" onclick={() => rowSecret(p, f, row, i)}>{saved ? "Change" : "Set"}</button>
+                                  {#if saved}<button type="button" class="link" onclick={() => rowSecret(p, f, row, i, true)}>Remove</button>{/if}
+                                </span>
+                              {:else}
+                                <input class="txt" type={i.type === "number" ? "number" : i.type === "url" ? "url" : "text"} autocomplete="off" placeholder={i.label} aria-label={i.label} value={row[i.key] ?? ""} oninput={(e) => (row[i.key] = i.type === "number" ? e.currentTarget.valueAsNumber : e.currentTarget.value)} />
+                              {/if}
+                            {/each}
+                            <button type="button" class="btn ghost icon" aria-label="Remove this row" onclick={() => removeRow(p, f, String(row.id))}>✕</button>
+                          </div>
+                        {/each}
+                        <div><button type="button" class="btn" onclick={() => addRow(p, f)}>Add</button></div>
                       {:else}
                         <label class="lbl" for="pf-{p.id}-{f.key}">{f.label}</label>
                         <input id="pf-{p.id}-{f.key}" class="txt" type={f.type === "number" ? "number" : f.type === "url" ? "url" : "text"} autocomplete="off" value={drafts[p.id]?.[f.key] ?? ""} oninput={(e) => (drafts[p.id][f.key] = f.type === "number" ? (e.currentTarget.value === "" ? null : e.currentTarget.valueAsNumber) : e.currentTarget.value)} />
@@ -236,6 +314,32 @@
   }
   .note {
     color: var(--accent-fg);
+  }
+  .good {
+    color: var(--success);
+  }
+  .test {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    min-height: 24px;
+  }
+  .test .btn {
+    height: 24px;
+    padding: 0 8px;
+  }
+  .rowbox {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .rowbox .txt {
+    flex: 1;
+    min-width: 140px;
   }
   .more {
     margin-top: 4px;

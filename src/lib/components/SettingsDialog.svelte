@@ -5,23 +5,23 @@
   import Dialog from "./Dialog.svelte";
   import Icon from "./Icon.svelte";
   import NetworkPane from "./NetworkPane.svelte";
-  import SearchPane from "./SearchPane.svelte";
   import PluginsPane from "./PluginsPane.svelte";
   import SchedulePane from "./SchedulePane.svelte";
 
-  type Tab = "general" | "speed" | "queue" | "network" | "search" | "plugins";
+  type Tab = "general" | "speed" | "queue" | "network" | "plugins";
   const tabs: { key: Tab; label: string }[] = [
     { key: "general", label: "General" },
     { key: "speed", label: "Speed" },
     { key: "queue", label: "Queue and seeding" },
     { key: "network", label: "Network" },
-    { key: "search", label: "Search" },
     { key: "plugins", label: "Plugins" },
   ];
 
   const stored = () => {
     try {
-      return (localStorage.getItem("drift.settingsTab") as Tab) || "general";
+      // A tab that no longer exists (the old Search tab) falls back to the first one.
+      const t = localStorage.getItem("drift.settingsTab") as Tab;
+      return tabs.some((x) => x.key === t) ? t : "general";
     } catch {
       return "general" as Tab;
     }
@@ -221,8 +221,6 @@
           {#if catError}<small class="bad" role="alert">{catError}</small>{/if}
           <small>A category can send its torrents to their own folder. Assign one in the Add dialog or from a torrent's right-click menu.</small>
         </div>
-      {:else if tab === "search"}
-        <SearchPane />
       {:else if tab === "plugins"}
         <PluginsPane />
       {:else}

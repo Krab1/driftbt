@@ -25,7 +25,14 @@ Optional `settings` describes a form Drift draws in Settings → Plugins:
 ]
 ```
 
-`type` is `text`, `url`, `number`, `bool` or `secret`; `key` follows the same rules as `id` and must be unique. Plain values are sent to the plugin in `initialize` (`settings: {key: value}`). Secrets are never sent that way: the plugin asks for them with `get_secret`. Saving a form replaces all of the plugin's saved plain values, ends the running plugin so it restarts with the new values, and gives a plugin that was switched off after failures another chance. Values for fields the manifest no longer declares, or now declares as `secret`, are never sent. Changing or removing a secret also clears the plugin's log. A form that isn't valid is listed as a problem and the plugin can't be turned on.
+`type` is `text`, `url`, `number`, `bool`, `secret` or `list`; `key` follows the same rules as `id` and must be unique. Plain values are sent to the plugin in `initialize` (`settings: {key: value}`). Secrets are never sent that way: the plugin asks for them with `get_secret`. Saving a form replaces all of the plugin's saved plain values, ends the running plugin so it restarts with the new values, and gives a plugin that was switched off after failures another chance. Values for fields the manifest no longer declares, or now declares as `secret`, are never sent. Changing or removing a secret also clears the plugin's log. A form that isn't valid is listed as a problem and the plugin can't be turned on.
+
+A `list` field is a set of rows the user can add and remove (for example several indexers). Its `item` array describes one row with the same kinds except `list`; a list with no `item` fields, or a list inside a list, is an invalid form. Its value in `settings` is an array of objects: each has an `id` (letters, digits, `-`, `_`) plus the row's non-secret fields, at most 50 rows. A secret field of a row is asked for with `get_secret` using the key `<list key>.<row id>.<field key>`, for example `indexers.prowlarr.apikey`; the host answers only for rows that exist in the saved list, and removing a row deletes its secrets.
+
+```json
+{ "key": "indexers", "label": "Indexers", "type": "list",
+  "item": [ { "key": "name", "label": "Name", "type": "text" }, { "key": "apikey", "label": "API key", "type": "secret" } ] }
+```
 
 `api` must be `1`. A plugin with another value, a missing program or a bad folder name is listed in Settings with the reason and can't be turned on. `permissions` is shown to the user before the first enable. It is not enforced.
 
@@ -41,7 +48,7 @@ One JSON object per line (UTF-8, `\n`) on the plugin's stdin and stdout, JSON-RP
 | `search` | `{query, limit}` | `{results: [Result]}` |
 | `shutdown` | `{}` | `{}` (then exit) |
 
-`Result`: `title` (required), and at least one of `info_hash` (40 hex or 32 base32), `magnet` (`magnet:?…`), `torrent_url` (http/https). Optional: `size` (bytes), `seeders`, `leechers`, `published` (unix seconds), `category`. Rows without a title or any way to open them are dropped; titles are cut at 300 characters.
+`Result`: `title` (required), and at least one of `info_hash` (40 hex or 32 base32), `magnet` (`magnet:?…`), `torrent_url` (http/https). Optional: `size` (bytes), `seeders`, `leechers`, `published` (unix seconds), `category`. Rows without a title or any way to open them are dropped; titles are cut at 300 characters. A row may also carry `source`, a label (up to 60 characters) for its badge when one plugin searches several places, for example the indexer's name; without it the badge is the plugin's name.
 
 ## Calls (plugin → app)
 
@@ -54,9 +61,9 @@ This is the only request a plugin can make. Settings values and secrets live bes
 ## Lifecycle
 
 - Started on first use, ended after 5 minutes idle (`shutdown`, then killed).
-- Each call has 5 seconds. A timeout, a crash, bad JSON or end of output kills the process and counts as a failure.
+- Each call has 7 seconds (the search as a whole is cut at 6, so a slow plugin never holds results back longer than that). A timeout, a crash, bad JSON or end of output kills the process and counts as a failure.
 - After a failure the plugin isn't started again for 2 s, then 4 s. The third failure in a row switches it off until Drift restarts. Any good answer resets the count.
-- An error reply (`"error"` in the response) means the plugin is alive; it fails that search only.
+- An error reply (`"error"` in the response) means the plugin is alive; it fails that search only. The plugin can say why with `error.data.reason`: `network` (couldn't reach the service), `auth` (the service refused the key), `bad_response` (the answer couldn't be read) or `config` (not set up yet). Drift shows its own wording for the reason and never the plugin's `message`, so nothing a remote server said (or an address or key) reaches the screen. No reason, or an unknown one, counts as `bad_response`.
 - A failing plugin never fails the search: the other sources still answer and the plugin shows as failed in the results panel.
 
 ## Reference

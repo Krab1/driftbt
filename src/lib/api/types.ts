@@ -121,17 +121,15 @@ export interface SearchReport {
   sources: SourceStatus[];
 }
 
-export interface TorznabConfig {
-  id: string;
-  name: string;
-  url: string;
-  enabled: boolean;
-}
-
+/** The old built-in search settings. Search sources are plugins now; Drift moves these over once at start. */
 export interface SearchSettings {
   archive_org: boolean;
-  torznab: TorznabConfig[];
+  torznab: { id: string; name: string; url: string; enabled: boolean }[];
 }
+
+/** One row of a list field (for example one Torznab indexer): an `id` plus the list's non-secret fields. */
+export type PluginRow = Record<string, string | number | boolean>;
+export type PluginValue = string | number | boolean | PluginRow[];
 
 export interface PluginInfo {
   id: string;
@@ -144,7 +142,8 @@ export interface PluginInfo {
   problem: string | null;
   /** The settings form the plugin asks for, the current plain values, and which secret fields already hold a value. */
   fields: PluginField[];
-  values: Record<string, string | number | boolean>;
+  values: Record<string, PluginValue>;
+  /** Secret fields holding a value. A list row's secret is `<list key>.<row id>.<field key>`. */
   secrets_set: string[];
   /** A version from the registry that takes over at the next start, and the version a rollback would bring back. */
   pending: string | null;
@@ -164,8 +163,10 @@ export interface PluginOffer {
 export interface PluginField {
   key: string;
   label: string;
-  type: "text" | "url" | "number" | "bool" | "secret";
+  type: "text" | "url" | "number" | "bool" | "secret" | "list";
   help: string | null;
+  /** For a list: the fields of one row. */
+  item?: PluginField[];
 }
 
 export interface OpenPayload {
@@ -384,7 +385,6 @@ export interface Api {
   remove(id: string, deleteFiles: boolean): Promise<void>;
   search(text: string): Promise<SearchReport>;
   /** Ids of search sources that have an API key saved. The keys themselves never reach the UI. */
-  searchKeysSet(): Promise<string[]>;
   /** Asks one source a sample question; the result says whether it answered. */
   testSearchSource(id: string): Promise<SourceStatus>;
   listPlugins(): Promise<PluginInfo[]>;
@@ -394,13 +394,12 @@ export interface Api {
   installPlugin(id: string, version: string): Promise<void>;
   /** Brings back the version that was replaced last time, at the next start. */
   rollbackPlugin(id: string): Promise<void>;
-  setPluginSettings(id: string, values: Record<string, string | number | boolean>): Promise<void>;
+  setPluginSettings(id: string, values: Record<string, PluginValue>): Promise<void>;
   /** An empty value removes the secret. */
   setPluginSecret(id: string, key: string, value: string): Promise<void>;
   /** The end of the plugin's error output, with its secrets blanked. */
   pluginLog(id: string): Promise<string>;
   /** An empty key removes it. The source must already be saved in settings. */
-  setSearchKey(id: string, key: string): Promise<void>;
   getSettings(): Promise<Settings>;
   setSettings(s: Settings): Promise<Settings>;
   /** Returns an unsubscribe function. */

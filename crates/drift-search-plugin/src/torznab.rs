@@ -1,65 +1,87 @@
 //! Torznab: the standard search API that Jackett, Prowlarr and most indexer managers speak. The user points
-//! Drift at their own indexer, so which sites get searched is their choice and their setup.
+//! Drift at their own indexers, so which sites get searched is their choice and their setup.
 
 use std::time::Duration;
 
-use async_trait::async_trait;
+use futures_util::future::join_all;
 use quick_xml::events::{BytesStart, Event};
-use quick_xml::XmlVersion;
 use quick_xml::Reader;
+use quick_xml::XmlVersion;
 
-use super::{magnet_hash, ProviderError, SearchProvider, SearchQuery, SearchResult};
+use crate::row::{Reason, Row};
 
-pub struct Torznab {
-    id: String,
+/// One configured indexer, ready to ask.
+pub struct Indexer {
     name: String,
     base_url: String,
     api_key: String,
     client: reqwest::Client,
 }
 
-impl Torznab {
+impl Indexer {
     /// `base_url` is the indexer's Torznab endpoint, e.g. `http://localhost:9117/api/v2.0/indexers/all/results/torznab/`.
-    pub fn new(id: &str, name: &str, base_url: &str, api_key: &str) -> Result<Self, ProviderError> {
-        let url = reqwest::Url::parse(base_url.trim()).map_err(|_| ProviderError::Config("The address isn't valid.".into()))?;
+    pub fn new(name: &str, base_url: &str, api_key: &str) -> Result<Self, Reason> {
+        let url = reqwest::Url::parse(base_url.trim()).map_err(|_| Reason::Config)?;
         if !matches!(url.scheme(), "http" | "https") {
-            return Err(ProviderError::Config("Only http and https addresses work.".into()));
+            return Err(Reason::Config);
         }
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(10))
-            .user_agent(concat!("Drift/", env!("CARGO_PKG_VERSION")))
-            .build()
-            .map_err(|_| ProviderError::Network)?;
-        Ok(Self { id: id.into(), name: name.into(), base_url: url.to_string(), api_key: api_key.trim().into(), client })
-    }
-}
-
-#[async_trait]
-impl SearchProvider for Torznab {
-    fn id(&self) -> &str {
-        &self.id
+        // Under the app's own call limit (7 s) and the search's 6 s, so one slow indexer is cut off while the others still answer.
+        let client = reqwest::Client::builder().timeout(Duration::from_secs(5)).user_agent(concat!("Drift/", env!("CARGO_PKG_VERSION"))).build().map_err(|_| Reason::Network)?;
+        Ok(Self { name: name.into(), base_url: url.to_string(), api_key: api_key.trim().into(), client })
     }
 
-    fn name(&self) -> &str {
-        &self.name
-    }
-
-    async fn search(&self, q: &SearchQuery) -> Result<Vec<SearchResult>, ProviderError> {
-        let mut params: Vec<(&str, String)> = vec![("t", "search".into()), ("q", q.text.clone()), ("limit", q.limit.clamp(1, 100).to_string()), ("extended", "1".into())];
+    pub async fn search(&self, text: &str, limit: usize) -> Result<Vec<Row>, Reason> {
+        let mut params: Vec<(&str, String)> = vec![("t", "search".into()), ("q", text.to_string()), ("limit", limit.clamp(1, 100).to_string()), ("extended", "1".into())];
         if !self.api_key.is_empty() {
             params.push(("apikey", self.api_key.clone()));
         }
-        // Errors are mapped to fixed messages on purpose: reqwest's own text contains the full address, key included.
-        let resp = self.client.get(&self.base_url).query(&params).send().await.map_err(|_| ProviderError::Network)?;
+        // Errors are mapped to fixed reasons on purpose: reqwest's own text contains the full address, key included.
+        let resp = self.client.get(&self.base_url).query(&params).send().await.map_err(|_| Reason::Network)?;
         let status = resp.status();
         if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
-            return Err(ProviderError::Auth);
+            return Err(Reason::Auth);
         }
         if !status.is_success() {
-            return Err(ProviderError::BadResponse);
+            return Err(Reason::BadResponse);
         }
-        let body = resp.text().await.map_err(|_| ProviderError::Network)?;
-        parse_feed(&body)
+        let body = resp.text().await.map_err(|_| Reason::Network)?;
+        let mut rows = parse_feed(&body)?;
+        for r in &mut rows {
+            r.source = Some(self.name.clone());
+        }
+        Ok(rows)
+    }
+}
+
+/// Asks every indexer at once. One failing indexer never fails the others; the search fails only when every
+/// indexer failed, with the most telling reason (a refused key beats a network error beats unreadable data).
+pub async fn search_all(indexers: Vec<Indexer>, text: &str, limit: usize) -> Result<Vec<Row>, Reason> {
+    let results = join_all(indexers.iter().map(|i| i.search(text, limit))).await;
+    let mut rows = Vec::new();
+    let mut worst: Option<Reason> = None;
+    let mut any_ok = false;
+    for r in results {
+        match r {
+            Ok(mut found) => {
+                any_ok = true;
+                rows.append(&mut found);
+            }
+            Err(e) => {
+                let rank = |r: Reason| match r {
+                    Reason::Auth => 3,
+                    Reason::Network => 2,
+                    Reason::BadResponse => 1,
+                    Reason::Config => 0,
+                };
+                if worst.is_none_or(|w| rank(e) > rank(w)) {
+                    worst = Some(e);
+                }
+            }
+        }
+    }
+    match (any_ok, worst) {
+        (false, Some(e)) => Err(e),
+        _ => Ok(rows),
     }
 }
 
@@ -68,16 +90,16 @@ fn attr(e: &BytesStart, key: &str) -> Option<String> {
 }
 
 /// Reads a Torznab RSS feed. `<error code="1xx"/>` means the key was refused; anything else odd is unreadable.
-pub fn parse_feed(xml: &str) -> Result<Vec<SearchResult>, ProviderError> {
+pub fn parse_feed(xml: &str) -> Result<Vec<Row>, Reason> {
     let mut reader = Reader::from_str(xml);
-    let mut items: Vec<SearchResult> = Vec::new();
+    let mut items: Vec<Row> = Vec::new();
     let mut cur: Option<Item> = None;
     let mut text_of: Option<String> = None;
     let mut buf = String::new();
     let mut saw_feed = false;
 
     loop {
-        match reader.read_event().map_err(|_| ProviderError::BadResponse)? {
+        match reader.read_event().map_err(|_| Reason::BadResponse)? {
             Event::Eof => break,
             Event::Start(e) | Event::Empty(e) => {
                 let name = e.name().as_ref().to_string();
@@ -85,7 +107,7 @@ pub fn parse_feed(xml: &str) -> Result<Vec<SearchResult>, ProviderError> {
                     "rss" | "channel" => saw_feed = true,
                     "error" => {
                         let code: u32 = attr(&e, "code").and_then(|c| c.parse().ok()).unwrap_or(0);
-                        return Err(if (100..200).contains(&code) { ProviderError::Auth } else { ProviderError::BadResponse });
+                        return Err(if (100..200).contains(&code) { Reason::Auth } else { Reason::BadResponse });
                     }
                     "item" => cur = Some(Item::default()),
                     "enclosure" => {
@@ -131,7 +153,7 @@ pub fn parse_feed(xml: &str) -> Result<Vec<SearchResult>, ProviderError> {
                 buf.clear();
                 if e.name().as_ref() == "item" {
                     if let Some(c) = cur.take() {
-                        if let Some(r) = c.into_result() {
+                        if let Some(r) = c.into_row() {
                             items.push(r);
                         }
                     }
@@ -141,7 +163,7 @@ pub fn parse_feed(xml: &str) -> Result<Vec<SearchResult>, ProviderError> {
         }
     }
     if !saw_feed {
-        return Err(ProviderError::BadResponse);
+        return Err(Reason::BadResponse);
     }
     Ok(items)
 }
@@ -163,7 +185,7 @@ impl Item {
         self.attrs.iter().find(|(n, _)| n == name).map(|(_, v)| v.as_str())
     }
 
-    fn into_result(self) -> Option<SearchResult> {
+    fn into_row(self) -> Option<Row> {
         if self.title.is_empty() {
             return None;
         }
@@ -181,11 +203,10 @@ impl Item {
             let peers = self.get("peers").and_then(|v| v.parse::<u32>().ok())?;
             Some(peers.saturating_sub(seeders.unwrap_or(0)))
         });
-        let info_hash = self.get("infohash").map(str::to_string).or_else(|| magnet.as_deref().and_then(magnet_hash));
-        Some(SearchResult {
+        Some(Row {
             title: self.title.clone(),
-            sources: Vec::new(),
-            info_hash,
+            // A hash taken from a magnet link is worked out by Drift itself; only an explicit attribute is passed on.
+            info_hash: self.get("infohash").map(str::to_string),
             magnet,
             torrent_url,
             size: self.size.or(self.enclosure_len).or_else(|| self.get("size").and_then(|v| v.parse().ok())),
@@ -193,6 +214,7 @@ impl Item {
             leechers,
             published: self.pub_date.as_deref().and_then(|d| chrono::DateTime::parse_from_rfc2822(d).ok()).map(|d| d.timestamp()),
             category: self.category.clone().or_else(|| self.get("category").map(str::to_string)),
+            source: None,
         })
     }
 }
@@ -247,25 +269,24 @@ mod tests {
         assert_eq!(a.category.as_deref(), Some("Linux"));
         assert_eq!(a.published, Some(1_791_885_600));
         let b = &r[1];
-        assert!(b.magnet.as_deref().unwrap().starts_with("magnet:?xt="));
-        assert_eq!(b.info_hash.as_deref(), Some("fedcba9876543210fedcba9876543210fedcba98"), "hash taken from the magnet");
+        assert!(b.magnet.as_deref().unwrap().starts_with("magnet:?xt="), "the hash inside the magnet is read by Drift, not here");
         assert_eq!((b.seeders, b.leechers, b.torrent_url.clone()), (Some(3), Some(9), None));
     }
 
     #[test]
     fn error_elements_and_garbage_are_told_apart() {
-        assert_eq!(parse_feed(r#"<error code="100" description="Incorrect user credentials"/>"#).unwrap_err(), ProviderError::Auth);
-        assert_eq!(parse_feed(r#"<error code="203" description="Function not available"/>"#).unwrap_err(), ProviderError::BadResponse);
-        assert_eq!(parse_feed("<html><body>Not an indexer</body></html>").unwrap_err(), ProviderError::BadResponse);
-        assert_eq!(parse_feed("definitely not xml <<<").unwrap_err(), ProviderError::BadResponse);
+        assert_eq!(parse_feed(r#"<error code="100" description="Incorrect user credentials"/>"#).unwrap_err(), Reason::Auth);
+        assert_eq!(parse_feed(r#"<error code="203" description="Function not available"/>"#).unwrap_err(), Reason::BadResponse);
+        assert_eq!(parse_feed("<html><body>Not an indexer</body></html>").unwrap_err(), Reason::BadResponse);
+        assert_eq!(parse_feed("definitely not xml <<<").unwrap_err(), Reason::BadResponse);
         assert_eq!(parse_feed("<rss><channel></channel></rss>").unwrap(), vec![]);
     }
 
     #[test]
     fn construction_rejects_bad_addresses() {
-        assert!(matches!(Torznab::new("a", "A", "not a url", "k"), Err(ProviderError::Config(_))));
-        assert!(matches!(Torznab::new("a", "A", "ftp://host/x", "k"), Err(ProviderError::Config(_))));
-        assert!(Torznab::new("a", "A", "http://localhost:9117/api/", "").is_ok());
+        assert!(matches!(Indexer::new("A", "not a url", "k"), Err(Reason::Config)));
+        assert!(matches!(Indexer::new("A", "ftp://host/x", "k"), Err(Reason::Config)));
+        assert!(Indexer::new("A", "http://localhost:9117/api/", "").is_ok());
     }
 
     /// Answers the next request with `reply` and reports the request line it saw.
@@ -288,11 +309,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sends_the_query_and_key_and_returns_results() {
+    async fn sends_the_query_and_key_and_labels_rows_with_the_indexer() {
         let (port, seen) = serve_once(http("200 OK", &feed())).await;
-        let t = Torznab::new("t1", "My indexer", &format!("http://127.0.0.1:{port}/api"), "SECRETKEY").unwrap();
-        let r = t.search(&SearchQuery { text: "ubuntu iso".into(), limit: 20 }).await.unwrap();
+        let t = Indexer::new("My indexer", &format!("http://127.0.0.1:{port}/api"), "SECRETKEY").unwrap();
+        let r = t.search("ubuntu iso", 20).await.unwrap();
         assert_eq!(r.len(), 2);
+        assert!(r.iter().all(|x| x.source.as_deref() == Some("My indexer")));
         let line = seen.await.unwrap();
         assert!(line.starts_with("GET /api?"), "{line}");
         for part in ["t=search", "q=ubuntu+iso", "limit=20", "apikey=SECRETKEY"] {
@@ -301,24 +323,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn refused_keys_unreachable_hosts_and_bad_bodies_map_to_safe_messages() {
-        let q = SearchQuery { text: "x".into(), limit: 5 };
+    async fn refused_keys_unreachable_hosts_and_bad_bodies_map_to_fixed_reasons() {
         let (p, _) = serve_once(http("401 Unauthorized", "no")).await;
-        let e = Torznab::new("t", "T", &format!("http://127.0.0.1:{p}/"), "K").unwrap().search(&q).await.unwrap_err();
-        assert_eq!(e, ProviderError::Auth);
+        assert_eq!(Indexer::new("T", &format!("http://127.0.0.1:{p}/"), "K").unwrap().search("x", 5).await.unwrap_err(), Reason::Auth);
 
         let (p, _) = serve_once(http("200 OK", r#"<error code="101" description="Account suspended"/>"#)).await;
-        assert_eq!(Torznab::new("t", "T", &format!("http://127.0.0.1:{p}/"), "K").unwrap().search(&q).await.unwrap_err(), ProviderError::Auth);
+        assert_eq!(Indexer::new("T", &format!("http://127.0.0.1:{p}/"), "K").unwrap().search("x", 5).await.unwrap_err(), Reason::Auth);
 
         let (p, _) = serve_once(http("500 Internal Server Error", "boom")).await;
-        assert_eq!(Torznab::new("t", "T", &format!("http://127.0.0.1:{p}/"), "K").unwrap().search(&q).await.unwrap_err(), ProviderError::BadResponse);
+        assert_eq!(Indexer::new("T", &format!("http://127.0.0.1:{p}/"), "K").unwrap().search("x", 5).await.unwrap_err(), Reason::BadResponse);
 
         let dead = {
             let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
             l.local_addr().unwrap().port()
         };
-        let e = Torznab::new("t", "T", &format!("http://127.0.0.1:{dead}/"), "TOPSECRET").unwrap().search(&q).await.unwrap_err();
-        assert_eq!(e, ProviderError::Network);
-        assert!(!e.to_string().contains("TOPSECRET") && !e.to_string().contains("127.0.0.1"), "messages must never carry the address or key");
+        assert_eq!(Indexer::new("T", &format!("http://127.0.0.1:{dead}/"), "K").unwrap().search("x", 5).await.unwrap_err(), Reason::Network);
+    }
+
+    #[tokio::test]
+    async fn one_bad_indexer_does_not_spoil_the_others_and_all_bad_reports_the_worst() {
+        let dead = {
+            let l = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            l.local_addr().unwrap().port()
+        };
+        let (good, _) = serve_once(http("200 OK", &feed())).await;
+        let (refused, _) = serve_once(http("401 Unauthorized", "no")).await;
+        let mk = |n: &str, p: u16| Indexer::new(n, &format!("http://127.0.0.1:{p}/"), "K").unwrap();
+
+        let rows = search_all(vec![mk("Good", good), mk("Dead", dead)], "x", 5).await.unwrap();
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|r| r.source.as_deref() == Some("Good")));
+
+        let (refused2, _) = serve_once(http("401 Unauthorized", "no")).await;
+        assert_eq!(search_all(vec![mk("Dead", dead), mk("Refused", refused2)], "x", 5).await.unwrap_err(), Reason::Auth, "a refused key is more useful to hear about than a dead host");
+        let _ = refused;
+        assert_eq!(search_all(vec![], "x", 5).await.unwrap(), vec![]);
     }
 }
