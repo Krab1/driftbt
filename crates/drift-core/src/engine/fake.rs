@@ -18,6 +18,7 @@ struct Inner {
     torrents: BTreeMap<TorrentId, Entry>,
     limits: Limits,
     network: NetworkConfig,
+    rechecks: Vec<TorrentId>,
 }
 
 struct Entry {
@@ -31,6 +32,11 @@ const FAKE_TOTAL: u64 = 1000;
 impl FakeEngine {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Test helper: the torrents `recheck` was called for, in order.
+    pub fn rechecked(&self) -> Vec<TorrentId> {
+        self.inner.lock().unwrap().rechecks.clone()
     }
 
     /// Test helper: add `bytes` of progress to a torrent that is downloading.
@@ -261,6 +267,15 @@ impl TorrentEngine for FakeEngine {
 
     async fn remove(&self, id: &TorrentId, _delete_files: bool) -> Result<()> {
         self.inner.lock().unwrap().torrents.remove(id).map(|_| ()).ok_or(EngineError::NotFound)
+    }
+
+    async fn recheck(&self, id: &TorrentId) -> Result<()> {
+        let mut g = self.inner.lock().unwrap();
+        if !g.torrents.contains_key(id) {
+            return Err(EngineError::NotFound);
+        }
+        g.rechecks.push(id.clone());
+        Ok(())
     }
 
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()> {

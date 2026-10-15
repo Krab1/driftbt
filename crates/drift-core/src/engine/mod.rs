@@ -53,6 +53,9 @@ pub trait TorrentEngine: Send + Sync {
     async fn pause(&self, id: &TorrentId) -> Result<()>;
     async fn resume(&self, id: &TorrentId) -> Result<()>;
     async fn remove(&self, id: &TorrentId, delete_files: bool) -> Result<()>;
+    /// Hashes the files on disk again and keeps what is correct; the torrent shows as checking meanwhile and then
+    /// carries on downloading whatever is missing or damaged. Keeps the torrent paused if it was paused.
+    async fn recheck(&self, id: &TorrentId) -> Result<()>;
     /// Replace the set of files to download.
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()>;
     async fn set_limits(&self, limits: Limits) -> Result<()>;

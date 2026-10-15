@@ -276,6 +276,11 @@ export function createMockApi(count = 40): Api {
       }
       return invalid();
     },
+    recheck: async (id) => {
+      find(id);
+      torrents = torrents.map((t) => (t.id === id ? { ...t, state: "checking", down_bps: 0, up_bps: 0, eta_secs: null } : t));
+      setTimeout(() => (torrents = torrents.map((t) => (t.id === id ? { ...t, state: t.progress_bytes >= t.total_bytes ? "seeding" : "downloading" } : t))), 2500);
+    },
     pause: async (id) => {
       find(id);
       userPaused.add(id);

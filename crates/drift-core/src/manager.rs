@@ -214,6 +214,16 @@ impl Manager {
         self.tick().await.map(|_| ())
     }
 
+    /// Verifies the downloaded data again (see `TorrentEngine::recheck`). Refused while the VPN guard holds
+    /// traffic, because a recheck re-adds the torrent and would otherwise reconnect it.
+    pub async fn recheck(&self, id: &TorrentId) -> Result<()> {
+        if self.guard_tripped() {
+            return Err(EngineError::Blocked);
+        }
+        self.engine.recheck(id).await?;
+        self.tick().await.map(|_| ())
+    }
+
     /// Makes sure a torrent is running and, if it is still downloading, first in line: what "Play" needs.
     pub async fn prioritize(&self, id: &TorrentId) -> Result<()> {
         if self.guard_tripped() {
@@ -461,6 +471,17 @@ mod tests {
         let first = m.tick().await.unwrap()[0].finished_at;
         assert!(first.is_some());
         assert_eq!(m.tick().await.unwrap()[0].finished_at, first, "stays put on later ticks");
+    }
+
+    #[tokio::test]
+    async fn recheck_goes_to_the_engine_and_keeps_the_torrent_in_the_library() {
+        let (engine, m, _) = setup(0);
+        m.add(mag(1), None, vec![]).await.unwrap();
+        m.set_category(&id(1), Some("Linux".into()));
+        m.recheck(&id(1)).await.unwrap();
+        assert_eq!(engine.rechecked(), [id(1)]);
+        assert_eq!(m.snapshot().await.unwrap()[0].category.as_deref(), Some("Linux"));
+        assert!(matches!(m.recheck(&id(9)).await, Err(EngineError::NotFound)));
     }
 
     #[tokio::test]

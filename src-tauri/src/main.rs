@@ -345,6 +345,7 @@ fn main() {
             commands::add_torrent,
             commands::pause_torrent,
             commands::resume_torrent,
+            commands::recheck_torrent,
             commands::remove_torrent,
             commands::set_files,
             commands::set_torrent_category,

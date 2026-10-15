@@ -44,6 +44,18 @@
     }
   }
 
+  async function recheck() {
+    close();
+    if (!t) return;
+    try {
+      await api.recheck(t.id);
+      await torrents.refresh();
+      ui.toast("Checking the downloaded files. Anything missing or damaged will be downloaded again.");
+    } catch (e) {
+      ui.toast(errorText(e), "error");
+    }
+  }
+
   async function play() {
     close();
     if (!t) return;
@@ -131,6 +143,9 @@
   {/if}
   {#if canToggle}
     <button role="menuitem" onclick={toggle}><Icon name={t!.state === "paused" ? "play" : "pause"} />{t!.state === "paused" ? "Resume" : "Pause"}</button>
+  {/if}
+  {#if t && t.total_bytes > 0 && t.state !== "checking"}
+    <button role="menuitem" onclick={recheck}><Icon name="check" />Check downloaded files</button>
   {/if}
   <button role="menuitem" onclick={reveal}><Icon name="folder" />Show in folder</button>
   <button role="menuitem" onclick={playlist}><Icon name="list" />Create playlist</button>

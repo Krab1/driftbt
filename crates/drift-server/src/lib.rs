@@ -106,6 +106,7 @@ pub fn router(shared: S) -> Router {
         .route("/torrents/{id}", delete(remove))
         .route("/torrents/{id}/pause", post(pause))
         .route("/torrents/{id}/resume", post(resume))
+        .route("/torrents/{id}/recheck", post(recheck))
         .route("/torrents/{id}/category", put(set_category))
         .route("/torrents/{id}/tags", put(set_tags))
         .route("/torrents/{id}/goal", put(set_goal))
@@ -169,6 +170,10 @@ async fn inspect(State(s): State<S>, Json(b): Json<InspectBody>) -> Res<TorrentP
 
 async fn pause(State(s): State<S>, Path(id): Path<String>) -> Res<()> {
     Ok(Json(s.svc.manager.pause(&TorrentId(id)).await?))
+}
+
+async fn recheck(State(s): State<S>, Path(id): Path<String>) -> Res<()> {
+    Ok(Json(s.svc.manager.recheck(&TorrentId(id)).await?))
 }
 
 async fn resume(State(s): State<S>, Path(id): Path<String>) -> Res<()> {

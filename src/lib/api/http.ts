@@ -186,6 +186,7 @@ export const httpApi: Api = {
   moveInQueue: (id, to) => call("PUT", `/torrents/${enc(id)}/move`, { to }),
   pause: (id) => call("POST", `/torrents/${enc(id)}/pause`),
   resume: (id) => call("POST", `/torrents/${enc(id)}/resume`),
+  recheck: (id) => call("POST", `/torrents/${enc(id)}/recheck`),
   remove: (id, deleteFiles) => call("DELETE", `/torrents/${enc(id)}?delete_files=${deleteFiles}`),
   setFiles: (id, selected) => call("PUT", `/torrents/${enc(id)}/files`, { selected }),
   watchDetails: async (id) => {

@@ -325,6 +325,28 @@ impl TorrentEngine for RqbitEngine {
             .map_err(backend)
     }
 
+    async fn recheck(&self, id: &TorrentId) -> Result<()> {
+        let h = self.handle(id)?;
+        // librqbit only hashes the files when a torrent is added, so a recheck is a re-add that keeps the files.
+        let bytes = h.with_metadata(|m| m.torrent_bytes.clone()).map_err(backend)?;
+        if bytes.is_empty() {
+            return Err(EngineError::Backend("torrent file bytes are not available".into()));
+        }
+        let paused = stats_of(&h).state == TorrentState::Paused;
+        let opts = AddTorrentOptions {
+            paused,
+            overwrite: true,
+            only_files: h.only_files(),
+            output_folder: Some(h.output_folder().to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+        let session = self.session();
+        session.delete(TorrentIdOrHash::Hash(h.info_hash()), false).await.map_err(backend)?;
+        drop(h);
+        session.add_torrent(AddTorrent::from_bytes(bytes), Some(opts)).await.map_err(backend)?;
+        Ok(())
+    }
+
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()> {
         let h = self.handle(id)?;
         let set: HashSet<usize> = selected.into_iter().collect();
@@ -612,6 +634,58 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+
+    /// A damaged file is found by a recheck (progress drops, good pieces stay); a repaired one checks out clean.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn recheck_finds_damage_and_clears_a_repaired_file() {
+        let root = scratch("recheck");
+        let (seed_dir, dl) = (root.join("seed"), root.join("dl"));
+        std::fs::create_dir_all(&seed_dir).unwrap();
+        std::fs::create_dir_all(&dl).unwrap();
+        let sd = seeder(&seed_dir, None).await;
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+        let id = download_from(&engine, &sd).await;
+        assert_eq!(state_after(&engine, &id, 60).await.0, TorrentState::Seeding);
+        let original = payload();
+        let sd_len = || original.len() as u64;
+
+        // Pause so the files are closed, then damage the middle of the file without changing its size.
+        engine.pause(&id).await.unwrap();
+        let file = dl.join("seedme.bin");
+        let mut bad = std::fs::read(&file).unwrap();
+        let mid = bad.len() / 2;
+        bad[mid..mid + 64].fill(0xAA);
+        std::fs::write(&file, &bad).unwrap();
+
+        engine.recheck(&id).await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let found = loop {
+            let t = engine.list().await.unwrap().into_iter().find(|t| t.id == id).unwrap();
+            // While the check runs a paused torrent also reads as Paused with no progress, so wait for real numbers.
+            if t.state == TorrentState::Paused && t.progress_bytes > 0 && t.progress_bytes < t.total_bytes {
+                break t.progress_bytes;
+            }
+            assert!(Instant::now() < deadline, "recheck never reported the damage, last {:?} {}/{}", t.state, t.progress_bytes, t.total_bytes);
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        };
+        assert!(found > 0 && found < sd_len(), "undamaged pieces are kept, the damaged one is not");
+
+        // Put the good bytes back (a repair): the next check finds everything and the torrent seeds again.
+        std::fs::write(&file, &original).unwrap();
+        engine.recheck(&id).await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let t = engine.list().await.unwrap().into_iter().find(|t| t.id == id).unwrap();
+            if t.state == TorrentState::Paused && t.progress_bytes == t.total_bytes {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the repaired file never checked out clean");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        engine.resume(&id).await.unwrap();
+        assert_eq!(state_after(&engine, &id, 30).await.0, TorrentState::Seeding);
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

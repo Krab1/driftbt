@@ -42,6 +42,7 @@ export const tauriApi: Api = {
   moveInQueue: (id, to) => call("move_in_queue", { id, to }),
   pause: (id) => call("pause_torrent", { id }),
   resume: (id) => call("resume_torrent", { id }),
+  recheck: (id) => call("recheck_torrent", { id }),
   remove: (id, deleteFiles) => call("remove_torrent", { id, deleteFiles }),
   setFiles: (id, selected) => call("set_files", { id, selected }),
   watchDetails: (id) => call<TorrentDetails | null>("watch_details", { id }),

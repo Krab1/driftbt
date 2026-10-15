@@ -345,6 +345,8 @@ export interface Api {
   createPlaylist(id: string): Promise<string>;
   pause(id: string): Promise<void>;
   resume(id: string): Promise<void>;
+  /** Hashes the downloaded files again and re-downloads anything missing or damaged. */
+  recheck(id: string): Promise<void>;
   remove(id: string, deleteFiles: boolean): Promise<void>;
   search(text: string): Promise<SearchReport>;
   /** Ids of search sources that have an API key saved. The keys themselves never reach the UI. */
