@@ -372,6 +372,8 @@ export interface Api {
   updateIpLists(): Promise<FilterStatus>;
   /** A .torrent file was picked up (or rejected) from the watch folder. */
   onWatch(cb: (e: { added?: string; invalid?: string }) => void): Promise<() => void>;
+  /** A message from a post-processing plugin, or a note that one failed. */
+  onPluginNotice(cb: (e: { text: string; error: boolean }) => void): Promise<() => void>;
   /** Plays a file in the default player while it downloads (the largest media file when `file` is omitted). */
   play(id: string, file?: number | null): Promise<void>;
   /** Writes an .m3u8 next to the files; resolves to its path. */

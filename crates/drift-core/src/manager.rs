@@ -59,6 +59,26 @@ struct State {
     pending_moves: Vec<TorrentId>,
     /// Short messages shown next to a torrent while it is being moved, or after a move failed.
     move_notes: std::collections::HashMap<TorrentId, String>,
+    /// Torrents that just finished, waiting for the post-processing plugins (see `background::postprocess`).
+    finished: Vec<TorrentId>,
+}
+
+/// What a post-processing plugin is told about a finished torrent.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Finished {
+    pub id: TorrentId,
+    pub name: String,
+    /// The folder the torrent is saved in; `files` are relative to it.
+    pub save_path: String,
+    pub files: Vec<FinishedFile>,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FinishedFile {
+    pub path: String,
+    pub size: u64,
 }
 
 pub struct Manager {
@@ -104,7 +124,7 @@ impl Manager {
 
     pub fn with_clock(engine: Arc<dyn TorrentEngine>, store: Arc<dyn MetaStore>, settings: SharedSettings, clock: Clock) -> Self {
         let lib = store.load();
-        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false, was_incomplete: HashSet::new(), pending_moves: Vec::new(), move_notes: Default::default() };
+        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false, was_incomplete: HashSet::new(), pending_moves: Vec::new(), move_notes: Default::default(), finished: Vec::new() };
         Self { engine, store, settings, clock, guard: Mutex::new(Guard::default()), state: Mutex::new(state) }
     }
 
@@ -256,15 +276,53 @@ impl Manager {
         self.tick().await.map(|_| ())
     }
 
+    /// The torrents that finished since the last call.
+    pub fn take_finished(&self) -> Vec<TorrentId> {
+        std::mem::take(&mut self.state.lock().unwrap().finished)
+    }
+
+    /// Whether the built-in "move when finished" is still waiting for, or busy with, this torrent.
+    pub fn is_moving(&self, id: &TorrentId) -> bool {
+        let st = self.state.lock().unwrap();
+        // A failed move leaves its note on the torrent, so only the "in progress" note counts.
+        st.pending_moves.contains(id) || st.move_notes.get(id).is_some_and(|n| n.starts_with("Moving"))
+    }
+
+    /// What post-processing plugins are told when `id` has finished.
+    pub async fn finished_info(&self, id: &TorrentId) -> Result<Finished> {
+        let d = self.engine.details(id).await?;
+        let st = self.state.lock().unwrap();
+        let meta = st.lib.get(id);
+        Ok(Finished {
+            id: id.clone(),
+            name: d.stats.name,
+            save_path: d.save_path,
+            files: d.files.into_iter().map(|f| FinishedFile { path: f.path, size: f.size }).collect(),
+            category: meta.and_then(|m| m.category.clone()),
+            tags: meta.map(|m| m.tags.clone()).unwrap_or_default(),
+        })
+    }
+
     pub fn has_pending_moves(&self) -> bool {
         !self.state.lock().unwrap().pending_moves.is_empty()
     }
 
     /// Moves the torrents that just finished to the `move_on_complete` folder, one after another.
     pub async fn run_pending_moves(&self) {
-        let ids = std::mem::take(&mut self.state.lock().unwrap().pending_moves);
-        for id in ids {
-            let Some(dest) = self.settings().move_on_complete else { return };
+        // A torrent stays in `pending_moves` until its own move starts (`relocate` marks it at once, with no await in
+        // between), so `is_moving` is true for the whole batch.
+        loop {
+            let Some(dest) = self.settings().move_on_complete else {
+                self.state.lock().unwrap().pending_moves.clear();
+                return;
+            };
+            let Some(id) = self.state.lock().unwrap().pending_moves.first().cloned() else { return };
+            {
+                // Marked as moving before it leaves the pending list, so there is no moment when it looks idle.
+                let mut st = self.state.lock().unwrap();
+                st.move_notes.insert(id.clone(), "Moving files…".into());
+                st.pending_moves.retain(|p| p != &id);
+            }
             let _ = self.relocate(&id, &dest).await; // a failure is already shown on the torrent
         }
     }
@@ -423,6 +481,7 @@ impl Manager {
                     if m.finished_at.is_none() {
                         m.finished_at = Some(now_secs());
                         structural = true;
+                        st.finished.push(t.id.clone());
                         if s.move_on_complete.is_some() {
                             st.pending_moves.push(t.id.clone());
                         }

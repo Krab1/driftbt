@@ -248,6 +248,7 @@ fn main() {
             // Moves the old built-in search settings (Internet Archive, Torznab indexers and keys) into their plugins.
             tauri::async_runtime::block_on(svc.migrate_search_to_plugins());
             let svc_settings = svc.settings.clone();
+            let svc_plugins = svc.plugins.clone();
             app.manage(AppState {
                 manager: manager.clone(),
                 net: net.clone(),
@@ -316,6 +317,11 @@ fn main() {
                             WatchEvent::Invalid(name) => serde_json::json!({ "invalid": name }),
                         },
                     );
+                }));
+                let handle = app.handle().clone();
+                let plugins = svc_plugins.clone();
+                tauri::async_runtime::spawn(background::postprocess(manager.clone(), plugins, svc_settings.clone(), move |n| {
+                    let _ = handle.emit("plugin_notice", serde_json::json!({ "text": n.text, "error": n.error }));
                 }));
                 tauri::async_runtime::spawn(background::ip_filter_refresh(net.clone(), svc_settings.clone()));
             }

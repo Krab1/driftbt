@@ -361,6 +361,7 @@ export function createMockApi(count = 40): Api {
       return filterStatus();
     },
     onWatch: sub(watchSubs),
+    onPluginNotice: async () => () => {},
     play: async (id) => {
       find(id);
       (window as unknown as { __played?: string[] }).__played = [...((window as unknown as { __played?: string[] }).__played ?? []), id];

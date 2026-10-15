@@ -24,6 +24,13 @@ fn install(root: &Path, id: &str, mode: &str, api: u32) {
     std::fs::write(d.join("plugin.json"), format!(r#"{{"id":"{id}","name":"Example","version":"1.0.0","api":{api},"kinds":["search"],"exec":{exec},"permissions":{{"net":["*"]}}}}"#)).unwrap();
 }
 
+/// The reference plugin as a post-processing plugin.
+fn install_pp(root: &Path, id: &str, mode: &str) {
+    install(root, id, mode, 1);
+    let p = root.join(id).join("plugin.json");
+    std::fs::write(&p, std::fs::read_to_string(&p).unwrap().replace("\"search\"", "\"postprocess\"")).unwrap();
+}
+
 fn limits() -> Limits {
     Limits { call_timeout: Duration::from_millis(1500), idle: Duration::from_millis(400), backoff: Duration::from_millis(30) }
 }
@@ -319,5 +326,67 @@ async fn a_list_inside_a_list_or_a_list_without_fields_is_not_a_valid_form() {
     put("empty", r#""settings":[{"key":"a","label":"A","type":"list","item":[]}]"#);
     let h = host(&root);
     assert!(h.list(&[]).iter().all(|p| p.problem.as_deref() == Some("Its settings form isn't valid.")));
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn a_finished_torrent_is_reported_to_postprocess_plugins_and_their_actions_are_cleaned() {
+    use drift_core::plugins::Action;
+    let root = scratch("pp");
+    install_pp(&root, "mover", "move=C:/Done");
+    install_pp(&root, "junk", "junk");
+    install_pp(&root, "boom", "crash");
+    install(&root, "searcher", "", 1);
+    let h = host(&root);
+    let ev = serde_json::json!({"id": "abc", "name": "Linux ISO"});
+
+    assert!(!h.has_postprocessors(&[]), "off unless enabled");
+    assert!(!h.has_postprocessors(&["searcher".to_string()]), "a search plugin isn't asked");
+    let on: Vec<String> = ["mover", "junk", "boom", "searcher"].map(String::from).to_vec();
+    let got = h.completed(&on, &ev).await;
+    assert_eq!(got.len(), 3);
+    assert_eq!(got.iter().filter(|(_, r)| r.is_err()).count(), 1, "a crashing plugin is a failure, not a panic");
+    let oks: Vec<&Vec<Action>> = got.iter().filter_map(|(_, r)| r.as_ref().ok()).collect();
+    assert!(oks.iter().any(|a| **a == [Action::Notify("saw Linux ISO".into()), Action::Move(PathBuf::from("C:/Done"))]));
+    assert!(oks.iter().any(|a| a.is_empty()), "relative paths, unknown types and blank messages are dropped");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn the_postprocess_loop_moves_a_finished_torrent_and_reports_a_failing_plugin() {
+    use drift_core::background::postprocess;
+    use drift_core::engine::fake::FakeEngine;
+    use drift_core::engine::TorrentEngine;
+    use drift_core::library::MemoryMetaStore;
+    use drift_core::manager::Manager;
+    use drift_core::model::{AddRequest, AddSource, TorrentId};
+    use drift_core::settings::Settings;
+    use std::sync::{Arc, Mutex};
+
+    let root = scratch("loop");
+    let done = root.join("Done");
+    install_pp(&root, "mover", &format!("move={}", done.to_string_lossy().replace("\\", "/")));
+    install_pp(&root, "boom", "crash");
+    let engine = Arc::new(FakeEngine::new());
+    let hash = "0123456789abcdef0123456789abcdef01234567";
+    engine.add(AddRequest::new(AddSource::Magnet(hash.into()))).await.unwrap();
+    let settings = Arc::new(Mutex::new(Settings { plugins: vec!["mover".into(), "boom".into()], ..Settings::default() }));
+    let manager = Arc::new(Manager::new(engine.clone(), Arc::new(MemoryMetaStore::default()), settings.clone()));
+    manager.tick().await.unwrap();
+    engine.advance(&TorrentId(hash.into()), 10_000);
+    manager.tick().await.unwrap(); // seen finishing
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let task = tokio::spawn(postprocess(manager.clone(), Arc::new(host(&root)), settings, move |n| {
+        let _ = tx.send(n);
+    }));
+    let mut notices = Vec::new();
+    while notices.len() < 2 {
+        notices.push(tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.expect("notices arrive").unwrap());
+    }
+    task.abort();
+    assert!(notices.iter().any(|n| !n.error && n.text.contains("saw ")), "{notices:?}");
+    assert!(notices.iter().any(|n| n.error && n.text.contains("keeps seeding")), "{notices:?}");
+    assert_eq!(engine.output_dir(&TorrentId(hash.into())), Some(done), "the move the plugin asked for happened through the engine");
     std::fs::remove_dir_all(root).ok();
 }

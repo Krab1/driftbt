@@ -218,6 +218,7 @@ export const httpApi: Api = {
   filterStatus: () => call("GET", "/filter"),
   updateIpLists: () => call("POST", "/filter/update"),
   onWatch: on<{ added?: string; invalid?: string }>("watch"),
+  onPluginNotice: on<{ text: string; error: boolean }>("plugin_notice"),
   play: () => Promise.reject(unavailable("Playing a file")),
   createPlaylist: (id) => call("POST", `/torrents/${enc(id)}/playlist`),
   getSettings: () => call("GET", "/settings"),

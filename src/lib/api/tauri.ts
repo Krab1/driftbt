@@ -66,6 +66,7 @@ export const tauriApi: Api = {
   filterStatus: () => call("filter_status"),
   updateIpLists: () => call("update_ip_lists"),
   onWatch: on<{ added?: string; invalid?: string }>("watch"),
+  onPluginNotice: on<{ text: string; error: boolean }>("plugin_notice"),
   play: (id, file = null) => call("play_torrent", { id, file }),
   createPlaylist: (id) => call("create_playlist", { id }),
   search: (text) => call("search_torrents", { text }),

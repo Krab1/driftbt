@@ -25,7 +25,7 @@ Rule of thumb: if it needs engine internals or runs every tick, it is a built-in
 | Kind | Protocol phase | What it does |
 |---|---|---|
 | `search` | v1 | Implements `SearchProvider` (see ARCHITECTURE). First kind, because search sources break and change most often. |
-| `postprocess` | v1.1 | Receives a "torrent completed" event (name, path, files, category); may rename, move, notify, run tools. Returns actions or nothing. |
+| `postprocess` | v1 | Receives a "torrent completed" event (name, save folder, files, category, tags). Returns actions: move the torrent to a folder (through the engine, so seeding carries on) or show a notice. It may do its own work while it runs; renaming files inside a torrent isn't an action because it would break the data being seeded. |
 | `notifier` | later | Webhooks, Telegram, etc. on events. |
 | `blocklist` | later | Supplies and refreshes IP lists. |
 | Theme packs | data only | JSON of design tokens. **No code**, no process, so no permissions needed. |

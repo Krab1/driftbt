@@ -6,7 +6,8 @@ use std::time::{Duration, SystemTime};
 
 use crate::guard::adapters;
 use crate::manager::{GuardStatus, Manager, SharedSettings};
-use crate::model::{AddRequest, AddSource};
+use crate::model::{AddRequest, AddSource, TorrentId};
+use crate::plugins::{Action, Host};
 use crate::netctl::{NetControl, Refresh};
 use crate::watch;
 
@@ -36,6 +37,60 @@ pub async fn watch_folder(manager: Arc<Manager>, settings: SharedSettings, on_ev
                     on_event(WatchEvent::Invalid(name));
                 }
                 Err(e) => eprintln!("watch folder: {name}: {e}"),
+            }
+        }
+    }
+}
+
+/// What the post-processing plugins did, for the host to show: a plain sentence and whether it went wrong.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginNotice {
+    pub text: String,
+    pub error: bool,
+}
+
+/// Every 3 s: tells the enabled `postprocess` plugins about torrents that just finished and carries out what they
+/// ask for. Seeding never waits for this and a failing plugin only produces a notice. A torrent still being moved by
+/// the built-in "move when finished" waits until that is done, so the plugin sees its final folder.
+pub async fn postprocess(manager: Arc<Manager>, plugins: Arc<Host>, settings: SharedSettings, on_notice: impl Fn(PluginNotice) + Send) {
+    // Torrents to tell plugins about, with how many times looking them up has failed.
+    let mut waiting: Vec<(TorrentId, u8)> = Vec::new();
+    loop {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        waiting.extend(manager.take_finished().into_iter().map(|id| (id, 0)));
+        let enabled = settings.lock().unwrap().plugins.clone();
+        if !plugins.has_postprocessors(&enabled) {
+            waiting.clear();
+            continue;
+        }
+        for (id, tries) in std::mem::take(&mut waiting) {
+            if manager.is_moving(&id) {
+                waiting.push((id, tries));
+                continue;
+            }
+            let Ok(info) = manager.finished_info(&id).await else {
+                // The engine may be busy (for example restarting after a network change): try again a few times.
+                if tries < 5 {
+                    waiting.push((id, tries + 1));
+                }
+                continue;
+            };
+            for (plugin, result) in plugins.completed(&enabled, &info).await {
+                match result {
+                    Err(()) => on_notice(PluginNotice { text: format!("{plugin} couldn't process {}. The torrent keeps seeding.", info.name), error: true }),
+                    Ok(actions) => {
+                        for a in actions {
+                            match a {
+                                Action::Notify(m) => on_notice(PluginNotice { text: format!("{plugin}: {m}"), error: false }),
+                                Action::Move(dest) => {
+                                    if manager.relocate(&id, &dest).await.is_err() {
+                                        on_notice(PluginNotice { text: format!("{plugin} asked to move {}, but it couldn't be moved.", info.name), error: true });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }

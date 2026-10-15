@@ -1,6 +1,6 @@
 //! Reference search plugin: the smallest thing that speaks protocol v1 (docs/PLUGIN_PROTOCOL.md). It answers every
 //! search with two fixed results. The first argument picks a misbehaviour so the host can be tested against it:
-//! `crash` (exits on the first search), `hang` (never answers a search), `noise` (junk before each reply), `settings` (puts its settings and secrets into the result titles, to test the form), `auth` / `network` / `config` (answer a search with that error reason), `labels` (tags each row with its own `source`).
+//! `crash` (exits on the first search), `hang` (never answers a search), `noise` (junk before each reply), `settings` (puts its settings and secrets into the result titles, to test the form), `auth` / `network` / `config` (answer a search with that error reason), `labels` (tags each row with its own `source`). As a post-processing plugin it answers `completed` with a notice, plus a move when the argument is `move=<folder>`; `crash` exits instead, and `junk` asks for things Drift must refuse.
 
 use std::io::{BufRead, Write};
 
@@ -48,6 +48,20 @@ fn main() {
                     tag(json!({"title": format!("{q} (example one)"), "info_hash": "0123456789abcdef0123456789abcdef01234567", "size": 1048576, "seeders": 5}), "Indexer A"),
                     tag(json!({"title": format!("{q} (example two)"), "magnet": "magnet:?xt=urn:btih:89abcdef0123456789abcdef0123456789abcdef"}), "Indexer B")
                 ]})
+            }
+            Some("completed") => {
+                if mode == "crash" {
+                    std::process::exit(1);
+                }
+                let name = req["params"]["name"].as_str().unwrap_or("");
+                let mut actions = vec![json!({"type": "notify", "message": format!("saw {name}")})];
+                if let Some(dest) = mode.strip_prefix("move=") {
+                    actions.push(json!({"type": "move", "dest": dest}));
+                }
+                if mode == "junk" {
+                    actions = vec![json!({"type": "move", "dest": "relative/dir"}), json!({"type": "delete_everything"}), json!({"type": "notify", "message": "  "})];
+                }
+                json!({"actions": actions})
             }
             Some("shutdown") => {
                 let _ = writeln!(out, "{}", json!({"jsonrpc": "2.0", "id": id, "result": {}}));

@@ -344,6 +344,10 @@ impl Plugin {
     }
 
     async fn call(self: &Arc<Self>, method: &str, params: Value) -> Result<Value, CallError> {
+        self.call_within(method, params, self.limits.call_timeout).await
+    }
+
+    async fn call_within(self: &Arc<Self>, method: &str, params: Value, timeout: Duration) -> Result<Value, CallError> {
         let mut st = self.state.lock().await;
         if st.disabled {
             return Err(CallError::Disabled);
@@ -364,7 +368,7 @@ impl Plugin {
             }
         }
         let r = st.running.as_mut().expect("started above");
-        match tokio::time::timeout(self.limits.call_timeout, r.rpc(method, params, &|k| plugin_secret(&self.manifest, &self.cfg, k))).await {
+        match tokio::time::timeout(timeout, r.rpc(method, params, &|k| plugin_secret(&self.manifest, &self.cfg, k))).await {
             Ok(Ok(v)) => {
                 r.last_used = Instant::now();
                 st.failures = 0;
@@ -642,6 +646,27 @@ impl Host {
         }
     }
 
+    /// Whether any enabled plugin wants to hear about finished torrents.
+    pub fn has_postprocessors(&self, enabled: &[String]) -> bool {
+        self.postprocessors(enabled).next().is_some()
+    }
+
+    fn postprocessors<'a>(&'a self, enabled: &'a [String]) -> impl Iterator<Item = &'a Arc<Plugin>> {
+        self.entries.iter().filter_map(|e| e.plugin.as_ref()).filter(move |p| enabled.contains(&p.manifest.id) && p.manifest.kinds.iter().any(|k| k == "postprocess"))
+    }
+
+    /// Tells every enabled post-processing plugin that a torrent finished, one after another, and returns what each
+    /// asked for (or `Err` for a plugin that failed). Plugin output is untrusted: see `sanitize_actions`.
+    pub async fn completed(&self, enabled: &[String], event: &impl Serialize) -> Vec<(String, Result<Vec<Action>, ()>)> {
+        let event = serde_json::to_value(event).unwrap_or(Value::Null);
+        let mut out = Vec::new();
+        for p in self.postprocessors(enabled) {
+            let r = p.call_within("completed", event.clone(), p.limits.call_timeout * 40).await.map(|v| sanitize_actions(&v)).map_err(|_| ());
+            out.push((p.manifest.name.clone(), r));
+        }
+        out
+    }
+
     /// Search sources for the enabled plugins that offer search.
     pub fn search_providers(&self, enabled: &[String]) -> Vec<Arc<dyn SearchProvider>> {
         self.entries
@@ -651,6 +676,40 @@ impl Host {
             .map(|p| Arc::new(ExternalSearchProvider { plugin: p.clone() }) as Arc<dyn SearchProvider>)
             .collect()
     }
+}
+
+/// What a post-processing plugin may ask for. It never touches files itself through the app: `Move` goes through the
+/// engine (so seeding carries on from the new place), and renaming files inside a torrent isn't offered because
+/// that would break the data the torrent is seeding.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Action {
+    /// Move the torrent's files into this folder (an absolute path).
+    Move(PathBuf),
+    /// Show the user a short message.
+    Notify(String),
+}
+
+const MAX_ACTIONS: usize = 20;
+
+/// Keeps the actions Drift understands, clamped: an unknown type, a relative or oversized path or an empty message is dropped.
+fn sanitize_actions(v: &Value) -> Vec<Action> {
+    v.get("actions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|a| match a["type"].as_str()? {
+            "move" => {
+                let dest = a["dest"].as_str()?.trim();
+                (dest.len() <= 1024 && Path::new(dest).is_absolute()).then(|| Action::Move(PathBuf::from(dest)))
+            }
+            "notify" => {
+                let m: String = a["message"].as_str()?.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect();
+                (!m.is_empty()).then_some(Action::Notify(m))
+            }
+            _ => None,
+        })
+        .take(MAX_ACTIONS)
+        .collect()
 }
 
 /// Wraps a plugin as a search source, so the aggregator can't tell it from a built-in one.

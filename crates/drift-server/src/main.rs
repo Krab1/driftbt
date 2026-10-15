@@ -190,6 +190,13 @@ async fn run() -> Result<(), String> {
             let _ = tx.send(Event::new("watch", &payload));
         }));
     }
+    {
+        let tx = tx.clone();
+        let plugins = shared.svc.plugins.clone();
+        tokio::spawn(background::postprocess(manager.clone(), plugins, settings.clone(), move |n| {
+            let _ = tx.send(Event::new("plugin_notice", &serde_json::json!({ "text": n.text, "error": n.error })));
+        }));
+    }
     tokio::spawn(background::ip_filter_refresh(net, settings));
 
     let listener = tokio::net::TcpListener::bind(args.bind).await.map_err(|e| format!("can't listen on {}: {e}", args.bind))?;

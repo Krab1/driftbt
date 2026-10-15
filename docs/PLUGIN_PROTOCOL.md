@@ -46,9 +46,16 @@ One JSON object per line (UTF-8, `\n`) on the plugin's stdin and stdout, JSON-RP
 |---|---|---|
 | `initialize` | `{api, app_version, settings}` | `{kinds, name, version}` |
 | `search` | `{query, limit}` | `{results: [Result]}` |
+| `completed` | `{id, name, save_path, files: [{path, size}], category, tags}` | `{actions: [Action]}` (kind `postprocess` only) |
 | `shutdown` | `{}` | `{}` (then exit) |
 
 `Result`: `title` (required), and at least one of `info_hash` (40 hex or 32 base32), `magnet` (`magnet:?…`), `torrent_url` (http/https). Optional: `size` (bytes), `seeders`, `leechers`, `published` (unix seconds), `category`. Rows without a title or any way to open them are dropped; titles are cut at 300 characters. A row may also carry `source`, a label (up to 60 characters) for its badge when one plugin searches several places, for example the indexer's name; without it the badge is the plugin's name.
+
+### Post-processing
+
+A plugin with kind `postprocess` that is switched on hears `completed` once for each torrent that finishes downloading while Drift runs (not for torrents that were already complete). `files[].path` is relative to `save_path`. If the built-in "move when finished" folder is set, Drift waits for that move first, so `save_path` is the final folder at that point. Plugins are asked one after another with the same event, so a plugin that comes after one that moved the torrent still sees the old `save_path`. A plugin has up to 5 minutes to answer `completed` (it may be copying or unpacking), and its other calls wait meanwhile.
+
+`Action`: `{"type":"move","dest":"<absolute folder>"}` moves the torrent's files there through the engine (seeding continues from the new place); `{"type":"notify","message":"..."}` shows a message (cut at 200 characters). Anything else, a relative `dest` or an empty message is dropped; at most 20 actions. A plugin that fails (crash, timeout, bad JSON) only produces a notice saying the torrent keeps seeding; the failure rules under Lifecycle apply. Seeding never waits on this. Drift never renames or deletes files for a plugin.
 
 ## Calls (plugin → app)
 
