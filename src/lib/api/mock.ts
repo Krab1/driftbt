@@ -413,6 +413,7 @@ export function createMockApi(count = 40): Api {
         name: "Example search",
         version: "1.0.0",
         kinds: ["search"],
+        description: "A made-up search source for trying the plugin screen.",
         permissions: { net: ["*"], fs: [] },
         enabled: settings.plugins.includes("example"),
         problem: null,
@@ -433,6 +434,7 @@ export function createMockApi(count = 40): Api {
         name: "Torznab indexers",
         version: "1.0.0",
         kinds: ["search"],
+        description: "Lets Find online search through your own torrent indexer. You run Jackett or Prowlarr yourself, add its address and API key below, and Drift sends your searches to it. It does nothing until you add an indexer.",
         permissions: { net: ["*"], fs: [] },
         enabled: settings.plugins.includes("torznab"),
         problem: null,
@@ -455,7 +457,7 @@ export function createMockApi(count = 40): Api {
         pending: null,
         previous: null,
       },
-      { id: "old", name: "Old plugin", version: "0.3.0", kinds: ["search"], permissions: { net: [], fs: [] }, enabled: false, problem: "It was made for plugin protocol 2, and this Drift speaks 1.", fields: [], values: {}, secrets_set: [], pending: null, previous: null },
+      { id: "old", name: "Old plugin", version: "0.3.0", kinds: ["search"], description: "", permissions: { net: [], fs: [] }, enabled: false, problem: "It was made for plugin protocol 2, and this Drift speaks 1.", fields: [], values: {}, secrets_set: [], pending: null, previous: null },
     ],
     pluginOffers: async () => {
       if (!settings.plugin_registry) throw { code: "registry_off", message: "Online plugin lookup is switched off. Turn it on first." };

@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "api": 1,
   "kinds": ["search"],
+  "description": "Adds the Internet Archive as a place to search under Find online. It lists things that are freely shared: public-domain books, films and music, old software and Linux releases. It only talks to archive.org and needs no setup.",
   "exec": ["drift-search.exe", "archive_org"],
   "permissions": { "net": ["archive.org"], "fs": [] }
 }

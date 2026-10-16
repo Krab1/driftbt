@@ -139,6 +139,8 @@ export interface PluginInfo {
   name: string;
   version: string;
   kinds: string[];
+  /** What the plugin does, in plain language (empty if its manifest doesn't say). */
+  description: string;
   permissions: { net: string[]; fs: string[] };
   enabled: boolean;
   /** Why it can't be used; null when it is fine. */

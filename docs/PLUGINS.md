@@ -49,7 +49,7 @@ A pack is one JSON file (see `docs/theme-pack-example.json`), imported in Settin
 
 ```
 <data>/plugins/<id>/
-  plugin.json
+  plugin.json          (id, name, version, a plain-language "description" shown in the list, kinds, permissions, settings form)
   <executable or script entry>
   (optional) README, icon
 ```

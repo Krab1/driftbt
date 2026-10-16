@@ -94,6 +94,9 @@ pub struct Manifest {
     pub version: String,
     pub api: u32,
     pub kinds: Vec<String>,
+    /// What the plugin does, in a sentence or two of plain language, shown in the plugin list.
+    #[serde(default)]
+    pub description: String,
     /// Program and arguments; the program is a path inside the plugin's folder.
     pub exec: Vec<String>,
     #[serde(default)]
@@ -416,6 +419,9 @@ pub struct PluginInfo {
     pub name: String,
     pub version: String,
     pub kinds: Vec<String>,
+    /// What it does, from its manifest; empty if it doesn't say.
+    #[serde(default)]
+    pub description: String,
     pub permissions: Permissions,
     pub enabled: bool,
     /// Why it can't be used (wrong protocol version, missing program, switched off after crashes).
@@ -505,13 +511,13 @@ impl Host {
             let m: Manifest = match serde_json::from_slice(crate::jsonfile::strip_bom(&bytes)) {
                 Ok(m) => m,
                 Err(_) => {
-                    let info = PluginInfo { id: folder.clone(), name: folder, version: String::new(), kinds: vec![], permissions: Permissions::default(), enabled: false, problem: Some("Its plugin.json can't be read.".into()), fields: vec![], values: Map::new(), secrets_set: vec![], pending: None, previous: None };
+                    let info = PluginInfo { id: folder.clone(), name: folder, version: String::new(), kinds: vec![], description: String::new(), permissions: Permissions::default(), enabled: false, problem: Some("Its plugin.json can't be read.".into()), fields: vec![], values: Map::new(), secrets_set: vec![], pending: None, previous: None };
                     entries.push(Entry { plugin: None, info });
                     continue;
                 }
             };
             let problem = check(&m, &d).err();
-            let info = PluginInfo { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), kinds: m.kinds.clone(), permissions: m.permissions.clone(), enabled: false, problem: problem.clone(), fields: m.settings.clone(), values: Map::new(), secrets_set: vec![], pending: None, previous: None };
+            let info = PluginInfo { id: m.id.clone(), name: m.name.clone(), version: m.version.clone(), kinds: m.kinds.clone(), description: m.description.clone(), permissions: m.permissions.clone(), enabled: false, problem: problem.clone(), fields: m.settings.clone(), values: Map::new(), secrets_set: vec![], pending: None, previous: None };
             let plugin = problem.is_none().then(|| Plugin::new(m.clone(), d.clone(), logs.join(format!("{}.log", m.id)), limits, cfg.clone()));
             entries.push(Entry { plugin, info });
         }

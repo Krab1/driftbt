@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "api": 1,
   "kinds": ["search"],
+  "description": "Lets Find online search through your own torrent indexer. You run Jackett or Prowlarr yourself, add its address and API key below, and Drift sends your searches to it. It does nothing until you add an indexer.",
   "exec": ["drift-search.exe", "torznab"],
   "permissions": { "net": ["*"], "fs": [] },
   "settings": [

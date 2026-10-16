@@ -150,6 +150,10 @@
   }
   onMount(() => void load().then(() => (loaded = true)));
 
+  /** What a kind of plugin does, in words. */
+  const KIND: Record<string, string> = { search: "adds a search source", postprocess: "acts when a torrent finishes" };
+  const kinds = (p: PluginInfo) => p.kinds.map((k) => KIND[k] ?? k).join(", ");
+
   const net = (p: PluginInfo) => (p.permissions.net.includes("*") ? "any website" : p.permissions.net.join(", "));
 
   async function toggle(p: PluginInfo, on: boolean) {
@@ -169,15 +173,20 @@
 {#key ui.settingsRev}
   <div class="field">
     <span>Plugins</span>
+    <p class="intro">
+      Plugins add things to Drift. Each one is a small separate program. A <b>search</b> plugin adds a place that <b>Find online</b> can look for torrents, and a plugin can also act when a torrent finishes (move it, show a notice). Drift comes with two search plugins. Turn on only the ones you want, and only plugins you trust.
+    </p>
     {#each list as p (p.id)}
       <div class="item">
         <input type="checkbox" aria-label="Use {p.name}" checked={p.enabled} disabled={!!p.problem && !p.enabled} onchange={(e) => toggle(p, e.currentTarget.checked)} />
         <div class="meta">
-          <div class="nm">{p.name} <small>{p.version} · {p.kinds.join(", ")}</small></div>
+          <div class="nm">{p.name} <small>{p.version}</small></div>
+          {#if p.description}<span class="desc">{p.description}</span>{/if}
+          <small>It {kinds(p)}.</small>
           {#if p.problem}
             <small class="bad">{p.problem}</small>
           {:else}
-            <small>Talks to: {p.permissions.net.length ? net(p) : "nothing"}</small>
+            <small>Connects to: {p.permissions.net.length ? net(p) : "nothing on the internet"}</small>
           {/if}
           {#if p.kinds.includes("search") && p.enabled && !p.problem}
             <span class="test">
@@ -266,13 +275,23 @@
       {/each}
     {/if}
     <small>
-      A plugin is a separate program Drift runs for you, for example another search source. Put its folder in <code>plugins</code> inside Drift's data folder and restart Drift. Plugins can only
-      answer questions; they can't add or control torrents.
+      To add a plugin by hand, put its folder in <code>plugins</code> inside Drift's data folder and restart Drift. A plugin can't add or remove your torrents; the most one can do is move a finished
+      torrent.
     </small>
   </div>
 {/key}
 
 <style>
+  .intro {
+    margin: 0 0 4px;
+    color: var(--text-secondary);
+    line-height: 1.45;
+  }
+  .desc {
+    display: block;
+    line-height: 1.4;
+    margin: 2px 0;
+  }
   .field {
     display: grid;
     gap: 8px;
