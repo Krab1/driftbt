@@ -160,7 +160,7 @@ pub(crate) mod sparse {
         Ok(Some(len))
     }
 
-    #[cfg(test)]
+    /// Bytes a file really takes on disk (a sparse file takes less than its length).
     pub fn allocated_bytes(p: &Path) -> u64 {
         use windows_sys::Win32::Storage::FileSystem::GetCompressedFileSizeW;
         let wide: Vec<u16> = std::os::windows::ffi::OsStrExt::encode_wide(p.as_os_str()).chain(Some(0)).collect();

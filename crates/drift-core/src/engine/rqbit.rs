@@ -51,8 +51,15 @@ impl RqbitConfig {
     }
 }
 
+/// What the storage of a session shares with the engine (Windows only; see `sparse_storage`).
+#[cfg(windows)]
+type Link = sparse_storage::SessionLink;
+#[cfg(not(windows))]
+type Link = ();
+
 pub struct RqbitEngine {
     session: RwLock<Arc<Session>>,
+    link: Mutex<Link>,
     cfg: Mutex<RqbitConfig>,
     limits: Mutex<Limits>,
     /// Serialises session rebuilds.
@@ -86,17 +93,18 @@ fn file_url(p: &Path) -> String {
 /// fixed: files are read through read-only handles, and a file is opened for writing only while data is arriving for it
 /// (the handle goes away a couple of seconds after the last write, and when the torrent is paused).
 ///
-/// It also keeps a skipped file mostly empty: such a file is only written where it shares a download piece with a file
-/// you picked. librqbit tries to mark files sparse on Windows but its call to the OS leaves out an argument the call
-/// requires, so it never takes effect and a skipped 600 MB file ends up taking 600 MB. Here a file is marked sparse when
-/// it is first written while still empty and not picked (picked files are given their full length up front).
+/// It also keeps a file you did not pick out of your folder. Such a file is only written where it shares a download
+/// piece with a file you picked (a few hundred KB at its start and end). librqbit would create the whole file for that,
+/// at full length, and its own attempt to make it sparse never takes effect on Windows. Here those bytes go into one small
+/// hidden file in the torrent's folder (`.drift-skipped-…`), and the real file is only created when you pick it
+/// (the bytes are then moved into it). A file that already exists is used as it is.
 #[cfg(windows)]
 mod sparse_storage {
+    use std::collections::{BTreeMap, HashMap, HashSet};
     use std::fs::{File, OpenOptions};
-    use std::os::windows::fs::FileExt;
+    use std::os::windows::fs::{FileExt, MetadataExt, OpenOptionsExt};
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-    use std::collections::HashSet;
     use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
     use std::time::{Duration, Instant};
 
@@ -110,8 +118,10 @@ mod sparse_storage {
     /// How long a file stays open for writing after its last write.
     const WRITER_IDLE: Duration = Duration::from_secs(2);
 
-    /// Where to find the session (and so each torrent's folder). The session is built after the factory, so the link is
-    /// filled in a moment later; torrents restored while the session is starting wait for it.
+    /// Where to find the session (and so each torrent's folder), plus what the storages of one session share: which
+    /// torrents were checked for a clash, the hidden file of each torrent, and the storage of each torrent (so a change
+    /// of picks reaches it). The session is built after the factory, so the link is filled in a moment later; torrents
+    /// restored while the session is starting wait for it.
     #[derive(Clone, Default)]
     pub struct SessionLink(Arc<LinkInner>);
 
@@ -121,6 +131,10 @@ mod sparse_storage {
         set: AtomicBool,
         /// Torrents whose files were already checked for a clash when first added.
         checked: Mutex<HashSet<Id20>>,
+        /// One hidden file per torrent, shared by every storage the torrent goes through (a recheck makes a new one
+        /// while the old one may still be finishing), so two of them never write to the same log.
+        stores: Mutex<HashMap<Id20, Arc<Mutex<Option<Store>>>>>,
+        files: Mutex<HashMap<Id20, Weak<Files>>>,
     }
 
     impl SessionLink {
@@ -145,6 +159,26 @@ mod sparse_storage {
             }
             self.0.session.read().unwrap().upgrade().context("the session has shut down")
         }
+
+        fn store_for(&self, hash: Id20) -> Arc<Mutex<Option<Store>>> {
+            self.0.stores.lock().unwrap().entry(hash).or_default().clone()
+        }
+
+        /// A torrent is going away or moving: everything remembered about it (including where its hidden file is).
+        pub fn forget(&self, hash: &Id20) {
+            self.0.checked.lock().unwrap().remove(hash);
+            self.0.stores.lock().unwrap().remove(hash);
+            self.0.files.lock().unwrap().remove(hash);
+        }
+
+        /// The user changed which files of a torrent are picked. Called before the torrent itself is told, so the files
+        /// that are now picked get their stored bytes written into the real file first.
+        pub fn set_picks(&self, hash: &Id20, picked: &HashSet<usize>) {
+            let files = self.0.files.lock().unwrap().get(hash).and_then(Weak::upgrade);
+            if let Some(files) = files {
+                files.set_picks(picked);
+            }
+        }
     }
 
     #[derive(Clone)]
@@ -159,12 +193,26 @@ mod sparse_storage {
                 link: self.0.clone(),
                 folder: OnceLock::new(),
                 epoch: Instant::now(),
+                store: self.0.store_for(shared.info_hash),
+                tidied: AtomicBool::new(false),
+                picked: Mutex::new(None),
+                piece_len: u64::from(metadata.lengths().default_piece_length()),
+                total: metadata.lengths().total_length(),
                 slots: metadata
                     .file_infos
                     .iter()
-                    .map(|f| Slot { rel: f.relative_filename.clone(), padding: f.attrs.padding, reader: RwLock::new(None), writer: RwLock::new(None), last_write: AtomicU64::new(0) })
+                    .map(|f| Slot {
+                        rel: f.relative_filename.clone(),
+                        padding: f.attrs.padding,
+                        start: f.offset_in_torrent,
+                        len: f.len,
+                        reader: RwLock::new(None),
+                        writer: RwLock::new(None),
+                        last_write: AtomicU64::new(0),
+                    })
                     .collect(),
             });
+            self.0.0.files.lock().unwrap().insert(shared.info_hash, Arc::downgrade(&files));
             if let Ok(rt) = tokio::runtime::Handle::try_current() {
                 let weak = Arc::downgrade(&files);
                 rt.spawn(async move {
@@ -181,6 +229,8 @@ mod sparse_storage {
                 // Only used to delete files and empty folders, which it knows the torrent's folder for.
                 fs: Arc::new(FilesystemStorageFactory::default().create(shared, metadata)?),
                 alive: Arc::new(AtomicBool::new(true)),
+                // The check that runs when a torrent starts reads parts of files that were never downloaded.
+                lenient: true,
             }))
         }
 
@@ -194,9 +244,213 @@ mod sparse_storage {
         }
     }
 
+    /// Where the bytes of the files you did not pick are kept: the torrent's folder, hidden.
+    pub fn skipped_store(folder: &Path, hash: &Id20) -> PathBuf {
+        folder.join(format!(".drift-skipped-{}", &hash.as_string()[..12]))
+    }
+
+    /// Whether a file on disk is the nearly empty stub an older Drift left for a skipped file: sparse, and holding no more
+    /// than the two download pieces that are shared with its neighbours. A complete file that merely carries the sparse
+    /// flag (from that older Drift, or from another client) is not one.
+    fn looks_like_stub(len: u64, allocated: u64, piece_len: u64) -> bool {
+        len > 0 && allocated <= 2 * (piece_len + (64 << 10)) && allocated < len / 2
+    }
+
+    fn read_exact_at(f: &File, mut buf: &mut [u8], mut at: u64) -> std::io::Result<()> {
+        while !buf.is_empty() {
+            let n = f.seek_read(buf, at)?;
+            if n == 0 {
+                return Err(std::io::ErrorKind::UnexpectedEof.into());
+            }
+            at += n as u64;
+            buf = &mut buf[n..];
+        }
+        Ok(())
+    }
+
+    fn write_all_at(f: &File, mut buf: &[u8], mut at: u64) -> std::io::Result<()> {
+        while !buf.is_empty() {
+            let n = f.seek_write(buf, at)?;
+            if n == 0 {
+                return Err(std::io::ErrorKind::WriteZero.into());
+            }
+            at += n as u64;
+            buf = &buf[n..];
+        }
+        Ok(())
+    }
+
+    /// A log of (file, offset, bytes) records plus an in-memory map of which ranges of which file it holds. Every record
+    /// starts with a signature, a record with the length `CLEAR` forgets a file, and a tail that doesn't parse (a torn
+    /// write, garbage) is cut off when the log is opened. A log that can't be opened is an error, never "empty".
+    struct Store {
+        path: PathBuf,
+        file: Option<File>,
+        end: u64,
+        /// (file, start) -> (end, position in the log of the byte at `start`); ranges of one file never overlap.
+        map: BTreeMap<(usize, u64), (u64, u64)>,
+    }
+
+    const MAGIC: u32 = 0x4b53_5244; // "DRSK"
+    const HEADER: u64 = 20;
+    const CLEAR: u32 = u32::MAX;
+
+    impl Store {
+        /// `lens` are the lengths of the torrent's files: a record for a file or a range that doesn't exist is rejected.
+        fn open(path: PathBuf, lens: &[u64]) -> anyhow::Result<Store> {
+            let mut s = Store { path, file: None, end: 0, map: BTreeMap::new() };
+            let f = match OpenOptions::new().read(true).write(true).open(&s.path) {
+                Ok(f) => f,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(s),
+                Err(e) => return Err(anyhow::Error::from(e).context(format!("error opening {:?}", s.path))),
+            };
+            let len = f.metadata()?.len();
+            let (mut pos, mut hdr) = (0u64, [0u8; HEADER as usize]);
+            while pos + HEADER <= len {
+                read_exact_at(&f, &mut hdr, pos)?;
+                if u32::from_le_bytes(hdr[0..4].try_into().unwrap()) != MAGIC {
+                    break;
+                }
+                let id = u32::from_le_bytes(hdr[4..8].try_into().unwrap()) as usize;
+                let off = u64::from_le_bytes(hdr[8..16].try_into().unwrap());
+                let n = u32::from_le_bytes(hdr[16..20].try_into().unwrap());
+                if id >= lens.len() {
+                    break;
+                }
+                if n == CLEAR {
+                    s.map.retain(|(i, _), _| *i != id);
+                    pos += HEADER;
+                    continue;
+                }
+                let data = pos + HEADER;
+                if n == 0 || off.saturating_add(u64::from(n)) > lens[id] || data + u64::from(n) > len {
+                    break;
+                }
+                s.insert(id, off, off + u64::from(n), data);
+                pos = data + u64::from(n);
+            }
+            if pos < len {
+                f.set_len(pos)?;
+            }
+            s.end = pos;
+            s.file = Some(f);
+            Ok(s)
+        }
+
+        fn file(&mut self) -> anyhow::Result<&File> {
+            if self.file.is_none() {
+                if let Some(dir) = self.path.parent() {
+                    std::fs::create_dir_all(dir)?;
+                }
+                const HIDDEN: u32 = 0x2;
+                let f = OpenOptions::new().create(true).read(true).write(true).attributes(HIDDEN).open(&self.path).with_context(|| format!("error opening {:?}", self.path))?;
+                self.end = f.metadata()?.len();
+                self.file = Some(f);
+            }
+            Ok(self.file.as_ref().expect("just opened"))
+        }
+
+        /// Records [start, end) of `id` as living at log position `pos`, replacing whatever overlapped.
+        fn insert(&mut self, id: usize, start: u64, end: u64, pos: u64) {
+            let hit: Vec<(u64, u64, u64)> = self.map.range((id, 0)..=(id, u64::MAX)).filter(|(&(_, s), &(e, _))| s < end && e > start).map(|(&(_, s), &(e, p))| (s, e, p)).collect();
+            for (s, e, p) in hit {
+                self.map.remove(&(id, s));
+                if s < start {
+                    self.map.insert((id, s), (start, p));
+                }
+                if e > end {
+                    self.map.insert((id, end), (e, p + (end - s)));
+                }
+            }
+            self.map.insert((id, start), (end, pos));
+        }
+
+        fn has(&self, id: usize) -> bool {
+            self.map.range((id, 0)..=(id, u64::MAX)).next().is_some()
+        }
+
+        fn write(&mut self, id: usize, offset: u64, buf: &[u8]) -> anyhow::Result<()> {
+            self.file()?;
+            let at = self.end;
+            let mut rec = Vec::with_capacity(HEADER as usize + buf.len());
+            rec.extend_from_slice(&MAGIC.to_le_bytes());
+            rec.extend_from_slice(&(id as u32).to_le_bytes());
+            rec.extend_from_slice(&offset.to_le_bytes());
+            rec.extend_from_slice(&(buf.len() as u32).to_le_bytes());
+            rec.extend_from_slice(buf);
+            write_all_at(self.file()?, &rec, at)?;
+            self.end += rec.len() as u64;
+            self.insert(id, offset, offset + buf.len() as u64, at + HEADER);
+            Ok(())
+        }
+
+        /// Reads what is held. What is not held is an error, or with `lenient` zeros: librqbit gives up on a whole file
+        /// after one failed read, and a part that was never stored should only fail the piece that needs it (its checksum
+        /// won't match), as it would with a sparse file. Only the check that runs when a torrent starts is lenient.
+        fn read(&self, id: usize, mut offset: u64, mut buf: &mut [u8], lenient: bool) -> anyhow::Result<()> {
+            while !buf.is_empty() {
+                let hit = self.map.range((id, 0)..=(id, offset)).next_back().filter(|(_, &(e, _))| e > offset);
+                let n = match (hit, &self.file) {
+                    (Some((&(_, s), &(e, p))), Some(f)) => {
+                        let n = ((e - offset) as usize).min(buf.len());
+                        read_exact_at(f, &mut buf[..n], p + (offset - s))?;
+                        n
+                    }
+                    _ if lenient => {
+                        let next = self.map.range((id, offset + 1)..=(id, u64::MAX)).next().map_or(u64::MAX, |(&(_, s), _)| s);
+                        let n = ((next - offset).min(buf.len() as u64)) as usize;
+                        buf[..n].fill(0);
+                        n
+                    }
+                    _ => anyhow::bail!("that part of the file was not stored"),
+                };
+                offset += n as u64;
+                buf = &mut buf[n..];
+            }
+            Ok(())
+        }
+
+        /// Everything held for `id`, as (offset, bytes).
+        fn parts(&self, id: usize) -> anyhow::Result<Vec<(u64, Vec<u8>)>> {
+            let f = self.file.as_ref().context("nothing is stored")?;
+            self.map
+                .range((id, 0)..=(id, u64::MAX))
+                .map(|(&(_, s), &(e, p))| {
+                    let mut data = vec![0u8; (e - s) as usize];
+                    read_exact_at(f, &mut data, p)?;
+                    Ok((s, data))
+                })
+                .collect()
+        }
+
+        /// Forgets a file (and says so in the log, so it stays forgotten). When nothing is left the log is emptied.
+        fn clear(&mut self, id: usize) -> anyhow::Result<()> {
+            self.map.retain(|(i, _), _| *i != id);
+            if self.map.is_empty() {
+                if let Some(f) = &self.file {
+                    f.set_len(0)?;
+                }
+                self.end = 0;
+                return Ok(());
+            }
+            let mut rec = Vec::with_capacity(HEADER as usize);
+            rec.extend_from_slice(&MAGIC.to_le_bytes());
+            rec.extend_from_slice(&(id as u32).to_le_bytes());
+            rec.extend_from_slice(&0u64.to_le_bytes());
+            rec.extend_from_slice(&CLEAR.to_le_bytes());
+            let at = self.end;
+            write_all_at(self.file()?, &rec, at)?;
+            self.end += HEADER;
+            Ok(())
+        }
+    }
+
     struct Slot {
         rel: PathBuf,
         padding: bool,
+        /// Where the file starts in the torrent, and how long it is.
+        start: u64,
+        len: u64,
         /// Opened on first read and kept: a read-only handle does not stop the file from being run.
         reader: RwLock<Option<File>>,
         /// Only while data is being written.
@@ -211,6 +465,16 @@ mod sparse_storage {
         folder: OnceLock<PathBuf>,
         epoch: Instant,
         slots: Vec<Slot>,
+        piece_len: u64,
+        total: u64,
+        /// Opened when first needed; shared with the other storages of this torrent.
+        store: Arc<Mutex<Option<Store>>>,
+        /// The empty files librqbit's own check created for files that were not picked have been removed.
+        tidied: AtomicBool,
+        /// Which files are picked: `None` until asked of the torrent; inside, `None` means all of them. After the first
+        /// time it is kept up to date by `set_picks`, so reading and writing never go back to the torrent for it (its
+        /// own lock may be held by whoever is reading).
+        picked: Mutex<Option<Option<HashSet<usize>>>>,
     }
 
     impl Files {
@@ -218,16 +482,181 @@ mod sparse_storage {
             self.slots.get(id).context("no such file")
         }
 
-        fn path(&self, id: usize) -> anyhow::Result<PathBuf> {
+        fn folder(&self) -> anyhow::Result<&Path> {
             if self.folder.get().is_none() {
                 let session = self.link.get()?;
                 let handle = session.get(TorrentIdOrHash::Hash(self.hash)).context("the torrent is not in the session")?;
                 let _ = self.folder.set(handle.output_folder().to_path_buf());
             }
-            Ok(self.folder.get().context("no folder")?.join(&self.slot(id)?.rel))
+            Ok(self.folder.get().context("no folder")?)
         }
 
-        fn read(&self, id: usize, mut offset: u64, mut buf: &mut [u8]) -> anyhow::Result<()> {
+        fn path(&self, id: usize) -> anyhow::Result<PathBuf> {
+            Ok(self.folder()?.join(&self.slot(id)?.rel))
+        }
+
+        /// Whether the file is not picked (so it is kept out of the folder). `false` while that is not known yet.
+        fn unpicked(&self, id: usize) -> bool {
+            let mut g = self.picked.lock().unwrap();
+            if g.is_none() {
+                let Ok(session) = self.link.get() else { return false };
+                let Some(h) = session.get(TorrentIdOrHash::Hash(self.hash)) else { return false };
+                *g = Some(h.only_files().map(|v| v.into_iter().collect()));
+            }
+            g.as_ref().and_then(|p| p.as_ref()).is_some_and(|p| !p.contains(&id))
+        }
+
+        /// The user changed the picks. Under the store's lock, so a store write in flight is finished first and the
+        /// stored bytes of files that are picked now go into their real files before anything else touches them.
+        fn set_picks(&self, picked: &HashSet<usize>) {
+            let paths: Vec<(usize, PathBuf)> = (0..self.slots.len()).filter(|id| picked.contains(id)).filter_map(|id| self.path(id).ok().map(|p| (id, p))).collect();
+            let r = self.with_store(|s| {
+                *self.picked.lock().unwrap() = Some(Some(picked.clone()));
+                for (id, path) in &paths {
+                    if s.has(*id) {
+                        self.materialize_into(s, *id, path)?;
+                    }
+                }
+                Ok(())
+            });
+            if let Err(e) = r {
+                eprintln!("couldn't move the stored bytes into the picked files: {e:#}");
+                *self.picked.lock().unwrap() = Some(Some(picked.clone()));
+            }
+        }
+
+        /// Whether a write of `len` bytes at `offset` of the file lies in a download piece that the file shares with
+        /// another file: only those bytes are worth keeping for a file that was not picked.
+        fn in_shared_piece(&self, id: usize, offset: u64, len: usize) -> bool {
+            let Ok(slot) = self.slot(id) else { return false };
+            if self.piece_len == 0 {
+                return false;
+            }
+            let (first, last) = (slot.start + offset, slot.start + offset + len as u64 - 1);
+            let piece_start = first / self.piece_len * self.piece_len;
+            let piece_end = ((last / self.piece_len + 1) * self.piece_len).min(self.total);
+            piece_start < slot.start || piece_end > slot.start + slot.len
+        }
+
+        /// librqbit's own check of the folder (run when a torrent is added) creates an empty file for every file of the
+        /// torrent. Those for files that were not picked are removed, once, with the folders made for them: such a file
+        /// only comes to exist when it is picked. A sparse stub that an older Drift left is converted.
+        fn tidy(&self) {
+            if self.tidied.load(Ordering::Acquire) {
+                return;
+            }
+            let Ok(folder) = self.folder() else { return };
+            self.unpicked(0);
+            let picked = match self.picked.lock().unwrap().clone() {
+                None => return,
+                Some(p) => p,
+            };
+            self.tidied.store(true, Ordering::Release);
+            let Some(picked) = picked else { return };
+            for (id, slot) in self.slots.iter().enumerate().filter(|(id, s)| !s.padding && !picked.contains(id)) {
+                let path = folder.join(&slot.rel);
+                let Ok(meta) = std::fs::metadata(&path) else { continue };
+                if meta.file_attributes() & 0x200 != 0 && looks_like_stub(meta.len(), crate::fsmove::sparse::allocated_bytes(&path), self.piece_len) {
+                    let _ = self.migrate_stub(id, &path);
+                } else if meta.len() == 0 && std::fs::remove_file(&path).is_ok() {
+                    let mut dir = path.parent();
+                    while let Some(d) = dir.filter(|d| *d != folder && d.starts_with(folder)) {
+                        if std::fs::remove_dir(d).is_err() {
+                            break;
+                        }
+                        dir = d.parent();
+                    }
+                }
+            }
+        }
+
+        /// Moves what a sparse stub really holds into the store and deletes the stub. On any failure the store forgets
+        /// it again and the stub stays, so the one place that has the file is the one that is used.
+        fn migrate_stub(&self, id: usize, path: &Path) -> anyhow::Result<()> {
+            let f = File::open(path)?;
+            let len = f.metadata()?.len();
+            let mut buf = vec![0u8; 64 << 10];
+            let r = self.with_store(|s| {
+                let copied: anyhow::Result<()> = (|| {
+                    let mut pos = 0u64;
+                    while pos < len {
+                        let n = ((len - pos) as usize).min(buf.len());
+                        read_exact_at(&f, &mut buf[..n], pos)?;
+                        // Only from the first to the last byte that isn't zero: the rest reads back as zeros anyway.
+                        if let Some(first) = buf[..n].iter().position(|&b| b != 0) {
+                            let last = buf[..n].iter().rposition(|&b| b != 0).expect("there is a first");
+                            s.write(id, pos + first as u64, &buf[first..=last])?;
+                        }
+                        pos += n as u64;
+                    }
+                    Ok(())
+                })();
+                if copied.is_err() {
+                    let _ = s.clear(id);
+                }
+                copied
+            });
+            drop(f);
+            r?;
+            if std::fs::remove_file(path).is_err() {
+                self.with_store(|s| s.clear(id))?;
+            }
+            Ok(())
+        }
+
+        /// The store, opened if it isn't yet. Never called with a slot lock held.
+        fn with_store<R>(&self, f: impl FnOnce(&mut Store) -> anyhow::Result<R>) -> anyhow::Result<R> {
+            let folder = self.folder()?.to_path_buf();
+            let mut g = self.store.lock().unwrap();
+            if g.is_none() {
+                let lens: Vec<u64> = self.slots.iter().map(|s| s.len).collect();
+                *g = Some(Store::open(skipped_store(&folder, &self.hash), &lens)?);
+            }
+            f(g.as_mut().expect("opened above"))
+        }
+
+        fn store_has(&self, id: usize) -> bool {
+            self.with_store(|s| Ok(s.has(id))).unwrap_or(false)
+        }
+
+        /// A file that was not picked: its bytes go to the store. `false` if it is picked after all.
+        fn store_write(&self, id: usize, offset: u64, buf: &[u8]) -> anyhow::Result<bool> {
+            self.with_store(|s| {
+                // Looked at with the store held, so a pick that happens right now can't lose these bytes: picking moves
+                // the stored bytes under the same lock.
+                if !self.unpicked(id) {
+                    return Ok(false);
+                }
+                s.write(id, offset, buf)?;
+                Ok(true)
+            })
+        }
+
+        /// A file that has been picked: what the store holds for it goes into the real file, which is made its full
+        /// length (as a picked file always is), and the store forgets it.
+        fn materialize_into(&self, s: &mut Store, id: usize, path: &Path) -> anyhow::Result<()> {
+            let parts = s.parts(id)?;
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let f = OpenOptions::new().create(true).write(true).truncate(false).open(path).with_context(|| format!("error opening {path:?} for writing"))?;
+            for (offset, data) in &parts {
+                write_all_at(&f, data, *offset)?;
+            }
+            let len = self.slot(id)?.len;
+            if f.metadata()?.len() < len {
+                f.set_len(len)?;
+            }
+            drop(f);
+            s.clear(id)
+        }
+
+        fn materialize(&self, id: usize) -> anyhow::Result<()> {
+            let path = self.path(id)?;
+            self.with_store(|s| if s.has(id) { self.materialize_into(s, id, &path) } else { Ok(()) })
+        }
+
+        fn read(&self, id: usize, mut offset: u64, mut buf: &mut [u8], lenient: bool) -> anyhow::Result<()> {
             let slot = self.slot(id)?;
             if slot.padding {
                 buf.fill(0);
@@ -235,6 +664,23 @@ mod sparse_storage {
             }
             if buf.is_empty() {
                 return Ok(());
+            }
+            self.tidy();
+            // Held for a file that was not picked: answered from the store, all under its lock, so a pick can't slip in
+            // between the look and the read.
+            let served = self.with_store(|s| {
+                if s.has(id) && self.unpicked(id) {
+                    s.read(id, offset, &mut *buf, lenient)?;
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            })?;
+            if served {
+                return Ok(());
+            }
+            if self.store_has(id) {
+                self.materialize(id)?;
             }
             loop {
                 if let Some(f) = slot.reader.read().unwrap().as_ref() {
@@ -251,7 +697,20 @@ mod sparse_storage {
                 let path = self.path(id)?;
                 let mut g = slot.reader.write().unwrap();
                 if g.is_none() {
-                    *g = Some(OpenOptions::new().read(true).open(&path).with_context(|| format!("error opening {path:?}"))?);
+                    match OpenOptions::new().read(true).open(&path) {
+                        Ok(f) => *g = Some(f),
+                        // Not picked, so never created: nothing of it is held, which reads as zeros while the torrent
+                        // is being checked (see Store::read).
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound && lenient && {
+                            drop(g);
+                            self.unpicked(id)
+                        } =>
+                        {
+                            buf.fill(0);
+                            return Ok(());
+                        }
+                        Err(e) => return Err(anyhow::Error::from(e).context(format!("error opening {path:?}"))),
+                    }
                 }
             }
         }
@@ -261,6 +720,7 @@ mod sparse_storage {
             if slot.padding || buf.is_empty() {
                 return Ok(());
             }
+            self.tidy();
             loop {
                 // The read lock is held for the whole write, so the idle closer (which needs the write lock) can't close it under us.
                 if let Some(f) = slot.writer.read().unwrap().as_ref() {
@@ -275,25 +735,24 @@ mod sparse_storage {
                 }
                 // Looked up before the lock is taken: the torrent's own lock must never be waited for while holding ours.
                 let path = self.path(id)?;
-                let unpicked = self.unpicked(id);
+                // A file that was not picked is not created for the part it shares with its neighbours; and while the
+                // store holds something for it, the store is the one place that has the file.
+                if (!path.exists() || self.store_has(id)) && self.in_shared_piece(id, offset, buf.len()) && self.store_write(id, offset, buf)? {
+                    return Ok(());
+                }
+                if self.store_has(id) {
+                    self.materialize(id)?;
+                }
                 let mut g = slot.writer.write().unwrap();
                 if g.is_none() {
                     if let Some(dir) = path.parent() {
                         std::fs::create_dir_all(dir)?;
                     }
                     let f = OpenOptions::new().create(true).write(true).truncate(false).open(&path).with_context(|| format!("error opening {path:?} for writing"))?;
-                    if unpicked && f.metadata().is_ok_and(|m| m.len() == 0) {
-                        let _ = crate::fsmove::sparse::mark_sparse(&f);
-                    }
                     slot.last_write.store(self.now(), Ordering::Relaxed);
                     *g = Some(f);
                 }
             }
-        }
-
-        fn unpicked(&self, id: usize) -> bool {
-            let Ok(session) = self.link.get() else { return false };
-            session.get(TorrentIdOrHash::Hash(self.hash)).and_then(|h| h.only_files()).is_some_and(|only| !only.contains(&id))
         }
 
         /// Milliseconds since the storage was made, plus one so that 0 can mean "nothing open".
@@ -333,6 +792,9 @@ mod sparse_storage {
         /// Cleared by `take()`: the old storage of a paused torrent must not write again (it could bring back a file that
         /// was deleted or moved in the meantime).
         alive: Arc<AtomicBool>,
+        /// Reads of parts that were never stored give zeros instead of an error. Only for the storage that checks the
+        /// torrent when it starts; a running torrent (uploading, streaming) must never answer with made-up bytes.
+        lenient: bool,
     }
 
     impl SparseStorage {
@@ -359,7 +821,7 @@ mod sparse_storage {
         }
 
         fn pread_exact(&self, file_id: usize, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
-            self.live()?.read(file_id, offset, buf)
+            self.live()?.read(file_id, offset, buf, self.lenient)
         }
 
         fn pwrite_all(&self, file_id: usize, offset: u64, buf: &[u8]) -> anyhow::Result<()> {
@@ -384,6 +846,7 @@ mod sparse_storage {
             if files.slot(file_id)?.padding {
                 return Ok(());
             }
+            files.materialize(file_id)?;
             if let Some(dir) = path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
@@ -396,15 +859,160 @@ mod sparse_storage {
         fn take(&self) -> anyhow::Result<Box<dyn TorrentStorage>> {
             self.alive.store(false, Ordering::Release);
             self.files.close_all();
-            Ok(Box::new(SparseStorage { files: self.files.clone(), fs: self.fs.clone(), alive: Arc::new(AtomicBool::new(true)) }))
+            Ok(Box::new(SparseStorage { files: self.files.clone(), fs: self.fs.clone(), alive: Arc::new(AtomicBool::new(true)), lenient: false }))
+        }
+    }
+
+    #[cfg(test)]
+    mod store_tests {
+        use super::*;
+
+        fn bytes(from: u64, to: u64) -> Vec<u8> {
+            (from..to).map(|k| (k * 7 + 3) as u8).collect()
+        }
+
+        fn tmp(name: &str) -> PathBuf {
+            let d = std::env::temp_dir().join(format!("drift-store-{name}-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(&d).unwrap();
+            d.join(".store")
+        }
+
+        const LENS: [u64; 8] = [1000; 8];
+
+        #[test]
+        fn what_is_written_reads_back_also_after_reopening_and_overwrites_win() {
+            let path = tmp("rt");
+            let mut st = Store::open(path.clone(), &LENS).unwrap();
+            // File 3: two neighbouring chunks, then a rewrite over part of both. File 5: one piece.
+            st.write(3, 100, &bytes(100, 160)).unwrap();
+            st.write(3, 160, &bytes(160, 200)).unwrap();
+            st.write(3, 140, &[9u8; 40]).unwrap();
+            st.write(5, 0, &bytes(0, 30)).unwrap();
+            let mut expect3 = bytes(100, 200);
+            expect3[40..80].fill(9);
+            let check = |st: &Store| {
+                let mut b = vec![0u8; 100];
+                st.read(3, 100, &mut b, false).unwrap();
+                assert_eq!(b, expect3);
+                let mut b = vec![0u8; 10];
+                st.read(3, 150, &mut b, false).unwrap();
+                assert_eq!(b, expect3[50..60]);
+                let mut b = vec![0u8; 30];
+                st.read(5, 0, &mut b, false).unwrap();
+                assert_eq!(b, bytes(0, 30));
+                assert!(st.read(3, 99, &mut [0u8; 2], false).is_err(), "a byte that was never stored is an error");
+                assert!(st.read(4, 0, &mut [0u8; 1], false).is_err());
+                let mut z = vec![1u8; 4];
+                st.read(3, 98, &mut z, true).unwrap();
+                assert_eq!(z, [0, 0, expect3[0], expect3[1]], "lenient: zeros before, data after");
+                let mut z = vec![1u8; 3];
+                st.read(4, 0, &mut z, true).unwrap();
+                assert_eq!(z, [0, 0, 0]);
+            };
+            check(&st);
+            drop(st);
+            check(&Store::open(path.clone(), &LENS).unwrap());
+
+            // Forgetting a file stays forgotten after a reopen; the other file is untouched.
+            let mut st = Store::open(path.clone(), &LENS).unwrap();
+            assert_eq!(st.parts(3).unwrap().iter().map(|(_, d)| d.len()).sum::<usize>(), 100);
+            st.clear(3).unwrap();
+            drop(st);
+            let st = Store::open(path.clone(), &LENS).unwrap();
+            assert!(!st.has(3) && st.has(5));
+
+            // Forgetting the last file empties the log, and it can be written to again.
+            let mut st = Store::open(path.clone(), &LENS).unwrap();
+            st.clear(5).unwrap();
+            assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
+            st.write(7, 0, &bytes(0, 10)).unwrap();
+            drop(st);
+            let st = Store::open(path, &LENS).unwrap();
+            let mut b = vec![0u8; 10];
+            st.read(7, 0, &mut b, false).unwrap();
+            assert_eq!(b, bytes(0, 10));
+        }
+
+        #[test]
+        fn overlapping_writes_split_the_old_ranges_correctly() {
+            let path = tmp("split");
+            let mut st = Store::open(path, &LENS).unwrap();
+            st.write(1, 0, &bytes(0, 100)).unwrap();
+            st.write(1, 40, &[1u8; 20]).unwrap(); // inside: leaves a left and a right part
+            st.write(1, 90, &[2u8; 20]).unwrap(); // across the end
+            st.write(1, 0, &[3u8; 10]).unwrap(); // across the start
+            let mut expect = bytes(0, 110);
+            expect[..10].fill(3);
+            expect[40..60].fill(1);
+            expect[90..110].fill(2);
+            let mut b = vec![0u8; 110];
+            st.read(1, 0, &mut b, false).unwrap();
+            assert_eq!(b, expect);
+        }
+
+        #[test]
+        fn a_log_with_garbage_zeros_or_foreign_records_never_leaks_data_into_the_map() {
+            let path = tmp("garbage");
+            let mut st = Store::open(path.clone(), &LENS).unwrap();
+            st.write(2, 10, &bytes(10, 50)).unwrap();
+            st.write(6, 0, &bytes(0, 20)).unwrap();
+            let good = st.end;
+            drop(st);
+            // A zero-filled tail (a power cut), then random bytes: both are cut off, the good records stay.
+            for junk in [vec![0u8; 100], (0..300u32).map(|k| (k * 31 + 7) as u8).collect::<Vec<u8>>()] {
+                use std::io::Write;
+                std::fs::OpenOptions::new().append(true).open(&path).unwrap().write_all(&junk).unwrap();
+                let st = Store::open(path.clone(), &LENS).unwrap();
+                assert!(st.has(2) && st.has(6) && !st.has(0) && !st.has(1));
+                assert_eq!(st.end, good);
+                assert_eq!(std::fs::metadata(&path).unwrap().len(), good, "the junk is cut off");
+            }
+            // The same log opened for a torrent with fewer files: records for files that don't exist are refused.
+            let st = Store::open(path.clone(), &[1000, 1000, 1000]).unwrap();
+            assert!(st.has(2) && !st.has(6));
+        }
+
+        #[test]
+        fn a_log_that_cannot_be_opened_is_an_error_not_an_empty_log() {
+            let path = tmp("locked");
+            let mut st = Store::open(path.clone(), &LENS).unwrap();
+            st.write(1, 0, &bytes(0, 10)).unwrap();
+            drop(st);
+            // Held with no sharing at all, like a scanner that insists on exclusive access.
+            let held = OpenOptions::new().read(true).share_mode(0).open(&path).unwrap();
+            assert!(Store::open(path.clone(), &LENS).is_err());
+            drop(held);
+            assert!(Store::open(path, &LENS).unwrap().has(1));
+        }
+
+        #[test]
+        fn only_a_nearly_empty_sparse_file_counts_as_an_old_stub() {
+            let piece = 256 << 10;
+            assert!(looks_like_stub(641 << 20, 512 << 10, piece), "a 641 MB file holding one piece");
+            assert!(!looks_like_stub(10 << 20, 10 << 20, piece), "a complete file that is merely flagged sparse");
+            assert!(!looks_like_stub(50 << 20, 40 << 20, piece), "a mostly complete one");
+            assert!(!looks_like_stub(0, 0, piece));
         }
     }
 }
 
-async fn build_session(cfg: &RqbitConfig) -> Result<Arc<Session>> {
+/// Moves a small file, across drives if need be.
+#[cfg(windows)]
+fn move_small_file(from: &Path, to: &Path) -> std::io::Result<()> {
+    if std::fs::rename(from, to).is_ok() {
+        return Ok(());
+    }
+    std::fs::copy(from, to)?;
+    std::fs::remove_file(from)
+}
+
+async fn build_session(cfg: &RqbitConfig) -> Result<(Arc<Session>, Link)> {
     let mut opts = SessionOptions::default();
     #[cfg(windows)]
     let link = sparse_storage::SessionLink::default();
+    #[cfg(not(windows))]
+    let link: Link = ();
     #[cfg(windows)]
     {
         opts.default_storage_factory = Some(Box::new(sparse_storage::SparseFactory(link.clone())));
@@ -444,14 +1052,15 @@ async fn build_session(cfg: &RqbitConfig) -> Result<Arc<Session>> {
     {
         link.set(&session);
     }
-    Ok(session)
+    Ok((session, link))
 }
 
 impl RqbitEngine {
     pub async fn new(cfg: RqbitConfig) -> Result<Self> {
-        let session = build_session(&cfg).await?;
+        let (session, link) = build_session(&cfg).await?;
         Ok(Self {
             session: RwLock::new(session),
+            link: Mutex::new(link),
             cfg: Mutex::new(cfg),
             limits: Mutex::new(Limits::default()),
             rebuild: tokio::sync::Mutex::new(()),
@@ -771,10 +1380,19 @@ impl TorrentEngine for RqbitEngine {
 
     async fn remove(&self, id: &TorrentId, delete_files: bool) -> Result<()> {
         let h = self.handle(id)?;
-        self.session()
-            .delete(TorrentIdOrHash::Hash(h.info_hash()), delete_files)
-            .await
-            .map_err(backend)
+        let (hash, folder) = (h.info_hash(), h.output_folder().to_path_buf());
+        self.session().delete(TorrentIdOrHash::Hash(hash), delete_files).await.map_err(backend)?;
+        #[cfg(windows)]
+        self.link.lock().unwrap().forget(&hash);
+        // The hidden file that held the bytes of the files you didn't pick goes with the rest, and so does the folder if
+        // that leaves it empty (it was what kept the folder from being removed).
+        #[cfg(windows)]
+        if delete_files && std::fs::remove_file(sparse_storage::skipped_store(&folder, &hash)).is_ok() {
+            let _ = std::fs::remove_dir(&folder);
+        }
+        #[cfg(not(windows))]
+        let _ = (hash, folder);
+        Ok(())
     }
 
     async fn recheck(&self, id: &TorrentId) -> Result<()> {
@@ -796,8 +1414,20 @@ impl TorrentEngine for RqbitEngine {
         let session = self.session();
         // Deleting from the session (not from disk) closes the files so they can be moved.
         session.delete(TorrentIdOrHash::Hash(saved.hash), false).await.map_err(backend)?;
+        // The torrent's hidden file is about to move, so the storage must not keep the old place in mind.
+        #[cfg(windows)]
+        self.link.lock().unwrap().forget(&saved.hash);
+        // The hidden file with the bytes of the files you didn't pick goes first, so the old folder can be tidied up.
+        #[cfg(windows)]
+        let store = (sparse_storage::skipped_store(&saved.output, &saved.hash), sparse_storage::skipped_store(dest, &saved.hash));
+        #[cfg(windows)]
+        let had_store = store.0.exists() && std::fs::create_dir_all(dest).is_ok() && move_small_file(&store.0, &store.1).is_ok();
         if let Err(e) = crate::fsmove::move_files(&saved.output, dest, &saved.files) {
             // Nothing moved: carry on where it was.
+            #[cfg(windows)]
+            if had_store {
+                let _ = move_small_file(&store.1, &store.0);
+            }
             let _ = self.add_saved(saved, None).await;
             return Err(EngineError::Backend(e.to_string()));
         }
@@ -807,7 +1437,18 @@ impl TorrentEngine for RqbitEngine {
     async fn set_files(&self, id: &TorrentId, selected: Vec<usize>) -> Result<()> {
         let h = self.handle(id)?;
         let set: HashSet<usize> = selected.into_iter().collect();
-        self.session().update_only_files(&h, &set).await.map_err(backend)
+        // The storage hears first: files that are picked now get the bytes it kept for them written into the real file
+        // before the torrent starts to want them.
+        #[cfg(windows)]
+        self.link.lock().unwrap().set_picks(&h.info_hash(), &set);
+        let r = self.session().update_only_files(&h, &set).await.map_err(backend);
+        #[cfg(windows)]
+        if r.is_err() {
+            if let Some(now) = h.only_files() {
+                self.link.lock().unwrap().set_picks(&h.info_hash(), &now.into_iter().collect());
+            }
+        }
+        r
     }
 
     async fn set_torrent_limits(&self, id: &TorrentId, limits: Limits) -> Result<()> {
@@ -863,19 +1504,21 @@ impl TorrentEngine for RqbitEngine {
 
         // The old session must release its port and state files before a new one can take them over.
         self.session().stop().await;
-        let session = match build_session(&new_cfg).await {
+        let (session, link) = match build_session(&new_cfg).await {
             Ok(s) => s,
             Err(e) => {
                 // Put the previous settings back so the app isn't left without an engine.
-                let restored = build_session(&old_cfg).await?;
+                let (restored, link) = build_session(&old_cfg).await?;
                 Self::apply_limits(&restored, *self.limits.lock().unwrap());
                 *self.session.write().unwrap() = restored;
+                *self.link.lock().unwrap() = link;
                 self.torrent_limits.lock().unwrap().clear();
                 return Err(e);
             }
         };
         Self::apply_limits(&session, *self.limits.lock().unwrap());
         *self.session.write().unwrap() = session;
+        *self.link.lock().unwrap() = link;
         *self.cfg.lock().unwrap() = new_cfg;
         self.torrent_limits.lock().unwrap().clear();
         Ok(())
@@ -1304,6 +1947,7 @@ mod tests {
 
     /// Skipped file sandwiched between two picked ones, with sizes that don't line up with the pieces: the pieces on
     /// the boundaries carry a little of the skipped file. It gets its full length but must not take that space on disk.
+    #[cfg(windows)]
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn a_skipped_file_next_to_a_picked_one_takes_almost_no_disk() {
         let root = scratch("edge");
@@ -1349,16 +1993,82 @@ mod tests {
                 Err(_) => println!("{n}: app progress {:>8}, NOT on disk", d.files[i].progress_bytes),
             }
         }
-        // The skipped file holds only the two boundary pieces' worth of data (under 200 KB), and the disk knows it.
+        // The skipped file is not in the folder at all: the few hundred KB it shares with its neighbours are in one small
+        // hidden file, and picking the file later makes it, whole and byte for byte.
         let skipped = dl.join("pack").join("b.bin");
         assert!(d.files[1].progress_bytes < 200_000);
+        assert!(!skipped.exists(), "the skipped file must not exist");
+        let hash = librqbit::dht::Id20::from_str(&id.0).unwrap();
         #[cfg(windows)]
         {
-            let used = crate::fsmove::sparse::allocated_bytes(&skipped);
-            println!("b.bin allocated on disk: {used} of {}", sizes[1]);
-            assert!(used < 1_000_000, "the skipped file takes {used} bytes of disk for {} bytes of data", d.files[1].progress_bytes);
+            let store = dl.join("pack").join(format!(".drift-skipped-{}", &hash.as_string()[..12]));
+            let len = std::fs::metadata(&store).expect("the edge bytes are kept in a hidden file").len();
+            println!("hidden file: {len} bytes for {} bytes of data", d.files[1].progress_bytes);
+            assert!(len < 200_000 && len >= d.files[1].progress_bytes, "{len}");
+            use std::os::windows::fs::MetadataExt;
+            assert!(std::fs::metadata(&store).unwrap().file_attributes() & 0x2 != 0, "and it is hidden");
         }
-        assert!(std::fs::metadata(&skipped).is_ok());
+        let _ = hash;
+
+        // After a check (what a restart does) the picked files still verify with no seeder around: the pieces they share
+        // with the skipped file are read back from the hidden file.
+        engine.recheck(&id).await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(d) = engine.details(&id).await {
+                if d.files.len() == 3 && d.files[0].progress_bytes == d.files[0].size && d.files[2].progress_bytes == d.files[2].size {
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "the picked files did not verify from the hidden file");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(!skipped.exists(), "still no skipped file after the check");
+
+        // A running torrent answers for the pieces it shares with the skipped file from the hidden file, strictly: another
+        // client that wants only a.bin (whose last piece includes the start of b.bin) gets it, byte for byte.
+        {
+            let leech_dir = root.join("leech");
+            std::fs::create_dir_all(&leech_dir).unwrap();
+            let our_port = engine.network_status().await.unwrap().listen_port.expect("downloader listens");
+            let leech = Session::new_with_opts(leech_dir.clone(), SessionOptions { dht: None, disable_local_service_discovery: true, listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }), ..Default::default() }).await.unwrap();
+            let opts = AddTorrentOptions { overwrite: true, only_files: Some(vec![0]), initial_peers: Some(vec![SocketAddr::from(([127, 0, 0, 1], our_port))]), ..Default::default() };
+            leech.add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(opts)).await.unwrap();
+            let a_data: Vec<u8> = (0..sizes[0]).map(|k| ((k * 31) >> 3) as u8 ^ 1).collect();
+            let got = leech_dir.join("pack").join("a.bin");
+            let deadline = Instant::now() + Duration::from_secs(30);
+            loop {
+                if std::fs::read(&got).is_ok_and(|b| b == a_data) {
+                    break;
+                }
+                assert!(Instant::now() < deadline, "the other client never got a.bin from us");
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            leech.stop().await;
+        }
+
+        engine.set_files(&id, vec![0, 1, 2]).await.unwrap();
+        // The check forgot the peers; a second seeder dials in so the rest of the file can come.
+        let dl_port = engine.network_status().await.unwrap().listen_port.expect("downloader listens");
+        let dialer = Session::new_with_opts(seed_dir.clone(), SessionOptions { dht: None, disable_local_service_discovery: true, listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }), ..Default::default() }).await.unwrap();
+        dialer
+            .add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, initial_peers: Some(vec![SocketAddr::from(([127, 0, 0, 1], dl_port))]), ..Default::default() }))
+            .await
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            let d = engine.details(&id).await.unwrap();
+            if d.files.iter().all(|f| f.progress_bytes == f.size) {
+                break;
+            }
+            assert!(Instant::now() < deadline, "the picked file never completed");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        for (i, n) in names.iter().enumerate() {
+            let expect: Vec<u8> = (0..sizes[i]).map(|k| ((k * 31) >> 3) as u8 ^ (i as u8 + 1)).collect();
+            assert_eq!(std::fs::read(dl.join("pack").join(n)).unwrap(), expect, "{n} is byte for byte what was shared");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -1488,6 +2198,77 @@ mod tests {
     #[cfg(not(windows))]
     fn allocated(_p: &Path, len: u64) -> u64 {
         len
+    }
+
+    /// A sparse stub left by an older Drift for a file that was not picked: the first time the torrent is opened its few real
+    /// bytes move to the hidden file and the stub is deleted, and the picked files around it still check out.
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn an_old_sparse_stub_of_a_skipped_file_is_replaced_by_the_hidden_file() {
+        use std::io::{Seek, SeekFrom, Write};
+        let root = scratch("stub");
+        let dl = root.join("dl");
+        let folder = dl.join("pack");
+        std::fs::create_dir_all(&folder).unwrap();
+        let sizes = [100_000usize, 3_000_000, 100_000];
+        let names = ["a.bin", "b.bin", "c.bin"];
+        let data: Vec<Vec<u8>> = sizes.iter().enumerate().map(|(i, &sz)| (0..sz).map(|k| ((k * 31) >> 3) as u8 ^ (i as u8 + 1)).collect()).collect();
+        // The torrent is made from a copy of the data elsewhere.
+        let src = root.join("src").join("pack");
+        std::fs::create_dir_all(&src).unwrap();
+        for (n, d) in names.iter().zip(&data) {
+            std::fs::write(src.join(n), d).unwrap();
+        }
+        let torrent = create_torrent(&src, CreateTorrentOptions { piece_length: Some(64 * 1024), ..Default::default() }, &BlockingSpawner::new(1)).await.unwrap().as_bytes().unwrap();
+        // What an older Drift left: the picked files whole, and for the skipped one a sparse file at full length that holds
+        // only the bytes that share a piece with them (its first 31072 and last 19808 bytes).
+        std::fs::write(folder.join("a.bin"), &data[0]).unwrap();
+        std::fs::write(folder.join("c.bin"), &data[2]).unwrap();
+        {
+            let mut f = std::fs::OpenOptions::new().create(true).truncate(true).write(true).open(folder.join("b.bin")).unwrap();
+            crate::fsmove::sparse::mark_sparse(&f).unwrap();
+            f.set_len(3_000_000).unwrap();
+            f.write_all(&data[1][..31072]).unwrap();
+            f.seek(SeekFrom::Start(2_980_192)).unwrap();
+            f.write_all(&data[1][2_980_192..]).unwrap();
+        }
+        assert!(crate::fsmove::sparse::allocated_bytes(&folder.join("b.bin")) < 1_000_000);
+
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+        let opts = AddTorrentOptions { overwrite: true, only_files: Some(vec![0, 2]), output_folder: Some(folder.to_string_lossy().into_owned()), ..Default::default() };
+        let r = engine.session().add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(opts)).await.unwrap();
+        let AddTorrentResponse::Added(_, h) = r else { panic!("not added") };
+        let id = id_of(&h);
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(d) = engine.details(&id).await {
+                if d.files.len() == 3 && d.files[0].progress_bytes == d.files[0].size && d.files[2].progress_bytes == d.files[2].size {
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "the picked files did not check out from the stub's bytes");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(!folder.join("b.bin").exists(), "the stub is gone");
+        let store = std::fs::read_dir(&folder).unwrap().filter_map(|e| e.ok()).find(|e| e.file_name().to_string_lossy().starts_with(".drift-skipped-")).expect("the hidden file");
+        let store_len = std::fs::metadata(store.path()).unwrap().len();
+        assert!(store_len > 40_000 && store_len < 200_000, "the hidden file is {store_len} bytes");
+
+        // And it holds up across a check: nothing is read from the stub any more.
+        engine.recheck(&id).await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Ok(d) = engine.details(&id).await {
+                if d.files.len() == 3 && d.files[0].progress_bytes == d.files[0].size && d.files[2].progress_bytes == d.files[2].size {
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "the picked files did not verify after a check");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert!(!folder.join("b.bin").exists());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Adding a torrent whose file is already in the folder is refused, and the file is left alone.
