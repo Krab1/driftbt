@@ -12,7 +12,12 @@
 
   async function load() {
     list = await api.listPlugins().catch(() => list);
-    for (const p of list) if (!drafts[p.id]) drafts[p.id] = structuredClone($state.snapshot(p.values));
+    for (const p of list) {
+      if (drafts[p.id]) continue;
+      const d = structuredClone($state.snapshot(p.values));
+      for (const f of p.fields) if (f.default !== undefined && d[f.key] === undefined) d[f.key] = f.default;
+      drafts[p.id] = d;
+    }
   }
 
   /** A typed-in value turned into what the plugin stores for a field of this kind. */

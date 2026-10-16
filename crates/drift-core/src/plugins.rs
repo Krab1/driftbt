@@ -52,6 +52,9 @@ pub struct Field {
     /// For a `text` field: the only values it may have, drawn as a drop-down.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<String>,
+    /// What the form shows until the user has chosen: a plain field of any kind but `secret`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default: Option<Value>,
 }
 
 const FIELD_KINDS: [&str; 6] = ["text", "url", "number", "bool", "secret", "list"];
@@ -102,7 +105,7 @@ fn form_ok(fields: &[Field], nested: bool) -> bool {
     let mut seen = std::collections::HashSet::new();
     fields.iter().all(|f| {
         let shape = if f.kind == "list" { !nested && !f.item.is_empty() && form_ok(&f.item, true) } else { f.item.is_empty() };
-        safe_id(&f.key) && FIELD_KINDS.contains(&f.kind.as_str()) && shape && options_ok(f) && seen.insert(f.key.as_str())
+        safe_id(&f.key) && FIELD_KINDS.contains(&f.kind.as_str()) && shape && options_ok(f) && f.default.as_ref().is_none_or(|d| f.kind != "list" && valid_value(&f.kind, d)) && seen.insert(f.key.as_str())
     })
 }
 

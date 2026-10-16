@@ -419,14 +419,17 @@ async fn a_simulators_per_torrent_form_is_validated_and_what_goes_through_is_fil
     install_sim_form(&root, "secret", r#"[{"key":"k","label":"K","type":"secret"}]"#);
     install_sim_form(&root, "dupe", r#"[{"key":"m","label":"M","type":"text","options":["a","a"]}]"#);
     install_sim_form(&root, "num", r#"[{"key":"m","label":"M","type":"number","options":["a"]}]"#);
+    install_sim_form(&root, "dflt", r#"[{"key":"b","label":"B","type":"bool","default":true}]"#);
+    install_sim_form(&root, "baddflt", r#"[{"key":"b","label":"B","type":"bool","default":"yes"}]"#);
     install_sim(&root, "plain", "", r#"["simulator"]"#);
     let h = host(&root);
-    let on: Vec<String> = ["ok", "secret", "dupe", "num", "plain"].map(String::from).to_vec();
+    let on: Vec<String> = ["ok", "secret", "dupe", "num", "plain", "dflt", "baddflt"].map(String::from).to_vec();
     let info = h.list(&on);
     let problem = |id: &str| info.iter().find(|p| p.id == id).unwrap().problem.clone();
     assert_eq!(problem("ok"), None);
     assert_eq!(problem("plain"), None);
-    for bad in ["secret", "dupe", "num"] {
+    assert_eq!(problem("dflt"), None);
+    for bad in ["secret", "dupe", "num", "baddflt"] {
         assert!(problem(bad).is_some_and(|p| p.contains("per-torrent")), "{bad}: {:?}", problem(bad));
     }
 
