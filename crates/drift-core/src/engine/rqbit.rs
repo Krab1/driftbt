@@ -1007,8 +1007,16 @@ fn move_small_file(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::remove_file(from)
 }
 
+/// The fingerprint Drift announces with, `-DR0130-` for 0.1.30, and the name that goes in User-Agent headers.
+fn identity() -> (librqbit::dht::Id20, String) {
+    let v: Vec<u8> = env!("CARGO_PKG_VERSION").split('.').map(|p| p.parse().unwrap_or(0)).collect();
+    let (major, minor, patch) = (v.first().copied().unwrap_or(0), v.get(1).copied().unwrap_or(0), v.get(2).copied().unwrap_or(0));
+    (librqbit::generate_azereus_style(*b"DR", (major % 10, minor % 10, patch / 10 % 10, patch % 10)), format!("Drift {}", env!("CARGO_PKG_VERSION")))
+}
+
 async fn build_session(cfg: &RqbitConfig) -> Result<(Arc<Session>, Link)> {
     let mut opts = SessionOptions::default();
+    (opts.peer_id, opts.client_name_and_version) = (Some(identity().0), Some(identity().1));
     #[cfg(windows)]
     let link = sparse_storage::SessionLink::default();
     #[cfg(not(windows))]
@@ -1531,6 +1539,15 @@ impl TorrentEngine for RqbitEngine {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn drift_announces_under_its_own_name() {
+        let (id, name) = super::identity();
+        let (ver, bytes) = (env!("CARGO_PKG_VERSION"), id.0);
+        let p: Vec<u32> = ver.split('.').map(|x| x.parse().unwrap()).collect();
+        assert_eq!(&bytes[..8], format!("-DR{}{}{}{}-", p[0] % 10, p[1] % 10, p[2] / 10 % 10, p[2] % 10).as_bytes());
+        assert_eq!(name, format!("Drift {ver}"));
+    }
+
     use std::time::{Duration, Instant};
 
     use librqbit::spawn_utils::BlockingSpawner;
