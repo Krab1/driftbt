@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/drift-core", "crates/drift-server", "crates/drift-search-plugin", "src-tauri"]
+members = ["crates/drift-core", "crates/drift-server", "crates/drift-search-plugin", "crates/drift-tracker-sim-plugin", "src-tauri"]
 
 [workspace.package]
 version = "0.1.26"
