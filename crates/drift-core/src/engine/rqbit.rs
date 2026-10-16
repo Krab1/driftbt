@@ -80,26 +80,72 @@ fn file_url(p: &Path) -> String {
     format!("file:///{}", path.trim_start_matches('/'))
 }
 
-/// A skipped file is only written where it shares a download piece with a file you picked, so it should be a mostly
-/// empty (sparse) file that takes almost no disk. librqbit tries to mark files sparse on Windows but its call to the
-/// OS leaves out an argument the call requires, so it never takes effect and a skipped 600 MB file ends up taking
-/// 600 MB. This wraps librqbit's file storage and marks a file sparse just before its first write, when it is still
-/// empty (files you picked are given their full length up front and are left alone).
+/// librqbit keeps every file of a torrent open for writing for as long as the torrent exists, even when it is paused or
+/// finished, and Windows will not start a program (or show its icon) while anything holds it open for writing. A
+/// downloaded game's `.exe` then fails with "being used by another process". This is librqbit's file storage with that
+/// fixed: files are read through read-only handles, and a file is opened for writing only while data is arriving for it
+/// (the handle goes away a couple of seconds after the last write, and when the torrent is paused).
+///
+/// It also keeps a skipped file mostly empty: such a file is only written where it shares a download piece with a file
+/// you picked. librqbit tries to mark files sparse on Windows but its call to the OS leaves out an argument the call
+/// requires, so it never takes effect and a skipped 600 MB file ends up taking 600 MB. Here a file is marked sparse when
+/// it is first written while still empty and not picked (picked files are given their full length up front).
 #[cfg(windows)]
 mod sparse_storage {
-    use std::fs::OpenOptions;
-    use std::io::IoSlice;
+    use std::fs::{File, OpenOptions};
+    use std::os::windows::fs::FileExt;
     use std::path::{Path, PathBuf};
-    use std::sync::{Arc, Mutex, RwLock, Weak};
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::collections::HashSet;
+    use std::sync::{Arc, Mutex, OnceLock, RwLock, Weak};
+    use std::time::{Duration, Instant};
 
+    use anyhow::Context;
     use librqbit::api::TorrentIdOrHash;
     use librqbit::dht::Id20;
     use librqbit::storage::filesystem::FilesystemStorageFactory;
     use librqbit::storage::{BoxStorageFactory, StorageFactory, TorrentStorage};
     use librqbit::{ManagedTorrentShared, Session, TorrentMetadata};
 
-    /// Where to find the session (and so each torrent's folder) once files are written.
-    pub type SessionLink = Arc<RwLock<Weak<Session>>>;
+    /// How long a file stays open for writing after its last write.
+    const WRITER_IDLE: Duration = Duration::from_secs(2);
+
+    /// Where to find the session (and so each torrent's folder). The session is built after the factory, so the link is
+    /// filled in a moment later; torrents restored while the session is starting wait for it.
+    #[derive(Clone, Default)]
+    pub struct SessionLink(Arc<LinkInner>);
+
+    #[derive(Default)]
+    struct LinkInner {
+        session: RwLock<Weak<Session>>,
+        set: AtomicBool,
+        /// Torrents whose files were already checked for a clash when first added.
+        checked: Mutex<HashSet<Id20>>,
+    }
+
+    impl SessionLink {
+        pub fn set(&self, session: &Arc<Session>) {
+            *self.0.session.write().unwrap() = Arc::downgrade(session);
+            self.0.set.store(true, Ordering::Release);
+        }
+
+        /// The session could not be built: whoever is waiting for it gives up.
+        pub fn fail(&self) {
+            self.0.set.store(true, Ordering::Release);
+        }
+
+        fn get(&self) -> anyhow::Result<Arc<Session>> {
+            // A start with many torrents and a slow disk can take a while; reading before the session is known would
+            // look like damaged files and throw away what the engine knows about finished pieces.
+            for _ in 0..6000 {
+                if self.0.set.load(Ordering::Acquire) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            self.0.session.read().unwrap().upgrade().context("the session has shut down")
+        }
+    }
 
     #[derive(Clone)]
     pub struct SparseFactory(pub SessionLink);
@@ -108,13 +154,33 @@ mod sparse_storage {
         type Storage = Box<dyn TorrentStorage>;
 
         fn create(&self, shared: &ManagedTorrentShared, metadata: &TorrentMetadata) -> anyhow::Result<Box<dyn TorrentStorage>> {
-            let files: Vec<PathBuf> = metadata.file_infos.iter().map(|f| f.relative_filename.clone()).collect();
-            Ok(Box::new(SparseStorage {
-                inner: Box::new(FilesystemStorageFactory::default().create(shared, metadata)?),
+            let files = Arc::new(Files {
                 hash: shared.info_hash,
-                marked: Arc::new(files.iter().map(|_| Mutex::new(false)).collect()),
-                files: Arc::new(files),
                 link: self.0.clone(),
+                folder: OnceLock::new(),
+                epoch: Instant::now(),
+                slots: metadata
+                    .file_infos
+                    .iter()
+                    .map(|f| Slot { rel: f.relative_filename.clone(), padding: f.attrs.padding, reader: RwLock::new(None), writer: RwLock::new(None), last_write: AtomicU64::new(0) })
+                    .collect(),
+            });
+            if let Ok(rt) = tokio::runtime::Handle::try_current() {
+                let weak = Arc::downgrade(&files);
+                rt.spawn(async move {
+                    let mut tick = tokio::time::interval(Duration::from_secs(1));
+                    loop {
+                        tick.tick().await;
+                        let Some(files) = weak.upgrade() else { break };
+                        files.close_idle_writers();
+                    }
+                });
+            }
+            Ok(Box::new(SparseStorage {
+                files,
+                // Only used to delete files and empty folders, which it knows the torrent's folder for.
+                fs: Arc::new(FilesystemStorageFactory::default().create(shared, metadata)?),
+                alive: Arc::new(AtomicBool::new(true)),
             }))
         }
 
@@ -128,79 +194,209 @@ mod sparse_storage {
         }
     }
 
-    pub struct SparseStorage {
-        inner: Box<dyn TorrentStorage>,
+    struct Slot {
+        rel: PathBuf,
+        padding: bool,
+        /// Opened on first read and kept: a read-only handle does not stop the file from being run.
+        reader: RwLock<Option<File>>,
+        /// Only while data is being written.
+        writer: RwLock<Option<File>>,
+        /// Milliseconds after `Files::epoch` of the last write.
+        last_write: AtomicU64,
+    }
+
+    struct Files {
         hash: Id20,
-        files: Arc<Vec<PathBuf>>,
-        /// Per file: already looked at. Held while marking, so a second writer waits for the mark before it writes.
-        marked: Arc<Vec<Mutex<bool>>>,
         link: SessionLink,
+        folder: OnceLock<PathBuf>,
+        epoch: Instant,
+        slots: Vec<Slot>,
+    }
+
+    impl Files {
+        fn slot(&self, id: usize) -> anyhow::Result<&Slot> {
+            self.slots.get(id).context("no such file")
+        }
+
+        fn path(&self, id: usize) -> anyhow::Result<PathBuf> {
+            if self.folder.get().is_none() {
+                let session = self.link.get()?;
+                let handle = session.get(TorrentIdOrHash::Hash(self.hash)).context("the torrent is not in the session")?;
+                let _ = self.folder.set(handle.output_folder().to_path_buf());
+            }
+            Ok(self.folder.get().context("no folder")?.join(&self.slot(id)?.rel))
+        }
+
+        fn read(&self, id: usize, mut offset: u64, mut buf: &mut [u8]) -> anyhow::Result<()> {
+            let slot = self.slot(id)?;
+            if slot.padding {
+                buf.fill(0);
+                return Ok(());
+            }
+            if buf.is_empty() {
+                return Ok(());
+            }
+            loop {
+                if let Some(f) = slot.reader.read().unwrap().as_ref() {
+                    while !buf.is_empty() {
+                        let n = f.seek_read(buf, offset)?;
+                        if n == 0 {
+                            return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "eof").into());
+                        }
+                        offset += n as u64;
+                        buf = &mut buf[n..];
+                    }
+                    return Ok(());
+                }
+                let path = self.path(id)?;
+                let mut g = slot.reader.write().unwrap();
+                if g.is_none() {
+                    *g = Some(OpenOptions::new().read(true).open(&path).with_context(|| format!("error opening {path:?}"))?);
+                }
+            }
+        }
+
+        fn write(&self, id: usize, mut offset: u64, mut buf: &[u8]) -> anyhow::Result<()> {
+            let slot = self.slot(id)?;
+            if slot.padding || buf.is_empty() {
+                return Ok(());
+            }
+            loop {
+                // The read lock is held for the whole write, so the idle closer (which needs the write lock) can't close it under us.
+                if let Some(f) = slot.writer.read().unwrap().as_ref() {
+                    slot.last_write.store(self.now(), Ordering::Relaxed);
+                    while !buf.is_empty() {
+                        let n = f.seek_write(buf, offset)?;
+                        anyhow::ensure!(n > 0, "the disk accepted no data");
+                        offset += n as u64;
+                        buf = &buf[n..];
+                    }
+                    return Ok(());
+                }
+                // Looked up before the lock is taken: the torrent's own lock must never be waited for while holding ours.
+                let path = self.path(id)?;
+                let unpicked = self.unpicked(id);
+                let mut g = slot.writer.write().unwrap();
+                if g.is_none() {
+                    if let Some(dir) = path.parent() {
+                        std::fs::create_dir_all(dir)?;
+                    }
+                    let f = OpenOptions::new().create(true).write(true).truncate(false).open(&path).with_context(|| format!("error opening {path:?} for writing"))?;
+                    if unpicked && f.metadata().is_ok_and(|m| m.len() == 0) {
+                        let _ = crate::fsmove::sparse::mark_sparse(&f);
+                    }
+                    slot.last_write.store(self.now(), Ordering::Relaxed);
+                    *g = Some(f);
+                }
+            }
+        }
+
+        fn unpicked(&self, id: usize) -> bool {
+            let Ok(session) = self.link.get() else { return false };
+            session.get(TorrentIdOrHash::Hash(self.hash)).and_then(|h| h.only_files()).is_some_and(|only| !only.contains(&id))
+        }
+
+        /// Milliseconds since the storage was made, plus one so that 0 can mean "nothing open".
+        fn now(&self) -> u64 {
+            self.epoch.elapsed().as_millis() as u64 + 1
+        }
+
+        fn close_idle_writers(&self) {
+            let idle = WRITER_IDLE.as_millis() as u64;
+            for s in &self.slots {
+                let last = s.last_write.load(Ordering::Relaxed);
+                if last == 0 || self.now().saturating_sub(last) < idle {
+                    continue;
+                }
+                if let Ok(mut g) = s.writer.try_write() {
+                    // Looked at again now that nobody can be writing.
+                    if self.now().saturating_sub(s.last_write.load(Ordering::Relaxed)) >= idle {
+                        *g = None;
+                        s.last_write.store(0, Ordering::Relaxed);
+                    }
+                }
+            }
+        }
+
+        fn close_all(&self) {
+            for s in &self.slots {
+                s.last_write.store(0, Ordering::Relaxed);
+                *s.writer.write().unwrap() = None;
+                *s.reader.write().unwrap() = None;
+            }
+        }
+    }
+
+    pub struct SparseStorage {
+        files: Arc<Files>,
+        fs: Arc<dyn TorrentStorage>,
+        /// Cleared by `take()`: the old storage of a paused torrent must not write again (it could bring back a file that
+        /// was deleted or moved in the meantime).
+        alive: Arc<AtomicBool>,
     }
 
     impl SparseStorage {
-        fn before_write(&self, file_id: usize) {
-            let Some(done) = self.marked.get(file_id) else { return };
-            let mut done = done.lock().unwrap();
-            if *done {
-                return;
-            }
-            let Some(session) = self.link.read().unwrap().upgrade() else { return };
-            let Some(handle) = session.get(TorrentIdOrHash::Hash(self.hash)) else { return };
-            // A file you picked is written whole in the end, and is better off as an ordinary file.
-            if handle.only_files().is_none_or(|only| only.contains(&file_id)) {
-                *done = true;
-                return;
-            }
-            let path: &Path = &handle.output_folder().join(&self.files[file_id]);
-            *done = true;
-            if let Ok(f) = OpenOptions::new().write(true).open(path) {
-                if f.metadata().is_ok_and(|m| m.len() == 0) {
-                    let _ = crate::fsmove::sparse::mark_sparse(&f);
-                }
-            }
+        fn live(&self) -> anyhow::Result<&Files> {
+            anyhow::ensure!(self.alive.load(Ordering::Acquire), "the torrent was stopped");
+            Ok(&self.files)
         }
     }
 
     impl TorrentStorage for SparseStorage {
         fn init(&mut self, shared: &ManagedTorrentShared, metadata: &TorrentMetadata) -> anyhow::Result<()> {
-            self.inner.init(shared, metadata)
+            // The first time a torrent is added, librqbit's own storage decides whether files already in the folder are in
+            // the way (they are refused unless the add allows overwriting); its handles are closed again at once. Not
+            // repeated when the same torrent is started again after an error, which would be refused for its own files.
+            let first = self.files.link.0.checked.lock().unwrap().insert(shared.info_hash);
+            if first {
+                let mut probe = FilesystemStorageFactory::default().create(shared, metadata)?;
+                if let Err(e) = probe.init(shared, metadata) {
+                    self.files.link.0.checked.lock().unwrap().remove(&shared.info_hash);
+                    return Err(e);
+                }
+            }
+            Ok(())
         }
 
         fn pread_exact(&self, file_id: usize, offset: u64, buf: &mut [u8]) -> anyhow::Result<()> {
-            self.inner.pread_exact(file_id, offset, buf)
+            self.live()?.read(file_id, offset, buf)
         }
 
         fn pwrite_all(&self, file_id: usize, offset: u64, buf: &[u8]) -> anyhow::Result<()> {
-            self.before_write(file_id);
-            self.inner.pwrite_all(file_id, offset, buf)
-        }
-
-        fn pwrite_all_vectored(&self, file_id: usize, offset: u64, bufs: [IoSlice<'_>; 2]) -> anyhow::Result<usize> {
-            self.before_write(file_id);
-            // Through the trait object itself: the `Box` impl in librqbit would split this into two writes.
-            (*self.inner).pwrite_all_vectored(file_id, offset, bufs)
+            self.live()?.write(file_id, offset, buf)
         }
 
         fn remove_file(&self, file_id: usize, filename: &Path) -> anyhow::Result<()> {
-            self.inner.remove_file(file_id, filename)
+            if let Ok(s) = self.files.slot(file_id) {
+                *s.writer.write().unwrap() = None;
+                *s.reader.write().unwrap() = None;
+            }
+            self.fs.remove_file(file_id, filename)
         }
 
         fn remove_directory_if_empty(&self, path: &Path) -> anyhow::Result<()> {
-            self.inner.remove_directory_if_empty(path)
+            self.fs.remove_directory_if_empty(path)
         }
 
         fn ensure_file_length(&self, file_id: usize, length: u64) -> anyhow::Result<()> {
-            self.inner.ensure_file_length(file_id, length)
+            let files = self.live()?;
+            let path = files.path(file_id)?;
+            if files.slot(file_id)?.padding {
+                return Ok(());
+            }
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            // A handle for this alone, gone again at once.
+            let f = OpenOptions::new().create(true).write(true).truncate(false).open(&path).with_context(|| format!("error opening {path:?} for writing"))?;
+            Ok(f.set_len(length)?)
         }
 
+        /// Pausing: nothing stays open. The files open again by themselves if the torrent is started again.
         fn take(&self) -> anyhow::Result<Box<dyn TorrentStorage>> {
-            Ok(Box::new(SparseStorage {
-                inner: self.inner.take()?,
-                hash: self.hash,
-                files: self.files.clone(),
-                marked: self.marked.clone(),
-                link: self.link.clone(),
-            }))
+            self.alive.store(false, Ordering::Release);
+            self.files.close_all();
+            Ok(Box::new(SparseStorage { files: self.files.clone(), fs: self.fs.clone(), alive: Arc::new(AtomicBool::new(true)) }))
         }
     }
 }
@@ -208,7 +404,7 @@ mod sparse_storage {
 async fn build_session(cfg: &RqbitConfig) -> Result<Arc<Session>> {
     let mut opts = SessionOptions::default();
     #[cfg(windows)]
-    let link: sparse_storage::SessionLink = Arc::new(RwLock::new(std::sync::Weak::new()));
+    let link = sparse_storage::SessionLink::default();
     #[cfg(windows)]
     {
         opts.default_storage_factory = Some(Box::new(sparse_storage::SparseFactory(link.clone())));
@@ -236,10 +432,17 @@ async fn build_session(cfg: &RqbitConfig) -> Result<Arc<Session>> {
         opts.persistence = Some(SessionPersistenceConfig::Json { folder: Some(dir.clone()) });
         opts.fastresume = true;
     }
-    let session = Session::new_with_opts(cfg.output_dir.clone(), opts).await.map_err(backend)?;
+    let session = match Session::new_with_opts(cfg.output_dir.clone(), opts).await {
+        Ok(s) => s,
+        Err(e) => {
+            #[cfg(windows)]
+            link.fail();
+            return Err(backend(e));
+        }
+    };
     #[cfg(windows)]
     {
-        *link.write().unwrap() = Arc::downgrade(&session);
+        link.set(&session);
     }
     Ok(session)
 }
@@ -1188,6 +1391,69 @@ mod tests {
         assert!(free < Duration::from_secs(3), "unlimited should be quick, took {free:?}");
         assert!(own >= Duration::from_millis(3500), "128 KB/s on the torrent should take about 5 s for 768 KiB, took {own:?}");
         assert!(overall_wins >= Duration::from_millis(3500), "the overall 128 KB/s must hold even though the torrent allows 20 MB/s, took {overall_wins:?}");
+    }
+
+    /// Adding a torrent whose file is already in the folder is refused, and the file is left alone.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn adding_a_torrent_onto_an_existing_file_is_refused_and_leaves_it_alone() {
+        let root = scratch("clash");
+        let (seed_dir, dl) = (root.join("seed"), root.join("dl"));
+        for d in [&seed_dir, &dl] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let sd = seeder(&seed_dir, None).await;
+        std::fs::write(dl.join("seedme.bin"), b"my own data").unwrap();
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+        let mut req = AddRequest::new(AddSource::FileBytes(sd.torrent.clone()));
+        req.peers = vec![sd.addr];
+        assert!(engine.add(req).await.is_err());
+        assert_eq!(std::fs::read(dl.join("seedme.bin")).unwrap(), b"my own data");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Windows will not start a program that something else has open for writing (its icon is lost too). Opening a file
+    /// the way it does, allowing others only to read, fails while any handle with write access is open.
+    #[cfg(windows)]
+    fn can_be_run(p: &Path) -> bool {
+        use std::os::windows::fs::OpenOptionsExt;
+        const SHARE_READ_DELETE: u32 = 1 | 4;
+        std::fs::OpenOptions::new().read(true).share_mode(SHARE_READ_DELETE).open(p).is_ok()
+    }
+
+    /// A downloaded file must not stay open for writing: not once the data is in, and not while the torrent is paused.
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn downloaded_files_are_not_left_open_for_writing_so_they_can_be_run() {
+        let root = scratch("runnable");
+        let (seed_dir, dl) = (root.join("seed"), root.join("dl"));
+        for d in [&seed_dir, &dl] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let sd = seeder(&seed_dir, None).await;
+        let engine = RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap();
+        let id = download_from(&engine, &sd).await;
+        assert_eq!(state_after(&engine, &id, 60).await.0, TorrentState::Seeding);
+        let file = dl.join("seedme.bin");
+        assert_eq!(std::fs::read(&file).unwrap(), payload(), "the data is all there");
+
+        // While data is arriving the file is open for writing; a moment after the last write it is not.
+        tokio::time::sleep(Duration::from_millis(3500)).await;
+        assert!(can_be_run(&file), "a finished, seeding file is open only for reading");
+        // The check itself works: a handle with write access makes it fail.
+        let held = std::fs::OpenOptions::new().write(true).open(&file).unwrap();
+        assert!(!can_be_run(&file));
+        drop(held);
+        assert!(can_be_run(&file));
+
+        // Paused: nothing is held at all, and starting again brings the torrent back without a new write handle.
+        engine.pause(&id).await.unwrap();
+        assert!(can_be_run(&file), "a paused torrent holds no write handle");
+        engine.resume(&id).await.unwrap();
+        assert_eq!(state_after(&engine, &id, 60).await.0, TorrentState::Seeding);
+        tokio::time::sleep(Duration::from_millis(3500)).await;
+        assert!(can_be_run(&file), "and a resumed one doesn't either");
+        assert_eq!(std::fs::read(&file).unwrap(), payload());
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// Changing a torrent's limit adds it to the engine again, and that must not throw away what the engine knows about
