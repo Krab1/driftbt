@@ -155,6 +155,21 @@ export interface PluginInfo {
   previous: string | null;
 }
 
+/** What a simulator plugin says about one torrent. `label` is a short status the plugin chose. */
+export interface SimulatorSelection {
+  info_hash: string;
+  enabled: boolean;
+  label: string | null;
+}
+
+/** One simulator plugin's answer to "which torrents do you simulate?". `ok` is false when it didn't answer. */
+export interface SimulatorState {
+  id: string;
+  name: string;
+  ok: boolean;
+  selections: SimulatorSelection[];
+}
+
 /** A plugin the registry offers: its newest version that works with this Drift. */
 export interface PluginOffer {
   id: string;
@@ -402,6 +417,10 @@ export interface Api {
   /** Asks one source a sample question; the result says whether it answered. */
   testSearchSource(id: string): Promise<SourceStatus>;
   listPlugins(): Promise<PluginInfo[]>;
+  /** Asks every enabled simulator plugin which torrents it simulates. */
+  simulatorStates(): Promise<SimulatorState[]>;
+  /** Switches simulation of one torrent on or off in one plugin; resolves to that plugin's refreshed state. */
+  setSimulation(plugin: string, infoHash: string, enabled: boolean): Promise<SimulatorState>;
   /** Needs `plugin_registry` on. */
   pluginOffers(): Promise<PluginOffer[]>;
   /** Downloads and verifies a plugin; it takes over at the next start. */

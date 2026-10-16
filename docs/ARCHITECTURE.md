@@ -75,6 +75,8 @@ Search sources shipped with Drift (no scrapers for third-party indexes are bundl
 
 The app itself has no built-in provider any more: `core::plugins` wraps every enabled search plugin as a `SearchProvider` (`ExternalSearchProvider`), and the aggregator can't tell them from any other source. See `docs/PLUGINS.md` and `docs/PLUGIN_PROTOCOL.md`.
 
+Simulator plugins (kind `simulator`): `core::simulator::run` (spawned in the composition roots) sends `torrents_updated` to each enabled one; `Service::simulator_states` / `set_simulation` back the torrent context menu (IPC `simulator_states`, `set_simulation`; HTTP `GET /simulators`, `PUT /simulators/{id}/{hash}`). Core never interprets what a simulator does.
+
 ## Headless server (`drift-server`)
 
 `drift-server --data-dir <folder> [--bind addr] [--ui-dir folder]` runs the same engine, queue, rules, filters, guard, watch folder and search with no UI (full guide: `docs/HEADLESS.md`). axum binds to `127.0.0.1:8793` by default; **every** route except `GET /api/health` needs `Authorization: Bearer <token>` (token created on first start, kept in `server.json`). Routes live under `/api` and mirror the IPC commands; `GET /api/events` is a server-sent-event stream (`snapshot`, `completed`, `guard`, `watch`). Same JSON models as the IPC; errors are `{code, message}`. Shared logic is in `drift-core::{background, service}`, the HTTP layer only translates. `drift.lock` in the data folder keeps the app and the server from sharing one folder. The web UI is the desktop frontend with `src/lib/api/http.ts` as its transport, chosen when `/api/health` answers.

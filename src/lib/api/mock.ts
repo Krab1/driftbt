@@ -249,6 +249,7 @@ export function createMockApi(count = 40): Api {
 
   let pluginValues: Record<string, PluginValue> = {};
   let pluginSecrets: string[] = [];
+  let simOn: string[] = [];
   let torznabValues: Record<string, PluginValue> = {};
   let torznabSecrets: string[] = [];
 
@@ -406,6 +407,11 @@ export function createMockApi(count = 40): Api {
     testSearchSource: async (id) => {
       await new Promise((r) => setTimeout(r, 600));
       return id === "archive_org" ? { id, name: "Internet Archive", outcome: "ok", count: 1, message: null } : { id, name: id, outcome: "failed", count: 0, message: "This source refused the API key. Check it in Settings." };
+    },
+    simulatorStates: async () => [{ id: "sim", name: "Example simulator", ok: true, selections: simOn.map((h) => ({ info_hash: h, enabled: true, label: "Simulating: example" })) }],
+    setSimulation: async (id, hash, enabled) => {
+      simOn = enabled ? [...new Set([...simOn, hash])] : simOn.filter((h) => h !== hash);
+      return { id, name: "Example simulator", ok: true, selections: simOn.map((h) => ({ info_hash: h, enabled: true, label: "Simulating: example" })) };
     },
     listPlugins: async () => [
       {

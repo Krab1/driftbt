@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api, type QueueMove } from "../api";
+  import { api, type QueueMove, type SimulatorState } from "../api";
   import { torrents } from "../stores/torrents.svelte";
   import { ui, errorText } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
@@ -16,15 +16,21 @@
     { to: "bottom", label: "Move to bottom of queue" },
   ];
 
+  // Simulator plugins answer on their own time, so their section appears when they have; the rest of the menu never waits.
+  let sims = $state<SimulatorState[]>([]);
+  if (t && t.state !== "error") api.simulatorStates().then((s) => (sims = s)).catch(() => {});
+  const simOn = (s: SimulatorState) => s.selections.find((x) => x.info_hash === t?.id);
+
   let el = $state<HTMLDivElement>();
   let pos = $state({ x: menu.x, y: menu.y });
 
   // Keep the menu inside the window, then focus the first item for keyboard use.
   $effect(() => {
     if (!el) return;
+    sims.length; // the menu grows when the simulator section arrives
     const r = el.getBoundingClientRect();
     pos = { x: Math.min(menu.x, innerWidth - r.width - 8), y: Math.min(menu.y, innerHeight - r.height - 8) };
-    el.querySelector<HTMLButtonElement>("button")?.focus();
+    if (!el.contains(document.activeElement)) el.querySelector<HTMLButtonElement>("button")?.focus();
   });
 
   /** Closing returns focus to the torrent list so keyboard users keep their place. */
@@ -130,6 +136,18 @@
     }
   }
 
+  async function simulate(s: SimulatorState) {
+    close();
+    if (!t) return;
+    const on = !simOn(s)?.enabled;
+    try {
+      await api.setSimulation(s.id, t.id, on);
+      ui.toast(on ? `${s.name} is simulating this torrent.` : `${s.name} stopped simulating this torrent.`);
+    } catch (e) {
+      ui.fail(e);
+    }
+  }
+
   function goal() {
     close();
     if (t) ui.goalTarget = { id: t.id, name: t.name };
@@ -193,6 +211,20 @@
       {/each}
     </div>
   {/if}
+  {#if sims.length}
+    <hr />
+    <div class="lbl" id="cm-sim">Simulator plugins</div>
+    <div role="group" aria-labelledby="cm-sim">
+      {#each sims as s (s.id)}
+        {@const sel = simOn(s)}
+        {#if s.ok}
+          <button role="menuitemcheckbox" aria-checked={!!sel?.enabled} onclick={() => simulate(s)}><span class="tick">{sel?.enabled ? "✓" : ""}</span>{s.name}: Simulate this torrent{#if sel?.enabled && sel.label}<span class="cur">{sel.label}</span>{/if}</button>
+        {:else}
+          <button role="menuitem" disabled title="It didn't answer. Look at its log in Settings → Plugins.">{s.name}: not responding</button>
+        {/if}
+      {/each}
+    </div>
+  {/if}
   <hr />
   <button role="menuitem" onclick={tags}><Icon name="file" />Tags…</button>
   <button role="menuitem" onclick={limit}><Icon name="sliders" />Speed limit…{#if t && (t.limit_down_kib || t.limit_up_kib)}<span class="cur">on</span>{/if}</button>
@@ -243,7 +275,10 @@
     width: 16px;
     text-align: center;
   }
-  button:hover,
+  button:disabled {
+    color: var(--text-muted);
+  }
+  button:hover:not(:disabled),
   button:focus-visible {
     background: var(--hover);
     outline: none;

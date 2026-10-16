@@ -390,3 +390,84 @@ async fn the_postprocess_loop_moves_a_finished_torrent_and_reports_a_failing_plu
     assert_eq!(engine.output_dir(&TorrentId(hash.into())), Some(done), "the move the plugin asked for happened through the engine");
     std::fs::remove_dir_all(root).ok();
 }
+
+const SIM_EXE: &str = env!("CARGO_BIN_EXE_drift-example-simulator-plugin");
+const HASH: &str = "0123456789abcdef0123456789abcdef01234567";
+
+fn install_sim(root: &Path, id: &str, mode: &str, kinds: &str) {
+    let d = root.join(id);
+    std::fs::create_dir_all(&d).unwrap();
+    std::fs::copy(SIM_EXE, d.join("plugin.exe")).unwrap();
+    let exec = if mode.is_empty() { r#"["plugin.exe"]"#.to_string() } else { format!(r#"["plugin.exe", "{mode}"]"#) };
+    std::fs::write(d.join("plugin.json"), format!(r#"{{"id":"{id}","name":"Sim","version":"1.0.0","api":1,"kinds":{kinds},"exec":{exec}}}"#)).unwrap();
+}
+
+#[tokio::test]
+async fn simulator_kind_is_accepted_alone_and_with_the_others() {
+    let root = scratch("simkinds");
+    install_sim(&root, "a", "", r#"["simulator"]"#);
+    install_sim(&root, "b", "", r#"["search","postprocess","simulator"]"#);
+    install(&root, "c", "", 1);
+    let h = host(&root);
+    let on: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+    assert!(h.list(&on).iter().all(|p| p.problem.is_none() && p.enabled));
+    assert_eq!(h.list(&on)[1].kinds, ["search", "postprocess", "simulator"]);
+    assert_eq!(h.simulator_ids(&on), ["a", "b"]);
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn selection_round_trip_with_a_simulator() {
+    let root = scratch("sim");
+    install_sim(&root, "sim", "", r#"["simulator"]"#);
+    let h = host(&root);
+    let on = vec!["sim".to_string()];
+
+    // A notification starts the plugin and returns without waiting for a reply.
+    assert!(h.torrents_updated("sim", &serde_json::json!({"torrents": [{"info_hash": HASH, "name": "x"}]})).await);
+    assert!(h.is_running("sim").await);
+
+    let s = &h.simulator_states(&on).await[0];
+    assert!(s.ok && s.selections.is_empty());
+
+    let t = serde_json::json!({"info_hash": HASH, "name": "x"});
+    let s = h.set_simulation(&on, "sim", HASH, true, &t).await.unwrap();
+    assert_eq!(s.selections.len(), 1);
+    assert!(s.selections[0].enabled && s.selections[0].label.as_deref() == Some("Simulating: example"));
+    let s = h.set_simulation(&on, "sim", HASH, false, &t).await.unwrap();
+    assert!(!s.selections[0].enabled);
+
+    let log = h.log("sim").unwrap();
+    assert!(log.contains("torrents_updated: 1 torrents") && log.contains("enabled=true") && log.contains("enabled=false"), "{log}");
+    assert!(h.set_simulation(&[], "sim", HASH, true, &t).await.is_err(), "only enabled simulators");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn a_simulator_stays_up_when_idle_and_stops_when_switched_off() {
+    let root = scratch("simidle");
+    install_sim(&root, "sim", "", r#"["simulator"]"#);
+    let h = host(&root);
+    assert!(h.torrents_updated("sim", &serde_json::json!({"torrents": []})).await);
+    tokio::time::sleep(Duration::from_millis(1200)).await; // idle limit here is 400 ms
+    assert!(h.is_running("sim").await, "it owns running jobs");
+    h.stop_unwanted_simulators(&["sim".to_string()]).await;
+    assert!(h.is_running("sim").await);
+    h.stop_unwanted_simulators(&[]).await;
+    assert!(!h.is_running("sim").await);
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[tokio::test]
+async fn failing_get_selection_is_unknown_not_switched_off() {
+    let root = scratch("simcrash");
+    install_sim(&root, "sim", "crash", r#"["simulator"]"#);
+    let h = host(&root);
+    let on = vec!["sim".to_string()];
+    for _ in 0..4 {
+        let s = &h.simulator_states(&on).await[0];
+        assert!(!s.ok && s.selections.is_empty());
+    }
+    assert!(h.list(&on)[0].problem.is_none(), "UI polling must not switch a plugin off");
+    std::fs::remove_dir_all(root).ok();
+}

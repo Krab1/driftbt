@@ -206,6 +206,7 @@ async fn run() -> Result<(), String> {
             let _ = tx.send(Event::new("plugin_notice", &serde_json::json!({ "text": n.text, "error": n.error })));
         }));
     }
+    tokio::spawn(drift_core::simulator::run(manager.clone(), shared.svc.plugins.clone(), settings.clone()));
     tokio::spawn(background::ip_filter_refresh(net, settings));
 
     let listener = tokio::net::TcpListener::bind(args.bind).await.map_err(|e| format!("can't listen on {}: {e}", args.bind))?;

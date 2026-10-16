@@ -227,6 +227,8 @@ export const httpApi: Api = {
   search: (text) => call("POST", "/search", { text }),
   testSearchSource: (id) => call("POST", `/search/test/${enc(id)}`),
   listPlugins: () => call("GET", "/plugins"),
+  simulatorStates: () => call("GET", "/simulators"),
+  setSimulation: (plugin, infoHash, enabled) => call("PUT", `/simulators/${enc(plugin)}/${enc(infoHash)}`, { enabled }),
   // Installing runs code on the host, so it is only offered in the desktop app, never over the remote API.
   pluginOffers: async () => Promise.reject(new Error("Installing plugins isn't available over the remote connection. Use Drift on the computer it runs on.")),
   installPlugin: async () => Promise.reject(new Error("Installing plugins isn't available over the remote connection. Use Drift on the computer it runs on.")),

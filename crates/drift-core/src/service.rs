@@ -204,6 +204,19 @@ impl Service {
         self.plugins.list(&self.settings.lock().unwrap().plugins)
     }
 
+    /// What each enabled simulator plugin says it simulates right now (asks the plugins, with short timeouts).
+    pub async fn simulator_states(&self) -> Vec<crate::plugins::SimulatorState> {
+        let enabled = self.settings.lock().unwrap().plugins.clone();
+        self.plugins.simulator_states(&enabled).await
+    }
+
+    /// Switches simulation of one torrent on or off in one plugin and returns that plugin's refreshed state.
+    pub async fn set_simulation(&self, plugin: &str, info_hash: &str, enabled: bool) -> Result<crate::plugins::SimulatorState, ApiError> {
+        let on = self.settings.lock().unwrap().plugins.clone();
+        let t = crate::simulator::torrent(&self.manager, info_hash).await.ok_or_else(|| ApiError::new("plugin", "That torrent isn't in the list."))?;
+        self.plugins.set_simulation(&on, plugin, &t.info_hash, enabled, &t).await.map_err(|m| ApiError::new("plugin", &m))
+    }
+
     pub async fn update_ip_lists(&self) -> Result<crate::netctl::FilterStatus, ApiError> {
         let s = self.settings.lock().unwrap().clone();
         self.net.apply(&s, Refresh::Force, unix_now()).await.map_err(|e| {

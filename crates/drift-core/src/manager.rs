@@ -549,6 +549,11 @@ impl Manager {
         })
     }
 
+    /// Trackers and save folder of one torrent (simulator plugins are told both).
+    pub async fn details(&self, id: &TorrentId) -> Result<crate::model::TorrentDetails> {
+        self.engine.details(id).await
+    }
+
     pub fn has_pending_moves(&self) -> bool {
         !self.state.lock().unwrap().pending_moves.is_empty()
     }

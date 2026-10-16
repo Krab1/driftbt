@@ -26,6 +26,7 @@ Rule of thumb: if it needs engine internals or runs every tick, it is a built-in
 |---|---|---|
 | `search` | v1 | Implements `SearchProvider` (see ARCHITECTURE). First kind, because search sources break and change most often. |
 | `postprocess` | v1 | Receives a "torrent completed" event (name, save folder, files, category, tags). Returns actions: move the torrent to a folder (through the engine, so seeding carries on) or show a notice. It may do its own work while it runs; renaming files inside a torrent isn't an action because it would break the data being seeded. |
+| `simulator` | v1 | Hears the list of torrents (`torrents_updated`) and which of them the user switched on (`selection_changed`, from the torrent's right-click menu: "Simulator plugins"). Drift only provides the list and the switches; everything the plugin does with a selected torrent, and the state it keeps for that, is the plugin's own (in its own folder). Unlike other kinds it is not stopped when idle, because it owns running jobs; Drift ends it when it is switched off or at exit. Kinds can be combined, e.g. `["search", "simulator"]`. |
 | `notifier` | later | Webhooks, Telegram, etc. on events. |
 | `blocklist` | later | Supplies and refreshes IP lists. |
 | Theme packs | data only | JSON of colour tokens. **No code**, no process, so no permissions needed. See below. |

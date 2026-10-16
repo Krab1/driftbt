@@ -34,6 +34,8 @@ A `list` field is a set of rows the user can add and remove (for example several
   "item": [ { "key": "name", "label": "Name", "type": "text" }, { "key": "apikey", "label": "API key", "type": "secret" } ] }
 ```
 
+`kinds` may hold `search`, `postprocess`, `simulator` or any combination; a kind Drift doesn't know is ignored, not an error.
+
 `api` must be `1`. A plugin with another value, a missing program or a bad folder name is listed in Settings with the reason and can't be turned on. `permissions` is shown to the user before the first enable. It is not enforced.
 
 ## Transport
@@ -47,6 +49,9 @@ One JSON object per line (UTF-8, `\n`) on the plugin's stdin and stdout, JSON-RP
 | `initialize` | `{api, app_version, settings}` | `{kinds, name, version}` |
 | `search` | `{query, limit}` | `{results: [Result]}` |
 | `completed` | `{id, name, save_path, files: [{path, size}], category, tags}` | `{actions: [Action]}` (kind `postprocess` only) |
+| `torrents_updated` | `{torrents: [Torrent]}` | none: a notification (kind `simulator` only) |
+| `get_selection` | `{}` | `{selections: [Selection]}` (kind `simulator` only) |
+| `selection_changed` | `{info_hash, enabled, torrent}` | `{}` (kind `simulator` only) |
 | `shutdown` | `{}` | `{}` (then exit) |
 
 `Result`: `title` (required), and at least one of `info_hash` (40 hex or 32 base32), `magnet` (`magnet:?…`), `torrent_url` (http/https). Optional: `size` (bytes), `seeders`, `leechers`, `published` (unix seconds), `category`. Rows without a title or any way to open them are dropped; titles are cut at 300 characters. A row may also carry `source`, a label (up to 60 characters) for its badge when one plugin searches several places, for example the indexer's name; without it the badge is the plugin's name.
@@ -56,6 +61,43 @@ One JSON object per line (UTF-8, `\n`) on the plugin's stdin and stdout, JSON-RP
 A plugin with kind `postprocess` that is switched on hears `completed` once for each torrent that finishes downloading while Drift runs (not for torrents that were already complete). `files[].path` is relative to `save_path`. If the built-in "move when finished" folder is set, Drift waits for that move first, so `save_path` is the final folder at that point. Plugins are asked one after another with the same event, so a plugin that comes after one that moved the torrent still sees the old `save_path`. A plugin has up to 5 minutes to answer `completed` (it may be copying or unpacking), and its other calls wait meanwhile.
 
 `Action`: `{"type":"move","dest":"<absolute folder>"}` moves the torrent's files there through the engine (seeding continues from the new place); `{"type":"notify","message":"..."}` shows a message (cut at 200 characters). Anything else, a relative `dest` or an empty message is dropped; at most 20 actions. A plugin that fails (crash, timeout, bad JSON) only produces a notice saying the torrent keeps seeding; the failure rules under Lifecycle apply. Seeding never waits on this. Drift never renames or deletes files for a plugin.
+
+### Simulators
+
+A plugin with kind `simulator` (alone or with others) is told about the torrents and about the user's per-torrent switch. Drift owns the list and the switches; the plugin owns what it does for a selected torrent and keeps its own state. Unlike other plugins it is **not** ended after 5 minutes idle: it runs from the first message until it is switched off in Settings (Drift sends `shutdown`) or Drift exits.
+
+**`torrents_updated`** is a JSON-RPC notification (no `id`, never answer it). Drift sends the full list of its torrents (every state; use `status`) shortly after the plugin starts, and again whenever the list differs from what the plugin was last sent. Changes are coalesced: at most one message per second, however fast byte counters move. A plugin that is restarted gets the full list again.
+
+```json
+{"jsonrpc":"2.0","method":"torrents_updated","params":{"torrents":[
+  {"info_hash":"0123456789abcdef0123456789abcdef01234567","name":"ubuntu-24.04.iso","status":"downloading",
+   "total_size":5872025600,"have_bytes":1200000000,"uploaded_bytes":345000000,"downloaded_bytes":1200000000,
+   "trackers":["http://tracker.example.com/announce"],"content_dir":"D:\Drift\Downloads\ubuntu-24.04.iso"}]}}
+```
+
+`Torrent`: `info_hash` (lowercase hex, the same id the UI uses); `name`; `status` (`checking`, `downloading`, `seeding`, `paused`, `queued` or `error`); `total_size`, `have_bytes`, `uploaded_bytes`, `downloaded_bytes` (unsigned byte counts; Drift doesn't count received bytes separately from what it has, so `downloaded_bytes` equals `have_bytes`); `trackers` (may be empty, e.g. while a magnet's details are unknown); optional `content_dir` (save folder joined with the name) and `torrent_file_path`, left out when not known (`torrent_file_path` is not sent today). Because Drift doesn't read replies to a notification, a plugin shouldn't call `get_secret` from inside one; ask for secrets in `initialize` or while answering a request.
+
+**`get_selection`** (2 s) asks which torrents the plugin simulates; Drift calls it when the user opens a torrent's menu and after each `selection_changed`, and caches the answer per plugin and info hash for display.
+
+```json
+{"jsonrpc":"2.0","id":10,"method":"get_selection","params":{}}
+{"jsonrpc":"2.0","id":10,"result":{"selections":[
+  {"info_hash":"0123456789abcdef0123456789abcdef01234567","enabled":true,"label":"Simulating: seed_only, 2 peers"},
+  {"info_hash":"89abcdef0123456789abcdef0123456789abcdef","enabled":false}]}}
+```
+
+Each row needs `info_hash` (40 hex or 32 base32) and `enabled`; `label` is optional (cut at 80 characters, shown next to the menu item). Rows that don't fit are dropped. A torrent not listed is shown as off.
+
+**`selection_changed`** (3 s) tells the plugin the user switched one torrent on or off. `torrent` is the same object as in `torrents_updated`. Start or stop your own job and answer `{}`; an error reply or no answer is shown to the user as "didn't respond". Drift then calls `get_selection` again.
+
+```json
+{"jsonrpc":"2.0","id":11,"method":"selection_changed","params":{"info_hash":"0123456789abcdef0123456789abcdef01234567","enabled":true,"torrent":{"info_hash":"0123456789abcdef0123456789abcdef01234567","name":"ubuntu-24.04.iso","status":"downloading","total_size":5872025600,"have_bytes":1200000000,"uploaded_bytes":345000000,"downloaded_bytes":1200000000,"trackers":[]}}}
+{"jsonrpc":"2.0","id":11,"result":{}}
+```
+
+Failures: `get_selection` and `selection_changed` that time out or fail are counted apart from the lifecycle failures below; five in a row count as one failure, so opening a menu can't switch a plugin off. The menu shows a plugin that didn't answer as "not responding". If the plugin doesn't read a `torrents_updated` line for 3 s, that is a lifecycle failure.
+
+Try it: `crates/drift-core/src/bin/drift-example-simulator-plugin.rs` simulates nothing and logs every method to its log. Manual check: install it as a plugin with `"kinds":["simulator"]`, turn it on, add two torrents, right-click one → Simulator plugins → tick it; View log shows `selection_changed` with `enabled=true` for that hash only. Untick: `enabled=false`. Restart Drift and open the menu: the log shows `get_selection` again.
 
 ## Calls (plugin → app)
 
@@ -67,7 +109,7 @@ This is the only request a plugin can make. Settings values and secrets live bes
 
 ## Lifecycle
 
-- Started on first use, ended after 5 minutes idle (`shutdown`, then killed).
+- Started on first use, ended after 5 minutes idle (simulators excepted, see above) (`shutdown`, then killed).
 - Each call has 7 seconds (the search as a whole is cut at 6, so a slow plugin never holds results back longer than that). A timeout, a crash, bad JSON or end of output kills the process and counts as a failure.
 - After a failure the plugin isn't started again for 2 s, then 4 s. The third failure in a row switches it off until Drift restarts. Any good answer resets the count.
 - An error reply (`"error"` in the response) means the plugin is alive; it fails that search only. The plugin can say why with `error.data.reason`: `network` (couldn't reach the service), `auth` (the service refused the key), `bad_response` (the answer couldn't be read) or `config` (not set up yet). Drift shows its own wording for the reason and never the plugin's `message`, so nothing a remote server said (or an address or key) reaches the screen. No reason, or an unknown one, counts as `bad_response`.

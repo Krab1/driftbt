@@ -129,6 +129,8 @@ pub fn router(shared: S) -> Router {
         .route("/plugins/{id}/settings", put(set_plugin_settings))
         .route("/plugins/{id}/secrets/{key}", put(set_plugin_secret))
         .route("/plugins/{id}/log", get(plugin_log))
+        .route("/simulators", get(simulator_states))
+        .route("/simulators/{id}/{hash}", put(set_simulation))
         .route("/events", get(events))
         .layer(middleware::from_fn_with_state(shared.clone(), require_token))
         // Torrent files arrive as JSON number arrays, so allow generous bodies.
@@ -332,6 +334,19 @@ async fn set_plugin_secret(State(s): State<S>, Path((id, key)): Path<(String, St
 
 async fn plugin_log(State(s): State<S>, Path(id): Path<String>) -> Res<String> {
     Ok(Json(s.svc.plugin_log(&id)?))
+}
+
+async fn simulator_states(State(s): State<S>) -> Json<Vec<drift_core::plugins::SimulatorState>> {
+    Json(s.svc.simulator_states().await)
+}
+
+#[derive(Deserialize)]
+struct EnabledBody {
+    enabled: bool,
+}
+
+async fn set_simulation(State(s): State<S>, Path((id, hash)): Path<(String, String)>, Json(b): Json<EnabledBody>) -> Res<drift_core::plugins::SimulatorState> {
+    Ok(Json(s.svc.set_simulation(&id, &hash, b.enabled).await?))
 }
 
 async fn plugins(State(s): State<S>) -> Json<Vec<drift_core::plugins::PluginInfo>> {

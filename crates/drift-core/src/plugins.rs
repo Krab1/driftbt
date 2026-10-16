@@ -267,15 +267,30 @@ impl Running {
             };
         }
     }
+
+    /// A JSON-RPC notification: no id, no reply.
+    async fn notify(&mut self, method: &str, params: Value) -> Result<(), CallError> {
+        let mut line = json!({"jsonrpc": "2.0", "method": method, "params": params}).to_string();
+        line.push('\n');
+        self.stdin.write_all(line.as_bytes()).await.map_err(|_| CallError::Failed)?;
+        self.stdin.flush().await.map_err(|_| CallError::Failed)
+    }
 }
 
 #[derive(Default)]
 struct State {
     running: Option<Running>,
     failures: u32,
+    /// Failed or timed-out `get_selection` / `selection_changed` calls in a row. Counted apart from `failures` so that
+    /// UI polling can't switch a plugin off; only a long run of them counts as one real failure.
+    soft_failures: u32,
     retry_at: Option<Instant>,
     disabled: bool,
 }
+
+const MAX_SOFT_FAILURES: u32 = 5;
+/// How long the host waits for a simulator to take one `torrents_updated` line off the pipe.
+const NOTIFY_TIMEOUT: Duration = Duration::from_secs(3);
 
 pub struct Plugin {
     pub manifest: Manifest,
@@ -284,11 +299,17 @@ pub struct Plugin {
     limits: Limits,
     cfg: Arc<Config>,
     state: tokio::sync::Mutex<State>,
+    /// Counts process starts, so the sender of `torrents_updated` knows when a plugin needs the full list again.
+    generation: std::sync::atomic::AtomicU32,
 }
 
 impl Plugin {
     fn new(manifest: Manifest, dir: PathBuf, log: PathBuf, limits: Limits, cfg: Arc<Config>) -> Arc<Self> {
-        Arc::new(Self { manifest, dir, log, limits, cfg, state: Default::default() })
+        Arc::new(Self { manifest, dir, log, limits, cfg, state: Default::default(), generation: Default::default() })
+    }
+
+    fn is_simulator(&self) -> bool {
+        self.manifest.kinds.iter().any(|k| k == "simulator")
     }
 
     /// Ends the running process so the next call starts it with the current settings.
@@ -351,7 +372,16 @@ impl Plugin {
     }
 
     async fn call_within(self: &Arc<Self>, method: &str, params: Value, timeout: Duration) -> Result<Value, CallError> {
-        let mut st = self.state.lock().await;
+        self.call_inner(method, params, timeout, false).await
+    }
+
+    /// For UI-driven simulator calls: a timeout or a dropped pipe is counted apart from the lifecycle failures above.
+    async fn call_soft(self: &Arc<Self>, method: &str, params: Value, timeout: Duration) -> Result<Value, CallError> {
+        self.call_inner(method, params, timeout, true).await
+    }
+
+    /// Starts the process if it isn't running, unless it is switched off or backing off.
+    async fn ensure_running(self: &Arc<Self>, st: &mut State) -> Result<(), CallError> {
         if st.disabled {
             return Err(CallError::Disabled);
         }
@@ -362,19 +392,30 @@ impl Plugin {
             match tokio::time::timeout(self.limits.call_timeout * 2, self.start()).await {
                 Ok(Ok(r)) => {
                     st.running = Some(r);
-                    tokio::spawn(idle_watch(Arc::downgrade(self)));
+                    self.generation.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    // A simulator owns running jobs, so it stays up until it is switched off or the app ends.
+                    if !self.is_simulator() {
+                        tokio::spawn(idle_watch(Arc::downgrade(self)));
+                    }
                 }
                 _ => {
-                    self.failed(&mut st);
+                    self.failed(st);
                     return Err(CallError::Failed);
                 }
             }
         }
+        Ok(())
+    }
+
+    async fn call_inner(self: &Arc<Self>, method: &str, params: Value, timeout: Duration, soft: bool) -> Result<Value, CallError> {
+        let mut st = self.state.lock().await;
+        self.ensure_running(&mut st).await?;
         let r = st.running.as_mut().expect("started above");
         match tokio::time::timeout(timeout, r.rpc(method, params, &|k| plugin_secret(&self.manifest, &self.cfg, k))).await {
             Ok(Ok(v)) => {
                 r.last_used = Instant::now();
                 st.failures = 0;
+                st.soft_failures = 0;
                 Ok(v)
             }
             // The plugin answered, just not usefully: it is alive, so this isn't a crash.
@@ -382,6 +423,33 @@ impl Plugin {
                 r.last_used = Instant::now();
                 Err(CallError::Rpc(reason))
             }
+            res => {
+                if !soft {
+                    self.failed(&mut st);
+                } else {
+                    // A late reply is skipped by id, so a timeout leaves the process usable; a broken pipe doesn't.
+                    if res.is_ok() {
+                        st.running = None;
+                    }
+                    st.soft_failures += 1;
+                    if st.soft_failures >= MAX_SOFT_FAILURES {
+                        st.soft_failures = 0;
+                        self.failed(&mut st);
+                    }
+                }
+                Err(CallError::Failed)
+            }
+        }
+    }
+
+    /// Sends a notification, starting the process first if needed. A pipe that stays full means the plugin isn't reading:
+    /// that counts as a real failure.
+    async fn notify(self: &Arc<Self>, method: &str, params: Value) -> Result<(), CallError> {
+        let mut st = self.state.lock().await;
+        self.ensure_running(&mut st).await?;
+        let r = st.running.as_mut().expect("started above");
+        match tokio::time::timeout(NOTIFY_TIMEOUT, r.notify(method, params)).await {
+            Ok(Ok(())) => Ok(()),
             _ => {
                 self.failed(&mut st);
                 Err(CallError::Failed)
@@ -389,6 +457,14 @@ impl Plugin {
         }
     }
 
+    /// Asks a running process to end. Does nothing while a call is in progress; the caller tries again later.
+    async fn stop(&self) {
+        let Ok(mut st) = self.state.try_lock() else { return };
+        if let Some(r) = st.running.as_mut() {
+            let _ = tokio::time::timeout(Duration::from_millis(500), r.rpc("shutdown", json!({}), &|_| None)).await;
+        }
+        st.running = None;
+    }
 }
 
 /// Ends the process once it has been idle for `limits.idle`.
@@ -447,6 +523,46 @@ pub struct Host {
     dir: PathBuf,
     /// Plugins whose registry update arrived at this start and asks for more access (or is new): off until approved.
     needs_approval: Vec<String>,
+    /// What each simulator plugin last said it simulates, by plugin id. A plugin missing here is unknown (never asked, or
+    /// the last `get_selection` failed).
+    sel: std::sync::Mutex<HashMap<String, Vec<Selection>>>,
+}
+
+/// One torrent a simulator plugin reports on: whether it simulates it, and a short status line for the UI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Selection {
+    pub info_hash: String,
+    pub enabled: bool,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
+/// What the UI shows for one simulator plugin. `ok` is false when it didn't answer `get_selection`; the rows are then empty.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SimulatorState {
+    pub id: String,
+    pub name: String,
+    pub ok: bool,
+    pub selections: Vec<Selection>,
+}
+
+const SELECTION_TIMEOUT: Duration = Duration::from_secs(2);
+const SELECTION_CHANGED_TIMEOUT: Duration = Duration::from_secs(3);
+const MAX_SELECTIONS: usize = 5000;
+
+/// Plugin output is untrusted: keep well-formed rows with a known hash form and a short label.
+fn sanitize_selections(v: &Value) -> Option<Vec<Selection>> {
+    let rows = v.get("selections")?.as_array()?;
+    Some(
+        rows.iter()
+            .filter_map(|r| {
+                let info_hash = normalize_hash(r["info_hash"].as_str()?)?;
+                let label = r["label"].as_str().map(|l| l.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(80).collect::<String>()).filter(|l| !l.is_empty());
+                Some(Selection { info_hash, enabled: r["enabled"].as_bool()?, label })
+            })
+            .take(MAX_SELECTIONS)
+            .collect(),
+    )
 }
 
 fn safe_id(id: &str) -> bool {
@@ -478,7 +594,7 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
 
 impl Host {
     pub fn empty() -> Self {
-        Self { entries: Vec::new(), cfg: Arc::new(Config { path: PathBuf::new(), values: Default::default(), secrets: Secrets::open(PathBuf::new()) }), dir: PathBuf::new(), needs_approval: Vec::new() }
+        Self { entries: Vec::new(), cfg: Arc::new(Config { path: PathBuf::new(), values: Default::default(), secrets: Secrets::open(PathBuf::new()) }), dir: PathBuf::new(), needs_approval: Vec::new(), sel: Default::default() }
     }
 
     /// The plugins under `<data>/plugins`, with default limits and logs in `<data>/plugin-logs`.
@@ -502,7 +618,7 @@ impl Host {
     pub fn load(dir: &Path, logs: &Path, limits: Limits) -> Self {
         let mut entries = Vec::new();
         let cfg = Arc::new(Config::open(dir));
-        let Ok(rd) = std::fs::read_dir(dir) else { return Self { entries, cfg, dir: dir.to_path_buf(), needs_approval: Vec::new() } };
+        let Ok(rd) = std::fs::read_dir(dir) else { return Self { entries, cfg, dir: dir.to_path_buf(), needs_approval: Vec::new(), sel: Default::default() } };
         let mut dirs: Vec<PathBuf> = rd.filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.is_dir()).collect();
         dirs.sort();
         for d in dirs {
@@ -521,7 +637,7 @@ impl Host {
             let plugin = problem.is_none().then(|| Plugin::new(m.clone(), d.clone(), logs.join(format!("{}.log", m.id)), limits, cfg.clone()));
             entries.push(Entry { plugin, info });
         }
-        Self { entries, cfg, dir: dir.to_path_buf(), needs_approval: Vec::new() }
+        Self { entries, cfg, dir: dir.to_path_buf(), needs_approval: Vec::new(), sel: Default::default() }
     }
 
     /// Plugins that came in through the registry at this start and must be approved again before they run.
@@ -671,6 +787,74 @@ impl Host {
             out.push((p.manifest.name.clone(), r));
         }
         out
+    }
+
+    fn simulators<'a>(&'a self, enabled: &'a [String]) -> impl Iterator<Item = &'a Arc<Plugin>> {
+        self.entries.iter().filter_map(|e| e.plugin.as_ref()).filter(move |p| enabled.contains(&p.manifest.id) && p.is_simulator())
+    }
+
+    /// Ids of the enabled plugins of kind `simulator`.
+    pub fn simulator_ids(&self, enabled: &[String]) -> Vec<String> {
+        self.simulators(enabled).map(|p| p.manifest.id.clone()).collect()
+    }
+
+    /// How many times the plugin's process has been started. A change means it lost whatever it had been told.
+    pub fn generation(&self, id: &str) -> u32 {
+        self.find(id).map_or(0, |p| p.generation.load(std::sync::atomic::Ordering::Relaxed))
+    }
+
+    /// Sends `torrents_updated` (a notification: no reply is awaited) to one simulator, starting it if needed.
+    /// Returns whether the plugin took it.
+    pub async fn torrents_updated(&self, id: &str, event: &impl Serialize) -> bool {
+        let (Ok(p), Ok(v)) = (self.find(id), serde_json::to_value(event)) else { return false };
+        p.notify("torrents_updated", v).await.is_ok()
+    }
+
+    /// Asks one simulator what it simulates and remembers the answer. Failures are logged and leave the plugin unknown.
+    async fn refresh_selection(&self, p: &Arc<Plugin>) -> SimulatorState {
+        let id = p.manifest.id.clone();
+        let rows = match p.call_soft("get_selection", json!({}), SELECTION_TIMEOUT).await {
+            Ok(v) => sanitize_selections(&v),
+            Err(_) => None,
+        };
+        let mut sel = self.sel.lock().unwrap();
+        match rows {
+            Some(rows) => {
+                sel.insert(id.clone(), rows.clone());
+                SimulatorState { id, name: p.manifest.name.clone(), ok: true, selections: rows }
+            }
+            None => {
+                eprintln!("simulator plugin {id}: get_selection failed");
+                sel.remove(&id);
+                SimulatorState { id, name: p.manifest.name.clone(), ok: false, selections: vec![] }
+            }
+        }
+    }
+
+    /// Refreshes and returns the selection of every enabled simulator. Never fails: a plugin that doesn't answer is `ok: false`.
+    pub async fn simulator_states(&self, enabled: &[String]) -> Vec<SimulatorState> {
+        let mut out = Vec::new();
+        for p in self.simulators(enabled) {
+            out.push(self.refresh_selection(p).await);
+        }
+        out
+    }
+
+    /// Tells one simulator the user switched a torrent on or off, then refreshes what it reports.
+    /// `torrent` is the `selection_changed.torrent` object; the plugin decides what to do with it.
+    pub async fn set_simulation(&self, enabled_ids: &[String], id: &str, info_hash: &str, enabled: bool, torrent: &impl Serialize) -> Result<SimulatorState, String> {
+        let p = self.simulators(enabled_ids).find(|p| p.manifest.id == id).ok_or("That plugin isn't turned on.")?;
+        let params = json!({"info_hash": info_hash, "enabled": enabled, "torrent": torrent});
+        p.call_soft("selection_changed", params, SELECTION_CHANGED_TIMEOUT).await.map_err(|_| format!("{} didn't respond.", p.manifest.name))?;
+        Ok(self.refresh_selection(p).await)
+    }
+
+    /// Ends the processes of simulators that are no longer enabled (or all of them with an empty list, at app exit).
+    pub async fn stop_unwanted_simulators(&self, enabled: &[String]) {
+        for p in self.entries.iter().filter_map(|e| e.plugin.as_ref()).filter(|p| p.is_simulator() && !enabled.contains(&p.manifest.id)) {
+            p.stop().await;
+            self.sel.lock().unwrap().remove(&p.manifest.id);
+        }
     }
 
     /// Search sources for the enabled plugins that offer search.

@@ -248,6 +248,16 @@ pub fn plugin_log(state: State<'_, AppState>, id: String) -> ApiResult<String> {
 }
 
 #[tauri::command]
+pub async fn simulator_states(state: State<'_, AppState>) -> ApiResult<Vec<drift_core::plugins::SimulatorState>> {
+    Ok(state.svc.simulator_states().await)
+}
+
+#[tauri::command]
+pub async fn set_simulation(state: State<'_, AppState>, plugin: String, info_hash: String, enabled: bool) -> ApiResult<drift_core::plugins::SimulatorState> {
+    state.svc.set_simulation(&plugin, &info_hash, enabled).await
+}
+
+#[tauri::command]
 pub fn list_plugins(state: State<'_, AppState>) -> Vec<drift_core::plugins::PluginInfo> {
     state.svc.list_plugins()
 }

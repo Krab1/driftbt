@@ -333,6 +333,7 @@ fn main() {
                 tauri::async_runtime::spawn(background::postprocess(manager.clone(), plugins, svc_settings.clone(), move |n| {
                     let _ = handle.emit("plugin_notice", serde_json::json!({ "text": n.text, "error": n.error }));
                 }));
+                tauri::async_runtime::spawn(drift_core::simulator::run(manager.clone(), svc_plugins.clone(), svc_settings.clone()));
                 tauri::async_runtime::spawn(background::ip_filter_refresh(net.clone(), svc_settings.clone()));
             }
 
@@ -395,6 +396,8 @@ fn main() {
             commands::set_plugin_settings,
             commands::set_plugin_secret,
             commands::plugin_log,
+            commands::simulator_states,
+            commands::set_simulation,
             commands::set_caption_rect,
             commands::check_update,
             commands::install_update,
@@ -406,6 +409,9 @@ fn main() {
 
     app.run(|handle, event| {
         if let RunEvent::Exit = event {
+            // Simulators get a polite shutdown; whatever doesn't answer is killed with the process.
+            let plugins = handle.state::<AppState>().svc.plugins.clone();
+            let _ = tauri::async_runtime::block_on(tokio::time::timeout(std::time::Duration::from_secs(2), plugins.stop_unwanted_simulators(&[])));
             if let Some(rq) = handle.state::<AppState>().rqbit.clone() {
                 // A stuck engine stop must not leave a hidden Drift running: give it a few seconds, then leave anyway.
                 let _ = tauri::async_runtime::block_on(tokio::time::timeout(std::time::Duration::from_secs(4), rq.shutdown()));
