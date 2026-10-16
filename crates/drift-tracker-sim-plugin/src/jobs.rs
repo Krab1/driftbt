@@ -13,10 +13,13 @@ use tokio::runtime::Handle;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+use crate::activity;
 use crate::identity::Identity;
 use crate::peer::Peer;
 use crate::profiles::{self, Profile};
-use crate::settings::{Mode, Settings};
+use crate::proxy;
+use crate::settings::{Mode, ProxyMode, Settings};
+use crate::swarm::{Content, Node, NodeCfg, Swarm};
 use crate::state::{now_iso, Store, TorrentSel};
 use crate::tracker::{self, Params};
 
@@ -55,7 +58,6 @@ struct Shared {
     settings: Settings,
     registry: Mutex<HashMap<String, Torrent>>,
     store: Mutex<Store>,
-    client: reqwest::Client,
     /// Encoded `name=value` pairs added to every tracker request (API key, extra query).
     extra: String,
 }
@@ -69,6 +71,41 @@ impl Shared {
 struct Job {
     stop: watch::Sender<bool>,
     handles: Vec<JoinHandle<()>>,
+    lo: Option<Arc<LoopCtx>>,
+}
+
+/// The loopback swarm of one torrent, built by whichever of its peers gets there first (once the size is known).
+struct LoopCtx {
+    swarm: tokio::sync::OnceCell<Swarm>,
+    ids: Vec<Identity>,
+    /// Bytes each peer already had when this run began (from its saved counters).
+    had: Vec<u64>,
+}
+
+impl LoopCtx {
+    async fn node(&self, sh: &Shared, hash: &str, ih: [u8; 20], total: u64, index: usize) -> Result<Arc<Node>, String> {
+        let s = &sh.settings;
+        let swarm = self
+            .swarm
+            .get_or_try_init(|| async {
+                let cfgs = self
+                    .ids
+                    .iter()
+                    .zip(&self.had)
+                    .map(|(id, had)| {
+                        let mut peer_id = [b'-'; 20];
+                        peer_id.iter_mut().zip(id.peer_id.bytes()).for_each(|(d, b)| *d = b);
+                        NodeCfg { up: s.upload, down: s.download, personality: id.personality(s.stealth.spread()), seed: id.seed(), peer_id, unchoke_secs: profiles::resolve(&id.client_profile, "", "").unchoke_secs, initial_have: *had }
+                    })
+                    .collect();
+                let seed = u64::from_be_bytes(ih[..8].try_into().expect("8 bytes"));
+                let swarm = Swarm::start(ih, Arc::new(Content::new(seed, total, 256 * 1024)), s.piece_strategy, cfgs).await?;
+                info!("loopback swarm started info_hash={hash} peers={}", self.ids.len());
+                Ok::<_, String>(swarm)
+            })
+            .await?;
+        swarm.nodes.get(index).cloned().ok_or_else(|| "no such loopback peer".to_string())
+    }
 }
 
 pub struct Sim {
@@ -81,7 +118,7 @@ pub struct Sim {
 
 impl Sim {
     pub fn new(settings: Settings, api_key: &str, rt: Handle) -> Self {
-        let dir = settings.data_dir.as_deref().map_or_else(|| PathBuf::from("data"), PathBuf::from);
+        let dir = settings.data_dir.as_deref().map_or_else(|| PathBuf::from("../.tracker-sim"), PathBuf::from);
         let store = Store::load(dir.join("state.json"));
         let mut extra = Vec::new();
         if !api_key.is_empty() && !settings.api_key_param.is_empty() {
@@ -90,11 +127,10 @@ impl Sim {
         if !settings.extra_query.is_empty() {
             extra.push(settings.extra_query.clone());
         }
-        let client = reqwest::Client::builder().timeout(Duration::from_secs(15)).build().unwrap_or_default();
         let enabled = store.state.torrents.values().filter(|t| t.enabled).count();
         info!("state loaded identities={} enabled_torrents={enabled}", store.state.identities.len());
         Self {
-            shared: Arc::new(Shared { settings, registry: Mutex::new(HashMap::new()), store: Mutex::new(store), client, extra: extra.join("&") }),
+            shared: Arc::new(Shared { settings, registry: Mutex::new(HashMap::new()), store: Mutex::new(store), extra: extra.join("&") }),
             rt,
             jobs: HashMap::new(),
             stopping: HashMap::new(),
@@ -144,7 +180,7 @@ impl Sim {
             let sel = store.state.torrents.entry(hash.clone()).or_default();
             if enabled {
                 if !sel.enabled || sel.mode.is_none() {
-                    *sel = TorrentSel { enabled: true, mode: Some(s.default_mode), peer_count: Some(s.default_peer_count), started_at: Some(now_iso()) };
+                    *sel = TorrentSel { enabled: true, mode: Some(s.default_mode), peer_count: Some(if s.default_mode == Mode::LoopbackPair { s.default_peer_count.max(2) } else { s.default_peer_count }), started_at: Some(now_iso()) };
                 }
             } else {
                 *sel = TorrentSel::default();
@@ -162,8 +198,9 @@ impl Sim {
 
     /// Every torrent we know of (listed by Drift or saved), with the switch and a label for the ones that are on.
     pub fn selections(&self) -> Vec<Value> {
-        let store = lock(&self.shared.store);
+        // registry first, as in `torrents_updated`
         let reg = lock(&self.shared.registry);
+        let store = lock(&self.shared.store);
         let hashes: BTreeSet<&String> = store.state.torrents.keys().chain(reg.keys()).collect();
         hashes
             .into_iter()
@@ -183,6 +220,7 @@ impl Sim {
         let mut handles = Vec::new();
         for (_, job) in self.jobs.drain() {
             let _ = job.stop.send(true);
+            job.lo.iter().filter_map(|c| c.swarm.get()).for_each(Swarm::stop);
             handles.extend(job.handles);
         }
         handles.extend(self.stopping.drain().flat_map(|(_, h)| h));
@@ -204,17 +242,19 @@ impl Sim {
         }
         // A peer that is still saying goodbye must finish first, or the new one would announce `started` before
         // the old `stopped` and resume from counters the old one hasn't saved yet.
-        if let Some(old) = self.stopping.remove(hash) {
-            self.rt.block_on(async {
-                let _ = tokio::time::timeout(Duration::from_secs(2), async {
-                    for h in old {
-                        let _ = h.await;
-                    }
-                })
-                .await;
-            });
-        }
-        let (mode, peers) = {
+        // (Waiting happens in the background: the host only gives `selection_changed` 3 s.)
+        let (gate_tx, gate) = watch::channel(false);
+        let old = self.stopping.remove(hash).unwrap_or_default();
+        self.rt.spawn(async move {
+            let _ = tokio::time::timeout(STOP_ANNOUNCE_TIMEOUT + Duration::from_secs(2), async {
+                for h in old {
+                    let _ = h.await;
+                }
+            })
+            .await;
+            let _ = gate_tx.send(true);
+        });
+        let (mode, mut peers) = {
             let store = lock(&self.shared.store);
             match store.state.torrents.get(hash) {
                 Some(t) if t.enabled => (t.mode.unwrap_or(self.shared.settings.default_mode), t.peer_count.unwrap_or(1)),
@@ -222,25 +262,52 @@ impl Sim {
             }
         };
         if mode == Mode::LoopbackPair {
-            warn!("mode loopback_pair is not built yet; info_hash={hash} runs as seed_only");
+            peers = peers.max(2); // one seeds, the rest download from it and from each other
         }
         let (tx, rx) = watch::channel(false);
         let s = &self.shared.settings;
-        let handles = (0..peers)
-            .map(|i| {
-                let id = lock(&self.shared.store).identity(i, &s.client_profile, &s.custom_prefix);
-                self.rt.spawn(run_peer(self.shared.clone(), hash.to_string(), id, mode, rx.clone()))
-            })
-            .collect();
+        let ids: Vec<Identity> = (0..peers).map(|i| lock(&self.shared.store).identity(i, &s.client_profile, &s.custom_prefix)).collect();
+        let had: Vec<u64> = {
+            let store = lock(&self.shared.store);
+            ids.iter().map(|id| s.persist_counters.then(|| store.state.counters.get(&format!("{}:{hash}", id.identity_id)).and_then(|c| c.have_bytes)).flatten().unwrap_or(0)).collect()
+        };
+        let lo = (mode == Mode::LoopbackPair).then(|| Arc::new(LoopCtx { swarm: tokio::sync::OnceCell::new(), ids: ids.clone(), had }));
+        let mut handles = Vec::new();
+        let mut taken: Vec<usize> = Vec::new();
+        for (i, id) in ids.into_iter().enumerate() {
+            let saved_proxy = if s.proxy_mode == ProxyMode::PerPeer { id.proxy_id.as_deref() } else { None };
+            let chosen = proxy::assign(&s.proxies, s.proxy_mode, saved_proxy, &taken);
+            let def = match &chosen {
+                Ok(p) => p.map(|n| {
+                    taken.push(n);
+                    &s.proxies[n]
+                }),
+                Err(e) => {
+                    warn!("{} not started: {e}", id.identity_id);
+                    continue;
+                }
+            };
+            let client = match proxy::client(def, s.local_address) {
+                Ok(c) => c,
+                Err(e) => {
+                    warn!("{} not started: {e}", id.identity_id);
+                    continue;
+                }
+            };
+            lock(&self.shared.store).set_proxy(i, def.filter(|_| s.proxy_mode == ProxyMode::PerPeer).map(|d| d.id.clone()));
+            info!("{} uses {}", id.identity_id, def.map_or("a direct connection", |d| d.id.as_str()));
+            handles.push(self.rt.spawn(run_peer(self.shared.clone(), client, hash.to_string(), id, mode, lo.clone().map(|c| (c, i)), gate.clone(), rx.clone())));
+        }
         let name = self.shared.torrent(hash).map(|t| t.name).unwrap_or_default();
         info!("simulation started info_hash={hash} name={name:?} mode={} peers={peers}", mode.name());
-        self.jobs.insert(hash.to_string(), Job { stop: tx, handles });
+        self.jobs.insert(hash.to_string(), Job { stop: tx, handles, lo });
     }
 
     /// Tells the job to stop. Its peers send `stopped` on their own; nothing waits for them here.
     fn stop_job(&mut self, hash: &str) {
         if let Some(job) = self.jobs.remove(hash) {
             let _ = job.stop.send(true);
+            job.lo.iter().filter_map(|c| c.swarm.get()).for_each(Swarm::stop);
             self.stopping.retain(|_, v| {
                 v.retain(|h| !h.is_finished());
                 !v.is_empty()
@@ -283,7 +350,8 @@ fn http_trackers(sh: &Shared, hash: &str) -> Vec<String> {
     sh.torrent(hash).map(|t| t.trackers).unwrap_or_default().into_iter().filter(|u| u.starts_with("http://") || u.starts_with("https://")).collect()
 }
 
-async fn announce_round(sh: &Shared, hash: &str, ih: &[u8; 20], peer: &Peer, profile: &Profile, event: Option<&str>, per_tracker: Duration) -> Outcome {
+#[allow(clippy::too_many_arguments)] // one call per announce; a bundle struct would only rename the arguments
+async fn announce_round(sh: &Shared, client: &reqwest::Client, hash: &str, ih: &[u8; 20], peer: &Peer, profile: &Profile, event: Option<&str>, per_tracker: Duration) -> Outcome {
     let trackers = http_trackers(sh, hash);
     if trackers.is_empty() {
         return Outcome::NoTracker;
@@ -298,12 +366,13 @@ async fn announce_round(sh: &Shared, hash: &str, ih: &[u8; 20], peer: &Peer, pro
         num_want: if event == Some("stopped") { 0 } else { profile.num_want },
         event,
         key: &peer.identity.key,
+        transmission_style: profile.transmission_query,
     };
     debug!("announce identity={} uploaded={} downloaded={} left={} event={}", peer.identity.identity_id, p.uploaded, p.downloaded, p.left, event.unwrap_or("none"));
     let (mut interval, mut ok, mut last_err) = (None, false, String::new());
     for t in &trackers {
         let url = tracker::announce_url(t, &p, sh.settings.info_hash_encoding, &sh.extra);
-        let answer = tokio::time::timeout(per_tracker, tracker::get(&sh.client, &url, &profile.user_agent)).await.unwrap_or_else(|_| Err("timed out".into()));
+        let answer = tokio::time::timeout(per_tracker, tracker::get(client, &url, &profile.user_agent)).await.unwrap_or_else(|_| Err("timed out".into()));
         match answer.and_then(|b| tracker::parse_answer(&b)) {
             Ok(a) => {
                 ok = true;
@@ -322,10 +391,10 @@ async fn announce_round(sh: &Shared, hash: &str, ih: &[u8; 20], peer: &Peer, pro
     }
 }
 
-async fn scrape_round(sh: &Shared, hash: &str, ih: &[u8; 20], profile: &Profile) {
+async fn scrape_round(sh: &Shared, client: &reqwest::Client, hash: &str, ih: &[u8; 20], profile: &Profile) {
     for t in http_trackers(sh, hash) {
         let Some(url) = tracker::scrape_url(&t, ih, sh.settings.info_hash_encoding, &sh.extra) else { continue };
-        if let Err(e) = tracker::get(&sh.client, &url, &profile.user_agent).await {
+        if let Err(e) = tracker::get(client, &url, &profile.user_agent).await {
             debug!("scrape failed tracker={} {e}", origin(&t));
         }
     }
@@ -340,8 +409,16 @@ fn flush(sh: &Shared, key: &str, peer: &Peer) {
 }
 
 /// One simulated peer of one torrent, from start to stop.
-async fn run_peer(sh: Arc<Shared>, hash: String, id: Identity, mode: Mode, mut stop: watch::Receiver<bool>) {
+#[allow(clippy::too_many_arguments)] // started from one place; a bundle struct would only rename the arguments
+async fn run_peer(sh: Arc<Shared>, client: reqwest::Client, hash: String, id: Identity, mode: Mode, lo: Option<(Arc<LoopCtx>, usize)>, mut gate: watch::Receiver<bool>, mut stop: watch::Receiver<bool>) {
     let s = &sh.settings;
+    // A previous run of this torrent is still saying goodbye: its final counters must be saved first.
+    while !*gate.borrow() {
+        tokio::select! {
+            r = gate.changed() => if r.is_err() { break },
+            () = until_stop(&mut stop) => return,
+        }
+    }
     let profile = profiles::resolve(&id.client_profile, &s.custom_prefix, &s.custom_user_agent);
     let Some(ih) = tracker::hash_bytes(&hash) else { return };
     let total = loop {
@@ -355,10 +432,25 @@ async fn run_peer(sh: Arc<Shared>, hash: String, id: Identity, mode: Mode, mut s
     };
     let key = format!("{}:{hash}", id.identity_id);
     let saved = if s.persist_counters { lock(&sh.store).state.counters.get(&key).cloned() } else { None };
-    let mut peer = Peer::new(id, mode, total, saved.as_ref(), s);
+    // In a loopback swarm the first peer seeds and the others download.
+    let (peer_mode, node) = match &lo {
+        Some((ctx, i)) => match ctx.node(&sh, &hash, ih, total, *i).await {
+            Ok(n) => (if *i == 0 { Mode::SeedOnly } else { Mode::DownloadAndSeed }, Some(n)),
+            Err(e) => {
+                warn!("{} not started: loopback swarm failed: {e}", id.identity_id);
+                return;
+            }
+        },
+        None => (mode, None),
+    };
+    let mut peer = Peer::new(id, peer_mode, total, saved.as_ref(), s);
+    if node.is_some() {
+        peer.use_measured();
+    }
     let first = Instant::now() + peer.initial_delay(s.start_delay_max_ms);
     let (mut next, mut next_scrape) = (first, first + peer.jittered(s.scrape_interval_ms));
     let (mut started, mut fails, mut last) = (false, 0u32, Instant::now());
+    let mut next_activity = Instant::now();
     loop {
         if sleep_or_stop(&mut stop, TICK).await {
             break;
@@ -368,8 +460,20 @@ async fn run_peer(sh: Arc<Shared>, hash: String, id: Identity, mode: Mode, mut s
         // separate task if that gap ever shows up on a tracker's graph.
         let dt = now.duration_since(last).as_secs_f64();
         last = now;
+        if s.activity_pattern && now >= next_activity {
+            let unix = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+            let f = activity::factor(peer.identity.seed(), unix);
+            peer.set_activity(f);
+            if let Some(n) = &node {
+                n.set_activity(f).await;
+            }
+            next_activity = now + Duration::from_secs(60);
+        }
         if started {
-            peer.step(dt);
+            match &node {
+                Some(n) => peer.measure(&n.snapshot()),
+                None => peer.step(dt),
+            }
         }
         if now >= next {
             let event = if !started {
@@ -379,11 +483,14 @@ async fn run_peer(sh: Arc<Shared>, hash: String, id: Identity, mode: Mode, mut s
             } else {
                 None
             };
-            let round = announce_round(&sh, &hash, &ih, &peer, &profile, event, ANNOUNCE_TIMEOUT);
+            let round = announce_round(&sh, &client, &hash, &ih, &peer, &profile, event, ANNOUNCE_TIMEOUT);
             let outcome = tokio::select! { o = round => o, () = until_stop(&mut stop) => break };
             match outcome {
                 Outcome::Done(hint) => {
                     started = true;
+                    if let Some(n) = &node {
+                        n.activate();
+                    }
                     fails = 0;
                     peer.last_announce = Some(now_iso());
                     next = Instant::now() + peer.announce_delay(hint.filter(|_| s.honor_tracker_interval).map(|i| i.clamp(10, 3600)));
@@ -407,12 +514,12 @@ async fn run_peer(sh: Arc<Shared>, hash: String, id: Identity, mode: Mode, mut s
             }
         }
         if s.scrape_enabled && started && Instant::now() >= next_scrape {
-            scrape_round(&sh, &hash, &ih, &profile).await;
+            scrape_round(&sh, &client, &hash, &ih, &profile).await;
             next_scrape = Instant::now() + peer.jittered(s.scrape_interval_ms);
         }
     }
     if started {
-        let stopped = announce_round(&sh, &hash, &ih, &peer, &profile, Some("stopped"), STOPPED_TRY_TIMEOUT);
+        let stopped = announce_round(&sh, &client, &hash, &ih, &peer, &profile, Some("stopped"), STOPPED_TRY_TIMEOUT);
         if tokio::time::timeout(STOP_ANNOUNCE_TIMEOUT, stopped).await.is_err() {
             warn!("stopped announce timed out identity={}", peer.identity.identity_id);
         }

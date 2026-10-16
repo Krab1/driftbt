@@ -107,6 +107,13 @@ impl Store {
         }
     }
 
+    pub fn set_proxy(&mut self, index: usize, proxy_id: Option<String>) {
+        if let Some(id) = self.state.identities.get_mut(index).filter(|i| i.proxy_id != proxy_id) {
+            id.proxy_id = proxy_id;
+            self.save();
+        }
+    }
+
     /// The identity at `index`, created (and saved) on first use. Identities are numbered in order, so peer
     /// number 2 of any torrent is always bot-002.
     pub fn identity(&mut self, index: usize, requested: &str, custom_prefix: &str) -> Identity {

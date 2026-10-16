@@ -8,6 +8,7 @@ use crate::rate::RateEngine;
 use crate::rng::Rng;
 use crate::settings::{Mode, Settings, Stealth};
 use crate::state::Counters;
+use crate::swarm::Snapshot;
 
 /// Longest slice of time one `step` accounts for. After a long pause (a slow tracker) counters carry on from
 /// there instead of catching up in one lump.
@@ -29,6 +30,10 @@ pub struct Peer {
     base_ms: f64,
     jitter: f64,
     stealth: Stealth,
+    /// Counters come from a real transfer (`measure`) instead of the rate engines (`step`).
+    measured: bool,
+    base_up: u64,
+    base_down: u64,
 }
 
 impl Peer {
@@ -56,6 +61,9 @@ impl Peer {
             base_ms: s.announce_base_ms,
             jitter: (s.jitter * s.stealth.jitter_scale()).min(0.9),
             stealth: s.stealth,
+            measured: false,
+            base_up: 0,
+            base_down: 0,
             identity,
         }
     }
@@ -64,8 +72,29 @@ impl Peer {
         self.total - self.have
     }
 
+    /// Switches to real counters: what is already counted is the base, the transfer adds to it.
+    pub fn use_measured(&mut self) {
+        self.measured = true;
+        self.base_up = self.uploaded;
+        self.base_down = self.downloaded;
+        if !self.mode.downloads() {
+            self.have = self.total;
+        }
+    }
+
+    pub fn measure(&mut self, s: &Snapshot) {
+        let was_missing = self.left() > 0;
+        self.uploaded = self.base_up + s.uploaded;
+        self.downloaded = self.base_down + s.downloaded;
+        self.have = s.have_bytes.min(self.total);
+        self.completed |= was_missing && self.left() == 0 && self.mode.downloads();
+    }
+
     /// Advances the counters by `dt` seconds.
     pub fn step(&mut self, dt: f64) {
+        if self.measured {
+            return;
+        }
         let dt = dt.clamp(0.0, MAX_STEP);
         if self.mode.downloads() && self.left() > 0 {
             let d = self.down.tick(dt).min(self.left());
@@ -76,6 +105,11 @@ impl Peer {
         // A peer can only upload what it owns.
         let owned = if self.total == 0 { 0.0 } else { self.have as f64 / self.total as f64 };
         self.uploaded += (self.up.tick(dt) as f64 * owned) as u64;
+    }
+
+    pub fn set_activity(&mut self, f: f64) {
+        self.up.set_activity(f);
+        self.down.set_activity(f);
     }
 
     /// True once, after the download finished; the next announce carries `event=completed`.

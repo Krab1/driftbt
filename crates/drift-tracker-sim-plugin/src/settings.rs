@@ -4,6 +4,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::pieces::Strategy;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mode {
@@ -111,6 +113,33 @@ pub enum HashEncoding {
     Hex,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyMode {
+    None,
+    Shared,
+    PerPeer,
+}
+
+impl ProxyMode {
+    fn parse(s: &str) -> Option<Self> {
+        Some(match s {
+            "none" => Self::None,
+            "shared" => Self::Shared,
+            "per_peer" => Self::PerPeer,
+            _ => return None,
+        })
+    }
+}
+
+/// One row of the proxy list. The password is a secret and is filled in by `main` after `from_json`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProxyDef {
+    pub id: String,
+    pub url: String,
+    pub username: String,
+    pub password: String,
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RateCfg {
     pub profile: RateProfile,
@@ -130,6 +159,8 @@ pub struct Settings {
     pub honor_tracker_interval: bool,
     pub upload: RateCfg,
     pub download: RateCfg,
+    pub activity_pattern: bool,
+    pub piece_strategy: Strategy,
     pub partial_percent: f64,
     pub persist_counters: bool,
     pub send_started: bool,
@@ -140,6 +171,9 @@ pub struct Settings {
     pub extra_query: String,
     pub custom_prefix: String,
     pub custom_user_agent: String,
+    pub proxy_mode: ProxyMode,
+    pub proxies: Vec<ProxyDef>,
+    pub local_address: Option<std::net::IpAddr>,
     pub data_dir: Option<String>,
     pub log_level: String,
 }
@@ -178,6 +212,25 @@ fn rate(v: &Value, prefix: &str, profile: RateProfile, min: f64, max: f64) -> Ra
     }
 }
 
+fn proxies(v: &Value) -> Vec<ProxyDef> {
+    let mut out: Vec<ProxyDef> = Vec::new();
+    for r in v.get("proxies").and_then(Value::as_array).into_iter().flatten() {
+        let (Some(id), Some(url)) = (text(r, "id"), text(r, "url")) else { continue };
+        if !["socks5://", "socks5h://", "http://", "https://"].iter().any(|p| url.starts_with(p)) {
+            warn!("proxy {id}: the address must start with socks5://, socks5h://, http:// or https://; skipped");
+            continue;
+        }
+        if url.starts_with("socks5://") {
+            warn!("proxy {id}: socks5:// looks up names on this computer; socks5h:// lets the proxy do it");
+        }
+        if out.iter().any(|p| p.id == id) {
+            continue;
+        }
+        out.push(ProxyDef { id: id.to_string(), url: url.to_string(), username: text(r, "username").unwrap_or("").to_string(), password: String::new() });
+    }
+    out
+}
+
 impl Settings {
     pub fn from_json(v: &Value) -> Self {
         Self {
@@ -191,6 +244,8 @@ impl Settings {
             honor_tracker_interval: flag(v, "honor_tracker_interval", false),
             upload: rate(v, "upload", RateProfile::Bursty, 100.0, 800.0),
             download: rate(v, "download", RateProfile::RandomWalk, 20.0, 500.0),
+            activity_pattern: flag(v, "activity_pattern", false),
+            piece_strategy: choice(v, "piece_strategy", Strategy::parse, Strategy::RarestFirst),
             partial_percent: num(v, "partial_availability_percent").unwrap_or(50.0).clamp(1.0, 99.0),
             persist_counters: flag(v, "persist_counters", true),
             send_started: flag(v, "send_started_event", true),
@@ -204,6 +259,9 @@ impl Settings {
             extra_query: text(v, "extra_query").unwrap_or("").trim_start_matches(['?', '&']).to_string(),
             custom_prefix: text(v, "custom_peer_id_prefix").unwrap_or("").to_string(),
             custom_user_agent: text(v, "custom_user_agent").unwrap_or("").to_string(),
+            proxy_mode: choice(v, "proxy_mode", ProxyMode::parse, ProxyMode::None),
+            proxies: proxies(v),
+            local_address: text(v, "outbound_address").and_then(|s| s.parse().map_err(|_| warn!("setting outbound_address: {s:?} is not an IP address")).ok()),
             data_dir: text(v, "data_dir").map(str::to_string),
             log_level: text(v, "log_level").unwrap_or("info").to_string(),
         }
@@ -247,5 +305,22 @@ mod tests {
     #[test]
     fn query_prefix_is_stripped() {
         assert_eq!(Settings::from_json(&json!({"extra_query": "?passkey=abc"})).extra_query, "passkey=abc");
+    }
+}
+
+#[cfg(test)]
+mod proxy_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn proxy_list_is_validated() {
+        let s = Settings::from_json(&json!({"proxy_mode": "per_peer", "outbound_address": "10.0.0.5", "proxies": [
+            {"id": "a", "url": "socks5h://h:1080", "username": "u"}, {"id": "a", "url": "socks5://dup:1"},
+            {"id": "b", "url": "ftp://x"}, {"url": "http://noid"}, {"id": "c", "url": "http://p:8080"}]}));
+        assert_eq!(s.proxy_mode, ProxyMode::PerPeer);
+        assert_eq!(s.proxies.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["a", "c"]);
+        assert_eq!(s.proxies[0].username, "u");
+        assert_eq!(s.local_address, Some("10.0.0.5".parse().unwrap()));
     }
 }

@@ -14,6 +14,8 @@ pub struct Params<'a> {
     pub num_want: u32,
     pub event: Option<&'a str>,
     pub key: &'a str,
+    /// Parameter order and set of a Transmission client instead of a libtorrent one.
+    pub transmission_style: bool,
 }
 
 pub fn hash_bytes(hex: &str) -> Option<[u8; 20]> {
@@ -52,20 +54,21 @@ fn join(base: &str, query: &str) -> String {
 
 /// `extra` is already-encoded `name=value` pairs (tracker key, passkey) appended unchanged.
 pub fn announce_url(base: &str, p: &Params, enc: HashEncoding, extra: &str) -> String {
-    let mut q = format!(
-        "info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}&key={}",
+    let head = format!(
+        "info_hash={}&peer_id={}&port={}&uploaded={}&downloaded={}&left={}",
         encode_hash(p.info_hash, enc),
         pct(p.peer_id.as_bytes()),
         p.port,
         p.uploaded,
         p.downloaded,
-        p.left,
-        p.key
+        p.left
     );
-    if let Some(e) = p.event {
-        q.push_str(&format!("&event={e}"));
-    }
-    q.push_str(&format!("&numwant={}&compact=1&no_peer_id=1&supportcrypto=1", p.num_want));
+    let event = p.event.map(|e| format!("&event={e}")).unwrap_or_default();
+    let mut q = if p.transmission_style {
+        format!("{head}&numwant={}&key={}&compact=1&supportcrypto=1{event}", p.num_want, p.key)
+    } else {
+        format!("{head}&key={}{event}&numwant={}&compact=1&no_peer_id=1&supportcrypto=1", p.key, p.num_want)
+    };
     if !extra.is_empty() {
         q.push('&');
         q.push_str(extra);
@@ -183,12 +186,14 @@ mod tests {
     #[test]
     fn announce_url_encodes_raw_bytes_once() {
         let h = hash_bytes(&format!("ab01{}", "ff".repeat(18))).unwrap();
-        let p = Params { info_hash: &h, peer_id: "-qB4650-abcdefghijkl", port: 51413, uploaded: 5, downloaded: 6, left: 7, num_want: 200, event: Some("started"), key: "AB12CD34" };
+        let p = Params { info_hash: &h, peer_id: "-qB4650-abcdefghijkl", port: 51413, uploaded: 5, downloaded: 6, left: 7, num_want: 200, event: Some("started"), key: "AB12CD34", transmission_style: false };
         let u = announce_url("http://t.example/announce?passkey=k", &p, HashEncoding::Raw, "apikey=z");
         assert!(u.starts_with("http://t.example/announce?passkey=k&info_hash=%AB%01%FF"), "{u}");
         assert!(u.contains("peer_id=-qB4650-abcdefghijkl&port=51413&uploaded=5&downloaded=6&left=7"));
         assert!(u.contains("&event=started&numwant=200&compact=1") && u.ends_with("&apikey=z"));
         assert!(announce_url("http://t/announce", &p, HashEncoding::Hex, "").contains("info_hash=ab01ffff"));
+        let tr = announce_url("http://t/announce", &Params { transmission_style: true, ..p }, HashEncoding::Raw, "");
+        assert!(tr.contains("&left=7&numwant=200&key=AB12CD34&compact=1&supportcrypto=1&event=started") && !tr.contains("no_peer_id"), "{tr}");
     }
 
     #[test]

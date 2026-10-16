@@ -4,16 +4,21 @@
 
 #[macro_use]
 mod log;
+mod activity;
 mod identity;
 mod jobs;
 mod peer;
+mod pieces;
 mod profiles;
+mod proxy;
 mod rate;
 mod rng;
 mod rpc;
 mod settings;
 mod state;
+mod swarm;
 mod tracker;
+mod wire;
 
 use std::collections::VecDeque;
 use std::io::BufRead;
@@ -42,10 +47,14 @@ fn main() {
         let id = msg.id.clone().unwrap_or(Value::Null);
         let reply = match msg.method.as_str() {
             "initialize" => {
-                let settings = Settings::from_json(&msg.params["settings"]);
+                let mut settings = Settings::from_json(&msg.params["settings"]);
                 log::set_level(&settings.log_level);
                 if sim.is_none() {
                     let api_key = rpc::ask_secret(&mut lines, &mut later, "tracker_api_key");
+                    for i in 0..settings.proxies.len() {
+                        let key = format!("proxies.{}.password", settings.proxies[i].id);
+                        settings.proxies[i].password = rpc::ask_secret(&mut lines, &mut later, &key);
+                    }
                     info!("tracker-sim initialized stealth_level={:?} client_profile={}", settings.stealth, settings.client_profile);
                     sim = Some(Sim::new(settings, &api_key, rt.handle().clone()));
                 }

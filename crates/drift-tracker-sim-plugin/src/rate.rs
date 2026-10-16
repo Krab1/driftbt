@@ -18,6 +18,7 @@ fn clamp(cfg: &RateCfg, r: f64) -> f64 {
 }
 
 pub struct RateEngine {
+    base: RateCfg,
     cfg: RateCfg,
     rng: Rng,
     scale: f64,
@@ -32,7 +33,13 @@ pub struct RateEngine {
 impl RateEngine {
     pub fn new(cfg: RateCfg, seed: u64, p: &Personality) -> Self {
         let mid = (cfg.min_bps + cfg.max_bps) / 2.0;
-        Self { cfg, rng: Rng::new(seed), scale: p.rate_scale, idle_prob: p.idle_prob, burst_prob: p.burst_prob, cur: mid, phase: Phase::Normal, phase_left: 0.0, tokens: 0.0 }
+        Self { base: cfg, cfg, rng: Rng::new(seed), scale: p.rate_scale, idle_prob: p.idle_prob, burst_prob: p.burst_prob, cur: mid, phase: Phase::Normal, phase_left: 0.0, tokens: 0.0 }
+    }
+
+    /// Scales the whole band (the configured min and max are for full activity); the next tick follows it.
+    pub fn set_activity(&mut self, f: f64) {
+        self.cfg.min_bps = self.base.min_bps * f;
+        self.cfg.max_bps = self.base.max_bps * f;
     }
 
     fn update_rate(&mut self, dt: f64) {

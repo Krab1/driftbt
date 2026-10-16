@@ -14,6 +14,9 @@ pub struct Identity {
     pub port: u16,
     pub client_profile: String,
     pub personality_seed: String,
+    /// The proxy this identity always uses (Phase 3), kept so it does not change address between runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proxy_id: Option<String>,
 }
 
 /// Behaviour parameters derived from the stored seed, so an identity acts the same way after a restart.
@@ -53,6 +56,7 @@ pub fn generate(index: usize, seed: u64, requested: &str, custom_prefix: &str) -
         port,
         client_profile: name,
         personality_seed: format!("{:016x}", rng.next_u64()),
+        proxy_id: None,
     }
 }
 

@@ -2,7 +2,7 @@
 
 A Drift `simulator` plugin (`crates/drift-tracker-sim-plugin`, binary `tracker-sim`). For each torrent the user switches on, it announces to the torrent's trackers as stable, human-looking peers whose counters grow gradually. **Purpose: testing a tracker and its anti-bot checks that you operate or have permission to test.** It is not a way to inflate ratios on someone else's tracker; the manifest description says so. Protocol and the host side are in `docs/PLUGIN_PROTOCOL.md` ("Simulators"); this file is only the plugin.
 
-Status: **Phase 1 is built** (announce-only). Phases 2-4 are designed here and not built.
+Status: **Phases 1-3 are built, and the parts of phase 4 that make sense here.** Real-network DHT, PEX and LSD are deliberately not built (see Phase 4).
 
 ## Where the brief and the real protocol differ
 
@@ -26,7 +26,7 @@ No core file was changed. Added outside the crate: the workspace member, `script
 - **Per torrent.** Job = N peer tasks (`peer_count`, default 1). Disabling one torrent signals only its job; each peer sends `event=stopped` (`numwant=0`) and saves its counters. A torrent that disappears from Drift's list stops too, but its switch is kept.
 - **Quick replies.** The main thread only reads stdin and updates state; announces run on two tokio workers. `selection_changed` returns after spawning. `shutdown` stops all jobs and waits up to 5 s for their `stopped` announces.
 - **Waiting for details.** A magnet without metadata has no size or trackers; its peers wait (5 s polls) rather than announce nonsense.
-- **Trackers.** HTTP(S) only; every http tracker in the torrent is announced to in turn. `udp://` is skipped (Phase 2).
+- **Trackers.** HTTP(S) only; every http tracker in the torrent is announced to in turn. `udp://` trackers are skipped (BEP 15 is not implemented).
 
 ### Modes
 
@@ -35,7 +35,7 @@ No core file was changed. Added outside the crate: the workspace member, `script
 | `seed_only` | yes | `left=0`, `downloaded` stays 0, `uploaded` grows |
 | `partial_seed` | synthetic | starts with `partial_availability_percent` of the size, downloads the rest, uploads in proportion to what it owns |
 | `download_and_seed` | synthetic | starts at 0, `left` shrinks at the download rate; upload scales with the owned fraction; `event=completed` once when `left` reaches 0 |
-| `loopback_pair` | **not built**; runs as `seed_only` with a warning | Phase 2 |
+| `loopback_pair` | yes (Phase 2) | real: counted from bytes that crossed a socket; needs 2+ peers (raised to 2 when switched on) |
 
 Selection (mode, peer count) is fixed when the torrent is switched on, from the settings at that moment, and saved; changing the defaults later affects only torrents switched on afterwards.
 
@@ -57,7 +57,7 @@ Tick 200 ms. Profiles: `constant_jitter` (target near the middle, ±15 %, smooth
 
 ### State (`state.rs`)
 
-`<data_dir or ./data>/state.json` (the plugin folder is the working directory): `{version, identities[], torrents{hash:{enabled,mode,peer_count,started_at}}, counters{"bot-001:<hash>":{uploaded_bytes,downloaded_bytes,have_bytes?,last_announce_time}}}`. Written to `state.json.tmp` then renamed. A corrupt file is renamed `state.json.corrupt` and the plugin starts empty. Counters are saved after every successful announce and on stop. `persist_counters=false` starts from zero each run (the peer still has the same identity).
+`<data_dir or ../.tracker-sim>/state.json` (the plugin folder is the working directory, so by default the file sits beside the plugin folders in `<data>/plugins/.tracker-sim/`, where replacing or updating the plugin folder doesn't touch it; Drift ignores a folder without a `plugin.json`): `{version, identities[], torrents{hash:{enabled,mode,peer_count,started_at}}, counters{"bot-001:<hash>":{uploaded_bytes,downloaded_bytes,have_bytes?,last_announce_time}}}`. Written to `state.json.tmp` then renamed. A corrupt file is renamed `state.json.corrupt` and the plugin starts empty. Counters are saved after every successful announce and on stop. `persist_counters=false` starts from zero each run (the peer still has the same identity).
 
 ### Tracker client (`tracker.rs`)
 
@@ -80,41 +80,44 @@ Every request gets a valid JSON reply (`-32602` for a bad hash, `-32601` for an 
 
 What Phase 1 cannot hide: it sends no peer traffic, so a tracker (or a swarm crawler) that connects to the announced port finds nothing there; all peers of one machine share its IP; and there is no real data behind `uploaded`. Phases 2 and 3 address these.
 
-## Phase 2: real BitTorrent transfer (designed, not built)
+## Phase 2: real BitTorrent transfer (built for `loopback_pair`)
 
-New modules in the crate: `btp_peer.rs` (wire protocol), `piece_strategy.rs`, `metainfo.rs` (parse the `.torrent`; for magnets, fetch metadata via BEP 9, or require `torrent_file_path`, which core does not send yet, so a small core change would be listed separately).
+Modules `wire.rs` (BEP 3 handshake and messages), `pieces.rs` (bitfield and piece strategies), `swarm.rs` (nodes, sessions, choker, synthetic content).
 
-- **Listener per identity** on its stored port (TCP). Announced port becomes honest.
-- **Wire**: handshake (`\x13BitTorrent protocol`, reserved bits per profile, info hash, peer id), `bitfield`, `have`, `interested`/`not interested`, `choke`/`unchoke`, `request`/`piece`/`cancel`, keep-alive every 2 min; optional fast extension.
-- **Data**: for `seed_only`, read real files from `content_dir`; otherwise synthesise deterministic pieces and verify SHA-1 against the metainfo (the test data are legal torrents only, per CLAUDE.md). `uploaded` counts payload bytes written to sockets, `downloaded` counts bytes of verified pieces; failed pieces count for neither; `left` = missing piece bytes.
-- **Choking**: regular unchoke slots (4) re-evaluated every 10 s (Transmission) or 15 s (qBittorrent/Deluge), plus one optimistic unchoke rotated every 30 s. Values live in `Profile`.
-- **Piece selection**: `sequential`, `random`, `rarest_first` (default; random among ties, random first piece), `endgame_bias` (duplicate requests + `cancel` in the last few pieces). Setting `piece_strategy`.
-- **The rate engine stays**: it becomes the socket bandwidth limiter (token bucket per direction) instead of a counter generator, so real transfer has the same shape.
-- **`loopback_pair`** first: two or more identities of one torrent in one process connect over 127.0.0.1, one seeding, one downloading; announces report real counters. This validates the wire code without external peers. A mode `partial_seed`/`download_and_seed` against real swarm peers follows.
-- Behaviour engine change: `Peer` stops integrating rates itself and instead reads byte counts from the connection layer; the schedule, events and persistence code are unchanged.
+- **Topology.** One swarm per torrent, built by the first peer to reach it once the size is known. Every peer listens on 127.0.0.1 (an ephemeral port; the port announced to the tracker is still the identity's, and nothing listens on it, see "What it cannot hide"). Peer 1 starts with every piece, the others with none; each later peer connects to all earlier ones, so leechers also trade with each other.
+- **Wire.** Handshake, `bitfield`, `have`, `interested`/`not interested`, `choke`/`unchoke`, `request`/`piece`/`cancel`, keep-alive every 2 min. 16 KiB blocks, 16 requests in flight per connection. Frames over 4 MB, bad bitfields, requests outside a piece and a wrong info hash end the connection.
+- **Data.** Synthetic: every byte is a function of (torrent, piece, offset), so no file is read and nothing is stored. A piece is accepted only if its SHA-256 equals the hash of what the generator produces for it (our own metainfo; real `.torrent` hashes would need `torrent_file_path`, which core does not send). A failed piece is discarded and counts for nothing.
+- **Counters.** `uploaded` = payload bytes handed to the socket by that peer; `downloaded` = bytes of verified pieces; `left` = size minus verified bytes. `completed` is announced once, when the last piece verifies. Nothing moves before the peer's first successful announce. The configured upload/download rate profiles become the bandwidth limiters (a token bucket per direction per peer), so a transfer has the same shape as the announce-only counters.
+- **Choking.** Every `unchoke_secs` (profile: Transmission 10 s, libtorrent clients 15 s), or at once when someone becomes interested: the 4 interested peers that moved the most data with us are unchoked, plus one optimistic unchoke re-drawn every 30 s. A choke drops the peer's pending requests.
+- **Piece selection** (`piece_strategy`): `sequential`; `random`; `rarest_first` (random for the first 4 pieces, then the least available, random among ties; the default); `endgame_bias` (rarest first, and when every missing piece is already requested elsewhere, request it again from this peer and `cancel` the duplicates when one copy arrives).
+- **Limits.** The swarm is for local validation: when the leecher has everything the transfer is over and counters stay put (the peers keep announcing). After a restart a leecher starts with as many whole pieces (from the front) as its saved `have_bytes`, so `left` and `downloaded` carry on instead of repeating the download; `uploaded`/`downloaded` continue from their saved totals. Which pieces it has is made up; only the amount is real. Not built: the fast extension, the extension protocol, real files, magnet metadata fetch (BEP 9), `partial_seed`/`download_and_seed` against a real swarm.
 
-New settings: `piece_strategy`, `listen_enabled`.
+## Phase 3: network identity diversity (built for tracker requests)
 
-## Phase 3: network identity diversity (designed, not built)
+`proxy.rs`. Settings: `proxy_mode` (`none`, `shared`, `per_peer`), a `proxies` list (address, optional user name, secret password via `get_secret("proxies.<row>.password")`) and `outbound_address`.
 
-The strongest bot fingerprint is many peers behind one IP. Module `proxy.rs`:
+- `shared`: every peer uses the first proxy. `per_peer`: peer *N* uses proxy *N*. **A peer with no proxy of its own does not run**, rather than announce from the real address (it logs why).
+- The assignment is saved in `state.json` (`proxy_id` on the identity), so an identity keeps its address between runs, even if the list is reordered; a removed proxy falls back to the slot by position.
+- Each peer has its own HTTP client (`socks5h://` recommended so the tracker's name is resolved by the proxy; `socks5://`, `http://`, `https://` work). `outbound_address` binds a local IP when no proxy is used (picks the network card).
+- Logs show a proxy's id, never its address or password. Errors carry no URL.
+- **Not built:** peer-wire connections through a proxy. The loopback swarm is local, so it has none; real peer traffic would need SOCKS5 BIND or a VPN with a forwarded port. Running one Drift per container/VM with its own IP remains the sturdiest way to get distinct addresses.
 
-- `proxy_mode`: `none` / `shared` / `per_peer`. A proxy list (a `list` settings field, rows `id`, `url`, optional `username`, secret `password` via `<list>.<row>.password`) assigns proxy *i* to identity *i* and **persists the assignment** in `state.json` (a bot must not change IP between runs).
-- **Tracker requests** go through the identity's proxy (reqwest supports `socks5h://` and `http://` proxies; one `Client` per identity instead of the shared one).
-- **Peer connections** (Phase 2): outbound through SOCKS5 (CONNECT); inbound is not possible through a plain proxy, so listening peers need a SOCKS5 BIND/UDP-capable service, a VPN with port forwarding, or a bound interface.
-- Optional `outbound_interface` (bind the local address of sockets), and a recipe for running several Drift/tracker-sim instances in separate containers/VMs, each with its own IP, which is the sturdiest option.
-- The announce `ip=` parameter is not set (a real client doesn't); behind a proxy the tracker sees the proxy's address.
+Done when: two identities announce from two different source addresses in the tracker's log, and an identity keeps its address after a restart (the integration test checks routing and the saved assignment; distinct source addresses need real proxies).
 
-Done when: two identities announce from two different source addresses in the tracker's log, and an identity keeps its address after a restart.
+## Phase 4: swarm realism
 
-## Phase 4: swarm realism (designed, not built)
+Built:
+- **Client-specific announce shape.** Transmission profiles send the parameters in Transmission's order and without `no_peer_id`; libtorrent profiles (qBittorrent, Deluge) in libtorrent's. Per-profile unchoke timing (Phase 2).
+- **Long-term behaviour** (`activity_pattern`, off by default, `activity.rs`): the rate band is scaled by a per-identity daily curve (peak mid-afternoon, 30 % at night, shifted per identity) and a smooth day-to-day drift of +-15 %, derived from the seed and the clock, so it is the same after a restart and needs no stored state. The configured min/max are for full activity.
 
-DHT (BEP 5, own routing table per identity, announce_peer for the torrent), PEX (BEP 11, `ut_pex` through the extension handshake, profile-dependent flags), LSD (BEP 14 multicast; only useful on a LAN), client-specific scrape patterns and parameter ordering per profile, long-term personality drift (a human's rate preferences change over days), and daily patterns (idle at night). Settings `enable_dht`, `enable_pex`, `enable_lsd` arrive here.
+Not built, on purpose:
+- **DHT (BEP 5), PEX (BEP 11), LSD (BEP 14).** They matter only to peers on a real network swarm, and this plugin's peers never join one (nothing listens on the announced port). Doing them would also publish the torrent's info hash to the public DHT or the local network, which a tracker test doesn't need and the user didn't ask for. A tracker cannot see them, so they would not affect what it is being tested against. If a swarm-level test is ever wanted, build them on top of a listener on the announced port, behind `enable_dht`/`enable_pex`/`enable_lsd` settings that default off.
+- **Client-specific scrape patterns.** Scrape is one GET per interval for every profile.
 
 ## Tests
 
-- Unit (in the crate): settings validation, rate bounds and burst limits, state round-trip and corruption, identity stability, peer counters in each mode, announce jitter and backoff, URL building, bencode answers, selection and resume logic, RPC parsing.
-- Integration (`tests/protocol.rs`, real binary, stub HTTP tracker, ~20 s): initialize / `torrents_updated` / `get_selection` / `selection_changed` / `shutdown`; nothing announced before selection; `started` first with uploaded 0; cumulative, monotonically growing counters with no single announce carrying most of the total; uneven gaps; `stopped` with `numwant=0` on disable and on shutdown; peer id and counters continue after a restart.
+- Unit (in the crate): settings validation, rate bounds and burst limits, state round-trip and corruption, identity stability, peer counters in each mode, announce jitter and backoff, URL building (both styles), bencode answers, selection and resume logic, RPC parsing; wire codec round-trips and refusals, bitfield and piece strategies, choker selection, proxy assignment, activity factor; and the loopback swarm over real TCP (three peers finishing with verified data, endgame, nothing moving before activation, corrupt data refused and not counted).
+- Integration (`tests/protocol.rs`, real binary, stub HTTP tracker, ~30 s): initialize / `torrents_updated` / `get_selection` / `selection_changed` / `shutdown`; nothing announced before selection; `started` first with uploaded 0; cumulative, monotonically growing counters with no single announce carrying most of the total; uneven gaps; `stopped` with `numwant=0` on disable and on shutdown; peer id and counters continue after a restart; a per-peer proxy receives the announces (a stub plays the proxy) and a peer without one stays quiet; a loopback pair announces counters that match the bytes moved (leecher's `left` falls to 0 with `completed`, seeder's `uploaded` covers it).
 
 ## Manual test
 
@@ -125,4 +128,6 @@ DHT (BEP 5, own routing table per identity, announce_peer for the torrent), PEX 
 5. Watch the tracker log for 60 s: first request has `event=started`, `uploaded=0`; later requests have growing `uploaded`, irregular gaps, no `event`. View log (Settings → Plugins) shows the `[DEBUG] announce ...` lines.
 6. Untick: a request with `event=stopped&numwant=0`. A second torrent ticked meanwhile is unaffected.
 7. Quit and restart Drift: the tick is still on; the first request has the same `peer_id` and `uploaded` ≥ the last value seen.
-8. Automated equivalent: `cargo test -p drift-tracker-sim-plugin`.
+8. Loopback: set Default mode `loopback_pair` (and, to see it finish quickly, upload/download min and max 2000-4000 KB/s on a small torrent), switch a torrent on: two peers announce; one reports `left=0`, the other's `left` falls to 0 with `event=completed`. The log shows `loopback swarm started`.
+9. Proxies: add a row under Proxies (for example `socks5h://127.0.0.1:1080` from a local SSH `-D` tunnel), set Proxy mode `per_peer`, and set Default peer count to 2: only peer 1 announces and the log says `bot-002 not started: ... no proxy`.
+10. Automated equivalent: `cargo test -p drift-tracker-sim-plugin`.
