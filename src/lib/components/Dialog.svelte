@@ -2,7 +2,8 @@
   import type { Snippet } from "svelte";
 
   // Native <dialog>: focus trap, Esc, and inert backdrop come from the browser.
-  let { title, onclose, children, footer, wide = false }: { title: string; onclose: () => void; children: Snippet; footer?: Snippet; wide?: boolean } = $props();
+  // `keep`: a click on the dimmed area doesn't close it, for dialogs with settings or text that a stray click must not throw away (Esc and the buttons still do).
+  let { title, onclose, children, footer, wide = false, keep = false }: { title: string; onclose: () => void; children: Snippet; footer?: Snippet; wide?: boolean; keep?: boolean } = $props();
   let el = $state<HTMLDialogElement>();
 
   $effect(() => {
@@ -10,7 +11,7 @@
   });
 </script>
 
-<dialog bind:this={el} class:wide aria-labelledby="dlg-title" {onclose} onclick={(e) => e.target === el && el?.close()}>
+<dialog bind:this={el} class:wide aria-labelledby="dlg-title" {onclose} onclick={(e) => !keep && e.target === el && el?.close()}>
   <div class="box">
     <h2 id="dlg-title">{title}</h2>
     <div class="body">{@render children()}</div>

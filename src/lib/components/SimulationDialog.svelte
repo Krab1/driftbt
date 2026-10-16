@@ -58,7 +58,7 @@
   }
 </script>
 
-<Dialog title="Simulation settings" onclose={() => (ui.simTarget = null)}>
+<Dialog title="Simulation settings" keep onclose={() => (ui.simTarget = null)}>
   <p class="name" title={target.name}>{target.name}</p>
   {#if loading}
     <p class="note">Asking {target.pluginName}…</p>
@@ -83,7 +83,7 @@
         </div>
       {/each}
     </div>
-    <small>These apply to this torrent only. {target.pluginName}'s own settings (Settings → Plugins) are the defaults.</small>
+    <small>These apply to this torrent only. {target.pluginName}'s own settings (Settings → Plugins) cover the rest, such as the client it pretends to be and proxies.</small>
   {/if}
   {#snippet footer()}
     {#if target.enabled}<button class="btn" disabled={loading} onclick={stop}>Stop simulation</button>{/if}

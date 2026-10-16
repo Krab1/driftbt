@@ -133,7 +133,7 @@
   }
 </script>
 
-<Dialog title="Add torrent" onclose={() => (ui.addOpen = false)}>
+<Dialog title="Add torrent" keep onclose={() => (ui.addOpen = false)}>
   <label class="field">
     <span>Magnet links or .torrent addresses, one per line</span>
     <textarea rows="3" placeholder="magnet:?xt=urn:btih:…" bind:value={magnets} oninput={() => (error = "")}></textarea>

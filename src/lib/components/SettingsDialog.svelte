@@ -137,7 +137,7 @@
   }
 </script>
 
-<Dialog title="Settings" wide onclose={() => (ui.settingsOpen = false)}>
+<Dialog title="Settings" wide keep onclose={() => (ui.settingsOpen = false)}>
   {#if ui.settings}
     {@const s = ui.settings}
     <div class="tabs" role="tablist" aria-label="Settings sections" tabindex="-1" onkeydown={onTabKey}>
