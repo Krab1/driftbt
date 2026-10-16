@@ -153,7 +153,7 @@
   </div>
 
   {#if previewing}
-    <p class="note" role="status">Fetching torrent info…</p>
+    <p class="note busy" role="status"><span class="spinner" aria-hidden="true"></span>Fetching torrent info… You don't have to wait: add it now and everything gets downloaded. You can untick files later.</p>
   {:else if previewError}
     <p class="note warn" role="status">{previewError} You can still add it.{#if more} <button class="link" onclick={() => (ui.detailView = { title: previewError, text: more })}>More details</button>{/if}</p>
   {:else if preview}
@@ -246,6 +246,26 @@
   .note {
     margin: 0;
     color: var(--text-secondary);
+  }
+  .note.busy {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .spinner {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin-top: 2px;
+    border: 2px solid var(--border-strong);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .note.warn {
     color: var(--warning);

@@ -305,6 +305,12 @@ fn main() {
                 ));
             }
 
+            // Adds that were still waiting for their details when the app last closed.
+            {
+                let manager = manager.clone();
+                tauri::async_runtime::spawn(async move { manager.resume_pending().await });
+            }
+
             // VPN guard, watch folder and IP list refresh: the loops live in core, shared with the headless server.
             {
                 let handle = app.handle().clone();

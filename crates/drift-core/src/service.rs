@@ -63,12 +63,13 @@ impl Service {
         Ok(self.engine.inspect(input.into_parts().0).await?)
     }
 
-    /// The manager picks the save folder (category, else the default) and the queue slot.
+    /// The manager picks the save folder (category, else the default) and the queue slot. Returns at once: the
+    /// torrent's details are fetched in the background (see `Manager::add_later`).
     pub async fn add(&self, input: AddInput, category: Option<String>) -> Result<TorrentId, ApiError> {
         let (source, only_files) = input.into_parts();
         let mut req = AddRequest::new(source);
         req.only_files = only_files;
-        Ok(self.manager.add(req, category, Vec::new()).await?)
+        Ok(self.manager.add_later(req, category, Vec::new()).await?)
     }
 
     /// Saves and applies new settings. Returns the settings that were in force before, so the caller can react to

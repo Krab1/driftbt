@@ -32,6 +32,18 @@ pub struct TorrentMeta {
     /// This torrent's own speed limits in KiB/s; 0 = none.
     pub limit_down_kib: u32,
     pub limit_up_kib: u32,
+    /// Set while the torrent is being added in the background.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending: Option<PendingAdd>,
+}
+
+/// An add that is still waiting for the torrent's details (a magnet link or address). Saved, so a restart carries on.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PendingAdd {
+    pub source: String,
+    pub only_files: Option<Vec<usize>>,
+    pub paused: bool,
 }
 
 pub type Library = BTreeMap<TorrentId, TorrentMeta>;

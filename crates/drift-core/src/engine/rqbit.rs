@@ -460,6 +460,35 @@ impl RqbitEngine {
         })
     }
 
+    /// A list-only add: what the torrent holds, plus the torrent itself and the peers that answered.
+    async fn look(&self, source: AddSource) -> Result<(TorrentPreview, Vec<u8>, Vec<SocketAddr>)> {
+        validate(&source)?;
+        let opts = AddTorrentOptions { list_only: true, ..Default::default() };
+        let session = self.session();
+        let fut = session.add_torrent(to_add(source), Some(opts));
+        let resp = tokio::time::timeout(Duration::from_secs(30), fut)
+            .await
+            .map_err(|_| EngineError::Timeout)?
+            .map_err(backend)?;
+        let AddTorrentResponse::ListOnly(l) = resp else {
+            return Err(EngineError::Backend("unexpected response to a list-only add".into()));
+        };
+        let files: Vec<PreviewFile> = l
+            .info
+            .iter_file_details()
+            .enumerate()
+            .map(|(index, f)| PreviewFile { index, path: f.filename.to_pathbuf().to_string_lossy().into_owned(), size: f.len })
+            .collect();
+        let id = TorrentId(l.info_hash.as_string());
+        let preview = TorrentPreview {
+            name: l.info.name().map(|n| n.into_owned()).unwrap_or_else(|| id.0.clone()),
+            total_bytes: files.iter().map(|f| f.size).sum(),
+            id,
+            files,
+        };
+        Ok((preview, l.torrent_bytes.to_vec(), l.seen_peers))
+    }
+
     fn session(&self) -> Arc<Session> {
         self.session.read().unwrap().clone()
     }
@@ -616,10 +645,24 @@ impl TorrentEngine for RqbitEngine {
         // Saving the torrent list is a file swap that Windows sometimes refuses for a moment (a virus scanner
         // looking at the new file, say). Trying again almost always works, and the user never sees the hiccup.
         // Where the files go: needs the torrent's name and file count, which a list-only look gives.
+        // For a magnet or an address that look has fetched the whole torrent, so add from it rather than fetching it twice.
+        let mut source = req.source.clone();
+        let mut peers = req.peers.clone();
+        // A magnet's own file choice (`so=`) is only read from the magnet, which the code below replaces.
+        let only_files = req.only_files.clone().or_else(|| match &req.source {
+            AddSource::Magnet(m) => librqbit::Magnet::parse(m).ok().and_then(|m| m.get_select_only()),
+            _ => None,
+        });
         let output_folder = match &req.output_dir {
             None => None,
-            Some(base) => Some(match self.inspect(req.source.clone()).await {
-                Ok(p) => torrent_folder(base, &p.name, p.files.len(), req.folder_for_single),
+            Some(base) => Some(match self.look(req.source.clone()).await {
+                Ok((p, bytes, seen)) => {
+                    if !matches!(source, AddSource::FileBytes(_)) {
+                        source = AddSource::FileBytes(bytes);
+                        peers.extend(seen);
+                    }
+                    torrent_folder(base, &p.name, p.files.len(), req.folder_for_single)
+                }
                 // A magnet nobody answers yet: keep it out of the save folder's root until the name is known.
                 Err(EngineError::Timeout) => {
                     let hash = match &req.source {
@@ -638,12 +681,12 @@ impl TorrentEngine for RqbitEngine {
             }
             let opts = AddTorrentOptions {
                 paused: req.paused,
-                only_files: req.only_files.clone(),
+                only_files: only_files.clone(),
                 output_folder: output_folder.clone().map(|p| p.to_string_lossy().into_owned()),
-                initial_peers: (!req.peers.is_empty()).then(|| req.peers.clone()),
+                initial_peers: (!peers.is_empty()).then(|| peers.clone()),
                 ..Default::default()
             };
-            match self.session().add_torrent(to_add(req.source.clone()), Some(opts)).await {
+            match self.session().add_torrent(to_add(source.clone()), Some(opts)).await {
                 Ok(AddTorrentResponse::Added(_, h) | AddTorrentResponse::AlreadyManaged(_, h)) => return Ok(id_of(&h)),
                 Ok(AddTorrentResponse::ListOnly(_)) => return Err(EngineError::Backend("unexpected list-only response".into())),
                 Err(e) => {
@@ -658,30 +701,7 @@ impl TorrentEngine for RqbitEngine {
     }
 
     async fn inspect(&self, source: AddSource) -> Result<TorrentPreview> {
-        validate(&source)?;
-        let opts = AddTorrentOptions { list_only: true, ..Default::default() };
-        let session = self.session();
-        let fut = session.add_torrent(to_add(source), Some(opts));
-        let resp = tokio::time::timeout(Duration::from_secs(30), fut)
-            .await
-            .map_err(|_| EngineError::Timeout)?
-            .map_err(backend)?;
-        let AddTorrentResponse::ListOnly(l) = resp else {
-            return Err(EngineError::Backend("unexpected response to a list-only add".into()));
-        };
-        let files: Vec<PreviewFile> = l
-            .info
-            .iter_file_details()
-            .enumerate()
-            .map(|(index, f)| PreviewFile { index, path: f.filename.to_pathbuf().to_string_lossy().into_owned(), size: f.len })
-            .collect();
-        let id = TorrentId(l.info_hash.as_string());
-        Ok(TorrentPreview {
-            name: l.info.name().map(|n| n.into_owned()).unwrap_or_else(|| id.0.clone()),
-            total_bytes: files.iter().map(|f| f.size).sum(),
-            id,
-            files,
-        })
+        self.look(source).await.map(|(preview, _, _)| preview)
     }
 
     async fn open_file(&self, id: &TorrentId, file: usize) -> Result<OpenFile> {
@@ -1391,6 +1411,83 @@ mod tests {
         assert!(free < Duration::from_secs(3), "unlimited should be quick, took {free:?}");
         assert!(own >= Duration::from_millis(3500), "128 KB/s on the torrent should take about 5 s for 768 KiB, took {own:?}");
         assert!(overall_wins >= Duration::from_millis(3500), "the overall 128 KB/s must hold even though the torrent allows 20 MB/s, took {overall_wins:?}");
+    }
+
+    /// Unticking a file that already has data, and choosing to delete it: the file is gone from disk, the neighbours that
+    /// shared a download piece with it are repaired by the check that follows, and the rest keeps its data.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn unticking_a_file_with_delete_removes_it_and_repairs_its_neighbours() {
+        use crate::library::MemoryMetaStore;
+        use crate::manager::Manager;
+        let root = scratch("untick");
+        let (seed_dir, dl) = (root.join("seed"), root.join("dl"));
+        let content = seed_dir.join("pack");
+        std::fs::create_dir_all(&content).unwrap();
+        std::fs::create_dir_all(&dl).unwrap();
+        let sizes = [100_000usize, 3_000_000, 100_000];
+        let names = ["a.bin", "b.bin", "c.bin"];
+        let data: Vec<Vec<u8>> = sizes.iter().enumerate().map(|(i, &sz)| (0..sz).map(|k| ((k * 31) >> 3) as u8 ^ (i as u8 + 1)).collect()).collect();
+        for (n, d) in names.iter().zip(&data) {
+            std::fs::write(content.join(n), d).unwrap();
+        }
+        let torrent = create_torrent(&content, CreateTorrentOptions { piece_length: Some(64 * 1024), ..Default::default() }, &BlockingSpawner::new(1)).await.unwrap().as_bytes().unwrap();
+        let loopback: SocketAddr = ([127, 0, 0, 1], 0).into();
+        let seeder = Session::new_with_opts(
+            seed_dir.clone(),
+            SessionOptions { dht: None, disable_local_service_discovery: true, listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }), ..Default::default() },
+        )
+        .await
+        .unwrap();
+        seeder.add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, ..Default::default() })).await.unwrap();
+        let port = seeder.listen_addr().expect("seeder listens").port();
+
+        let engine = Arc::new(RqbitEngine::new(engine_cfg(&dl, None)).await.unwrap());
+        let settings = Arc::new(Mutex::new(crate::settings::Settings::default()));
+        let manager = Manager::new(engine.clone(), Arc::new(MemoryMetaStore::default()), settings);
+        let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
+        req.peers = vec![SocketAddr::from(([127, 0, 0, 1], port))];
+        let id = engine.add(req).await.unwrap();
+        assert_eq!(state_after(&engine, &id, 60).await.0, TorrentState::Seeding);
+        let folder = dl.join("pack");
+        assert!(folder.join("b.bin").exists());
+
+        manager.set_files(&id, vec![0, 2], true).await.unwrap();
+        // The check adds the torrent again and, with no tracker or DHT on loopback, nothing says where a seeder is
+        // (a real swarm finds peers by itself), so a second seeder dials in.
+        let dl_port = engine.network_status().await.unwrap().listen_port.expect("downloader listens");
+        let dialer = Session::new_with_opts(seed_dir.clone(), SessionOptions { dht: None, disable_local_service_discovery: true, listen: Some(ListenerOptions { listen_addr: loopback, ..Default::default() }), ..Default::default() }).await.unwrap();
+        dialer
+            .add_torrent(AddTorrent::from_bytes(torrent.clone()), Some(AddTorrentOptions { overwrite: true, initial_peers: Some(vec![SocketAddr::from(([127, 0, 0, 1], dl_port))]), ..Default::default() }))
+            .await
+            .unwrap();
+        // The check runs in the background; wait until the two kept files are whole again.
+        let deadline = Instant::now() + Duration::from_secs(60);
+        loop {
+            if let Ok(d) = engine.details(&id).await {
+                if d.files.len() == 3 && d.files[0].progress_bytes == d.files[0].size && d.files[2].progress_bytes == d.files[2].size && d.files[1].progress_bytes < d.files[1].size {
+                    break;
+                }
+            }
+            assert!(Instant::now() < deadline, "the kept files did not come back whole");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(std::fs::read(folder.join("a.bin")).unwrap(), data[0], "a.bin is intact");
+        assert_eq!(std::fs::read(folder.join("c.bin")).unwrap(), data[2], "c.bin is intact");
+        // The deleted file may be back as a few pieces that it shares with its neighbours, but not as the whole file.
+        let left = std::fs::metadata(folder.join("b.bin")).map(|m| allocated(&folder.join("b.bin"), m.len())).unwrap_or(0);
+        assert!(left < 600_000, "the deleted file did not come back ({left} bytes on disk)");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Bytes a file really takes on disk (a sparse file takes less than its length).
+    #[cfg(windows)]
+    fn allocated(p: &Path, _len: u64) -> u64 {
+        crate::fsmove::sparse::allocated_bytes(p)
+    }
+    #[cfg(not(windows))]
+    fn allocated(_p: &Path, len: u64) -> u64 {
+        len
     }
 
     /// Adding a torrent whose file is already in the folder is refused, and the file is left alone.

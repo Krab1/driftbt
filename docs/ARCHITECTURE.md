@@ -109,6 +109,8 @@ pub trait TorrentEngine: Send + Sync {
 
 **As built (M0):** `crates/drift-core/src/engine/mod.rs` is authoritative. Implemented: `add`, `list`, `details`, `pause`, `resume`, `remove`, `set_files`, `set_limits`; ids are `&TorrentId` (lowercase info-hash hex) and every method returns `Result<_, EngineError>`. `set_network`, `set_ip_filter` and `stream_url` are added with the milestone that needs them (M5-05, M5-02, M4-04). `add` is idempotent (re-adding a managed torrent returns its id, even by bare magnet). ETA is derived in the adapter from speed because librqbit's own is private.
 
+**Adding is deferred (D-61).** The front ends call `Manager::add_later` (via `Service::add`), which returns the torrent id at once; the engine's `add` runs in a background task owned by the manager. A waiting torrent is a library entry carrying `pending` (magnet or address, chosen files, paused) plus an in-memory row, and the manager shows it in the list as "Fetching torrent info…" until the engine lists the real one. `resume_pending` picks up saved ones at start-up (desktop and headless). `pause`/`resume`/`remove` try the engine first and fall back to the waiting row; `resume` on a failed row retries. IPC/HTTP `set_files` takes an optional `delete_unchecked` (`PUT /torrents/{id}/files` body `{ selected, delete_unchecked }`): the manager deletes the files that were chosen until now and are not any more, then rechecks.
+
 Rules: no librqbit types in signatures. Errors are our `EngineError` enum. Anything librqbit can't do (queueing, scheduling, ratio goals) lives in `core`, driven through this trait (pause/resume).
 
 ## Contract: `SettingsStore`

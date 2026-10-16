@@ -5,13 +5,13 @@ Scope control: anything not here needs approval. "Engine" = comes from librqbit;
 ## MVP (M1–M3): a client you can use daily
 | Feature | Source | Notes |
 |---|---|---|
-| Add by magnet, .torrent file, URL | Engine | Paste anywhere in the window, drag-drop, Add dialog |
+| Add by magnet, .torrent file, URL | Engine | Paste anywhere in the window, drag-drop, Add dialog. Adding returns at once: a magnet or address shows in the list as "Fetching torrent info…" under its `dn=` name and becomes the real torrent when the details arrive (all files chosen; the Add dialog's file choice is kept if it was made). Survives a restart. |
 | Open magnet links and .torrent files with the app | Ours | Single-instance forwarding built (M2-03); the installer registers the `magnet:` scheme and `.torrent` association (M3-04) |
 | Pause / resume / remove (keep or delete data) | Engine | Remove asks once, remembers choice |
 | Torrent list with progress, speed, ETA, size | Ours | Virtualised, sortable, tabular numerals |
 | Filters: All / Downloading / Seeding / Paused / Error | Ours | Counts in the sidebar |
 | Search box filters the list | Ours | Client-side, instant |
-| File selection before and after adding | Engine | Tree with checkboxes, size per file. A file you skip is never downloaded; the few hundred KB it can share with a picked neighbour go into a sparse file that takes almost no disk, also after a move to another drive |
+| File selection before and after adding | Engine | Tree with checkboxes, size per file. A file you skip is never downloaded; the few hundred KB it can share with a picked neighbour go into a sparse file that takes almost no disk, also after a move to another drive. Unticking a file that already has data asks whether to delete it (the torrent is checked again afterwards so the pieces it shared with its neighbours are fetched once more). |
 | Download folder + per-add override | Ours | Free-space check before start |
 | Global speed limits | Engine | Status-bar menu: separate Download and Upload lines, each Unlimited, a common speed, or Custom (KB/s or MB/s); the Speed tab in Settings holds the same values and the schedule |
 | **Speed limit for one torrent** | Engine + ours | Right-click → Speed limit…: its own download and upload limit; a small "Limited" badge marks the torrent in the list. The overall limit still applies on top, so the slower of the two always wins. librqbit only takes a limit when a torrent is added, so a change restarts that torrent briefly, and Drift sets it again after anything that restarts the engine |

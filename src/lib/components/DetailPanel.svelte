@@ -3,6 +3,7 @@
   import { formatBytes, formatEta, formatSpeed, percent } from "../../format";
   import { torrents } from "../stores/torrents.svelte";
   import { ui, errorText, type DetailTab } from "../stores/ui.svelte";
+  import Dialog from "./Dialog.svelte";
   import FileTree from "./FileTree.svelte";
   import Flag from "./Flag.svelte";
   import Icon from "./Icon.svelte";
@@ -46,18 +47,47 @@
     override = null;
   });
 
+  /** Files being unticked that already have data on disk: the user decides whether that data goes. */
+  let dropping = $state<{ next: Set<number>; files: { path: string; progress_bytes: number }[] } | null>(null);
+  /** The tick the user just clicked was not applied (Cancel): redraw the list so the boxes show what is really chosen. */
+  let treeKey = $state(0);
+  function cancelDrop() {
+    dropping = null;
+    treeKey++;
+  }
+
   let pending: ReturnType<typeof setTimeout> | undefined;
   function changeFiles(next: Set<number>) {
+    const dropped = (d?.files ?? []).filter((f) => selected.has(f.index) && !next.has(f.index) && f.progress_bytes > 0);
+    if (dropped.length) {
+      dropping = { next, files: dropped };
+      return;
+    }
+    apply(next, false);
+  }
+
+  function apply(next: Set<number>, deleteUnchecked: boolean) {
     override = next;
     const id = sel?.id;
     if (!id) return;
     clearTimeout(pending);
-    pending = setTimeout(() => {
-      api.setFiles(id, [...next]).catch((e) => {
-        override = null;
-        ui.fail(e);
-      });
-    }, 200);
+    const send = () =>
+      api
+        .setFiles(id, [...next], deleteUnchecked)
+        .then(() => deleteUnchecked && ui.toast("Deleted. The torrent is being checked again to repair the pieces next to the deleted files."))
+        .catch((e) => {
+          override = null;
+          ui.fail(e);
+        });
+    // A delete is a decision, not a tick of the mouse: it is sent at once so a later change can't swallow it.
+    if (deleteUnchecked) void send();
+    else pending = setTimeout(send, 200);
+  }
+
+  function decide(deleteUnchecked: boolean) {
+    const choice = dropping;
+    dropping = null;
+    if (choice) apply(choice.next, deleteUnchecked);
   }
 
   async function retry() {
@@ -170,7 +200,7 @@
         {:else if d.files.length === 0}
           <p class="hint">The file list appears once the torrent info has been fetched.</p>
         {:else}
-          <FileTree files={d.files} {selected} onchange={changeFiles} showProgress onplay={(i) => play(i)} />
+          {#key treeKey}<FileTree files={d.files} {selected} onchange={changeFiles} showProgress onplay={(i) => play(i)} />{/key}
         {/if}
       {:else if ui.detailTab === "peers"}
         {#if !d || d.peers.length === 0}
@@ -196,7 +226,50 @@
   {/if}
 </section>
 
+{#if dropping}
+  {@const have = dropping.files.reduce((a, f) => a + f.progress_bytes, 0)}
+  <Dialog title="Stop downloading {dropping.files.length === 1 ? 'this file' : dropping.files.length + ' files'}?" onclose={cancelDrop}>
+    <p class="ask">
+      {dropping.files.length === 1 ? "This file already has" : "These files already have"}
+      {formatBytes(have)} downloaded. Delete it to free the space, or keep it on disk?
+    </p>
+    <ul class="askfiles">
+      {#each dropping.files.slice(0, 5) as f (f.path)}<li title={f.path}>{f.path}</li>{/each}
+      {#if dropping.files.length > 5}<li>and {dropping.files.length - 5} more</li>{/if}
+    </ul>
+    <p class="hint">Deleting makes the torrent check itself again, which takes a moment. A few pieces next to the deleted files are fetched once more.</p>
+    {#snippet footer()}
+      <button class="btn" onclick={cancelDrop}>Cancel</button>
+      <button class="btn" onclick={() => decide(false)}>Keep files</button>
+      <button class="btn danger" onclick={() => decide(true)}>Delete files</button>
+    {/snippet}
+  </Dialog>
+{/if}
+
 <style>
+  .ask {
+    margin: 0 0 8px;
+  }
+  .askfiles {
+    margin: 0 0 8px;
+    padding-left: 18px;
+    color: var(--text-secondary);
+  }
+  .askfiles li {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 420px;
+  }
+  .danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+  }
+  .danger:hover {
+    filter: brightness(1.08);
+    background: var(--danger);
+  }
   .graph {
     margin: 12px 0 4px;
   }

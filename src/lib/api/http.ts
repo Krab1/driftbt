@@ -190,7 +190,7 @@ export const httpApi: Api = {
   recheck: (id) => call("POST", `/torrents/${enc(id)}/recheck`),
   moveTorrent: (id, dest) => call("POST", `/torrents/${enc(id)}/move`, { dest }),
   remove: (id, deleteFiles) => call("DELETE", `/torrents/${enc(id)}?delete_files=${deleteFiles}`),
-  setFiles: (id, selected) => call("PUT", `/torrents/${enc(id)}/files`, { selected }),
+  setFiles: (id, selected, deleteUnchecked) => call("PUT", `/torrents/${enc(id)}/files`, { selected, delete_unchecked: deleteUnchecked ?? false }),
   watchDetails: async (id) => {
     watched = id;
     return id ? call<TorrentDetails>("GET", `/torrents/${enc(id)}/details`) : null;

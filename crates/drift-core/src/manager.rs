@@ -1,7 +1,7 @@
 //! Orchestrates the engine with everything it doesn't know about: the download queue, categories and
 //! tags, and seeding goals. The app talks to the manager, never to the engine directly.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -9,8 +9,8 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::engine::{EngineError, Result, TorrentEngine};
 use crate::guard::{self, Adapter, Guard, Verdict};
-use crate::library::{Library, MetaStore, TorrentMeta};
-use crate::model::{AddRequest, Limits, TorrentId, TorrentState, TorrentStats, TorrentView};
+use crate::library::{Library, MetaStore, PendingAdd, TorrentMeta};
+use crate::model::{AddRequest, AddSource, Limits, TorrentId, TorrentState, TorrentStats, TorrentView};
 use crate::queue::{self, Move};
 use crate::rules::{self, Goal};
 use crate::settings::Settings;
@@ -68,6 +68,83 @@ struct State {
     move_notes: std::collections::HashMap<TorrentId, String>,
     /// Torrents that just finished, waiting for the post-processing plugins (see `background::postprocess`).
     finished: Vec<TorrentId>,
+    /// Adds running in the background: shown in the list at once, then replaced by the real torrent.
+    adding: HashMap<TorrentId, Adding>,
+}
+
+/// A torrent that is being added in the background, waiting for its details.
+struct Adding {
+    name: String,
+    /// Plain-language reason it failed; the row stays so it can be retried or removed.
+    error: Option<String>,
+    error_detail: Option<String>,
+    /// The user paused it while it was still waiting: it is paused as soon as it exists.
+    paused: bool,
+    /// Wakes the background task to try again after a failure.
+    retry: Arc<tokio::sync::Notify>,
+    /// Ends with the id the torrent really got.
+    task: Option<tokio::task::JoinHandle<Option<TorrentId>>>,
+}
+
+/// The info-hash (40 hex digits) of a magnet link or a bare hash; `None` for anything else, base32 hashes included.
+fn magnet_hash(s: &str) -> Option<String> {
+    let s = s.trim().to_ascii_lowercase();
+    let hex = |h: &str| {
+        if h.len() == 40 && h.bytes().all(|b| b.is_ascii_hexdigit()) {
+            Some(h.to_string())
+        } else {
+            base32_to_hex(h)
+        }
+    };
+    if let Some(h) = hex(&s) {
+        return Some(h);
+    }
+    let query = s.strip_prefix("magnet:?")?;
+    query.split('&').find_map(|kv| kv.strip_prefix("xt=urn:btih:")).and_then(hex)
+}
+
+/// The 40-digit hex form of a 32-letter base32 info-hash (the other way magnet links write it).
+fn base32_to_hex(h: &str) -> Option<String> {
+    if h.len() != 32 {
+        return None;
+    }
+    let (mut bits, mut nbits, mut out) = (0u32, 0u32, String::with_capacity(40));
+    for c in h.bytes() {
+        let v = match c {
+            b'a'..=b'z' => c - b'a',
+            b'2'..=b'7' => c - b'2' + 26,
+            _ => return None,
+        };
+        bits = (bits << 5) | u32::from(v);
+        nbits += 5;
+        if nbits >= 8 {
+            nbits -= 8;
+            out.push_str(&format!("{:02x}", (bits >> nbits) & 0xff));
+        }
+    }
+    (out.len() == 40).then_some(out)
+}
+
+/// The `dn=` name of a magnet link, if it has one.
+fn magnet_name(s: &str) -> Option<String> {
+    let query = s.trim().strip_prefix("magnet:?")?;
+    let raw = query.split('&').find_map(|kv| kv.strip_prefix("dn="))?;
+    let mut bytes = Vec::with_capacity(raw.len());
+    let b = raw.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'+' => bytes.push(b' '),
+            b'%' if i + 2 < b.len() && b[i + 1].is_ascii_hexdigit() && b[i + 2].is_ascii_hexdigit() => {
+                bytes.push(u8::from_str_radix(&raw[i + 1..i + 3], 16).unwrap_or(b'?'));
+                i += 2;
+            }
+            c => bytes.push(c),
+        }
+        i += 1;
+    }
+    let name = String::from_utf8_lossy(&bytes).trim().to_string();
+    (!name.is_empty()).then_some(name)
 }
 
 /// What a post-processing plugin is told about a finished torrent.
@@ -131,7 +208,7 @@ impl Manager {
 
     pub fn with_clock(engine: Arc<dyn TorrentEngine>, store: Arc<dyn MetaStore>, settings: SharedSettings, clock: Clock) -> Self {
         let lib = store.load();
-        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false, was_incomplete: HashSet::new(), pending_moves: Vec::new(), move_notes: Default::default(), finished: Vec::new() };
+        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false, was_incomplete: HashSet::new(), pending_moves: Vec::new(), move_notes: Default::default(), finished: Vec::new(), adding: HashMap::new() };
         Self { engine, store, settings, clock, guard: Mutex::new(Guard::default()), state: Mutex::new(state) }
     }
 
@@ -234,7 +311,12 @@ impl Manager {
             }
         }
 
+        let asked_paused = req.paused;
         let id = self.engine.add(req).await?;
+        // The guard may have tripped while the details were on their way: the check above is long out of date.
+        if !asked_paused && self.guard_tripped() {
+            let _ = self.engine.pause(&id).await;
+        }
         let mut st = self.state.lock().unwrap();
         if !st.lib.contains_key(&id) {
             let position = next_position(&st.lib);
@@ -244,13 +326,169 @@ impl Manager {
         Ok(id)
     }
 
+    /// Adds a torrent without waiting for it: the torrent shows up in the list at once, and its details (name, files)
+    /// are fetched in the background, after which it is added for real. A failure stays visible on its row.
+    pub async fn add_later(self: &Arc<Self>, req: AddRequest, category: Option<String>, tags: Vec<String>) -> Result<TorrentId> {
+        let (id, name, source) = match &req.source {
+            AddSource::Magnet(m) => match magnet_hash(m) {
+                Some(h) => (TorrentId(h.clone()), magnet_name(m).unwrap_or(h), Some(m.trim().to_string())),
+                // A hash written another way: let the engine read it, and wait for it.
+                None => {
+                    let id = self.add(req, category, tags).await?;
+                    return Ok(id);
+                }
+            },
+            AddSource::Url(u) => {
+                if !(u.starts_with("http://") || u.starts_with("https://")) {
+                    return Err(EngineError::InvalidInput("not a web address".into()));
+                }
+                use std::hash::{Hash, Hasher};
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                u.hash(&mut h);
+                (TorrentId(format!("address-{:016x}", h.finish())), u.clone(), Some(u.clone()))
+            }
+            // A file is read on the spot (nothing to wait for), so a bad file is refused right away.
+            AddSource::FileBytes(_) => {
+                let p = self.engine.inspect(req.source.clone()).await?;
+                (p.id, p.name, None)
+            }
+        };
+        if self.state.lock().unwrap().adding.contains_key(&id) || self.engine.list().await?.iter().any(|t| t.id == id) {
+            return Ok(id);
+        }
+        {
+            let mut st = self.state.lock().unwrap();
+            if st.adding.contains_key(&id) {
+                return Ok(id);
+            }
+            if !st.lib.contains_key(&id) {
+                let position = next_position(&st.lib);
+                let pending = source.map(|source| PendingAdd { source, only_files: req.only_files.clone(), paused: req.paused });
+                st.lib.insert(id.clone(), TorrentMeta { category: category.clone(), tags: tags.clone(), position, added_at: now_secs(), pending, ..Default::default() });
+            }
+            st.adding.insert(id.clone(), Adding { name, error: None, error_detail: None, paused: req.paused, retry: Default::default(), task: None });
+            self.save(&mut st);
+        }
+        self.spawn_add(id.clone(), req, category, tags);
+        Ok(id)
+    }
+
+    fn spawn_add(self: &Arc<Self>, key: TorrentId, req: AddRequest, category: Option<String>, tags: Vec<String>) {
+        let me = self.clone();
+        let k = key.clone();
+        let retry = self.state.lock().unwrap().adding.get(&key).map(|a| a.retry.clone()).unwrap_or_default();
+        let task = tokio::spawn(async move {
+            let real = loop {
+                match me.add(req.clone(), category.clone(), tags.clone()).await {
+                    Ok(real) => break real,
+                    Err(e) => {
+                        let e = crate::errors::ApiError::from(e);
+                        if let Some(a) = me.state.lock().unwrap().adding.get_mut(&k) {
+                            a.error = Some(e.message);
+                            a.error_detail = e.detail;
+                        }
+                        // The row says it failed; Resume on it (the Retry button) wakes this up again.
+                        retry.notified().await;
+                        if let Some(a) = me.state.lock().unwrap().adding.get_mut(&k) {
+                            a.error = None;
+                            a.error_detail = None;
+                        }
+                    }
+                }
+            };
+            // The state lock is not held across the pause below.
+            let pause_now = {
+                let mut st = me.state.lock().unwrap();
+                let paused = st.adding.remove(&k).is_some_and(|a| a.paused);
+                if real != k {
+                    // An address got a temporary id: what was set on that row (category, tags, goal) moves to the real one.
+                    if let Some(mut m) = st.lib.remove(&k) {
+                        m.pending = None;
+                        st.lib.insert(real.clone(), m);
+                    }
+                } else if let Some(m) = st.lib.get_mut(&k) {
+                    m.pending = None;
+                }
+                me.save(&mut st);
+                paused.then(|| real.clone())
+            };
+            if let Some(real) = pause_now {
+                let _ = me.pause(&real).await;
+            }
+            Some(real)
+        });
+        if let Some(a) = self.state.lock().unwrap().adding.get_mut(&key) {
+            a.task = Some(task);
+        }
+    }
+
+    /// Picks up adds that were still waiting for their details when the app last closed.
+    pub async fn resume_pending(self: &Arc<Self>) {
+        let engine_ids: HashSet<TorrentId> = self.engine.list().await.map(|l| l.into_iter().map(|t| t.id).collect()).unwrap_or_default();
+        let jobs: Vec<(TorrentId, PendingAdd, Option<String>, Vec<String>)> = {
+            let mut st = self.state.lock().unwrap();
+            let mut jobs = Vec::new();
+            let mut changed = false;
+            for (id, m) in st.lib.iter_mut() {
+                let Some(p) = m.pending.clone() else { continue };
+                if engine_ids.contains(id) {
+                    m.pending = None;
+                    changed = true;
+                } else {
+                    jobs.push((id.clone(), p, m.category.clone(), m.tags.clone()));
+                }
+            }
+            if changed {
+                self.save(&mut st);
+            }
+            jobs
+        };
+        for (id, p, category, tags) in jobs {
+            self.restart_add(id, p, category, tags);
+        }
+    }
+
+    fn restart_add(self: &Arc<Self>, id: TorrentId, p: PendingAdd, category: Option<String>, tags: Vec<String>) {
+        let source = if p.source.starts_with("http://") || p.source.starts_with("https://") { AddSource::Url(p.source.clone()) } else { AddSource::Magnet(p.source.clone()) };
+        let name = magnet_name(&p.source).unwrap_or_else(|| if matches!(source, AddSource::Url(_)) { p.source.clone() } else { id.0.clone() });
+        let mut req = AddRequest::new(source);
+        req.only_files = p.only_files;
+        req.paused = p.paused;
+        let p_paused = p.paused;
+        self.state.lock().unwrap().adding.insert(id.clone(), Adding { name, error: None, error_detail: None, paused: p_paused, retry: Default::default(), task: None });
+        self.spawn_add(id, req, category, tags);
+    }
+
     pub async fn pause(&self, id: &TorrentId) -> Result<()> {
-        self.engine.pause(id).await?;
+        let r = self.engine.pause(id).await;
+        if matches!(r, Err(EngineError::NotFound)) {
+            // Still waiting for its details: it is paused as soon as it exists.
+            if let Some(a) = self.state.lock().unwrap().adding.get_mut(id) {
+                a.paused = true;
+                return Ok(());
+            }
+        }
+        r?;
         self.with_meta(id, |m| m.user_paused = true);
         Ok(())
     }
 
     pub async fn resume(&self, id: &TorrentId) -> Result<()> {
+        // A torrent that is still waiting for its details (or failed to get them): nothing to start yet, but a failed
+        // one is tried again.
+        let waiting = self.state.lock().unwrap().adding.get(id).map(|a| a.retry.clone());
+        if let Some(retry) = waiting {
+            if !self.engine.list().await?.iter().any(|t| &t.id == id) {
+                let mut st = self.state.lock().unwrap();
+                if let Some(a) = st.adding.get_mut(id) {
+                    a.paused = false;
+                    if a.error.is_some() {
+                        retry.notify_one();
+                    }
+                }
+                return Ok(());
+            }
+        }
         // The guard's own resume goes through here too, after it has cleared its tripped flag.
         if self.guard_tripped() {
             return Err(EngineError::Blocked);
@@ -366,6 +604,25 @@ impl Manager {
     }
 
     pub async fn remove(&self, id: &TorrentId, delete_files: bool) -> Result<()> {
+        let adding = self.state.lock().unwrap().adding.remove(id);
+        if let Some(a) = adding {
+            let mut real = None;
+            if let Some(task) = a.task {
+                task.abort();
+                // Waited for, so nothing is added behind our back after this.
+                if let Ok(Some(r)) = task.await {
+                    real = Some(r);
+                }
+            }
+            let _ = self.engine.remove(id, delete_files).await;
+            if let Some(r) = real.filter(|r| r != id) {
+                let _ = self.engine.remove(&r, delete_files).await;
+            }
+            let mut st = self.state.lock().unwrap();
+            st.lib.remove(id);
+            self.save(&mut st);
+            return Ok(());
+        }
         self.engine.remove(id, delete_files).await?;
         let mut st = self.state.lock().unwrap();
         st.lib.remove(id);
@@ -376,6 +633,45 @@ impl Manager {
 
     pub fn set_category(&self, id: &TorrentId, category: Option<String>) {
         self.with_meta(id, |m| m.category = category);
+    }
+
+    /// Chooses which files of a torrent to download. With `delete_unchecked`, the files that are no longer wanted and
+    /// have something downloaded are deleted from disk too. A file shares its first and last download piece with its
+    /// neighbours, so those pieces are damaged by the delete; the torrent is checked again, which finds and re-fetches
+    /// only them.
+    pub async fn set_files(&self, id: &TorrentId, selected: Vec<usize>, delete_unchecked: bool) -> Result<()> {
+        if !delete_unchecked {
+            return self.engine.set_files(id, selected).await;
+        }
+        if self.guard_tripped() {
+            return Err(EngineError::Blocked);
+        }
+        let before = self.engine.details(id).await?;
+        let keep: HashSet<usize> = selected.iter().copied().collect();
+        self.engine.set_files(id, selected).await?;
+        let base = std::path::Path::new(&before.save_path);
+        let (mut deleted, mut failed) = (false, Vec::new());
+        // Only the files that were wanted until now: ones unticked earlier were kept on purpose. A file that was sized
+        // but has no finished piece yet is deleted too, it only takes up room.
+        for f in before.files.iter().filter(|f| f.selected && !keep.contains(&f.index)) {
+            let rel = std::path::Path::new(&f.path);
+            if !rel.components().all(|c| matches!(c, std::path::Component::Normal(_))) {
+                continue;
+            }
+            match std::fs::remove_file(base.join(rel)) {
+                Ok(()) => deleted = true,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => failed.push(format!("{} ({e})", f.path)),
+            }
+        }
+        if deleted {
+            self.engine.recheck(id).await?;
+            self.tick().await?;
+        }
+        if !failed.is_empty() {
+            return Err(EngineError::Backend(format!("couldn't delete {}", failed.join(", "))));
+        }
+        Ok(())
     }
 
     /// Tags are trimmed, de-duplicated ignoring case, and limited in number and length.
@@ -444,6 +740,42 @@ impl Manager {
         incomplete.sort();
         let rank: std::collections::HashMap<&TorrentId, u32> = incomplete.iter().enumerate().map(|(n, (_, id))| (*id, n as u32 + 1)).collect();
 
+        let waiting = st.adding.iter().filter(|(id, _)| !list.iter().any(|t| &t.id == *id)).map(|(id, a)| {
+            let meta = st.lib.get(id);
+            let failed = a.error.is_some();
+            TorrentView {
+                stats: TorrentStats {
+                    error_detail: a.error_detail.clone(),
+                    id: id.clone(),
+                    name: a.name.clone(),
+                    state: if failed {
+                        TorrentState::Error
+                    } else if a.paused {
+                        TorrentState::Paused
+                    } else {
+                        TorrentState::Checking
+                    },
+                    error: a.error.clone(),
+                    total_bytes: 0,
+                    progress_bytes: 0,
+                    uploaded_bytes: 0,
+                    down_bps: 0,
+                    up_bps: 0,
+                    peers_live: 0,
+                    eta_secs: None,
+                    tracker: None,
+                },
+                category: meta.and_then(|m| m.category.clone()),
+                tags: meta.map(|m| m.tags.clone()).unwrap_or_default(),
+                queue_pos: None,
+                note: None,
+                added_at: meta.map(|m| m.added_at).filter(|&a| a > 0),
+                finished_at: None,
+                limit_down_kib: 0,
+                limit_up_kib: 0,
+            }
+        });
+
         list.iter()
             .map(|t| {
                 let meta = st.lib.get(&t.id);
@@ -475,6 +807,7 @@ impl Manager {
                     stats,
                 }
             })
+            .chain(waiting)
             .collect()
     }
 
@@ -604,6 +937,169 @@ mod tests {
         let mut x: Vec<_> = v.iter().map(|t| (u32::from_str_radix(&t.stats.id.0, 16).unwrap(), t.stats.state)).collect();
         x.sort_by_key(|(n, _)| *n);
         x
+    }
+
+    async fn until<F: Fn() -> bool>(what: &str, f: F) {
+        for _ in 0..400 {
+            if f() {
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        panic!("timed out waiting for {what}");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_magnet_is_in_the_list_at_once_and_becomes_the_real_torrent_when_its_details_arrive() {
+        let (engine, m, _) = setup(0);
+        let m = Arc::new(m);
+        engine.hold_adds(true);
+        let mut req = mag(7);
+        req.source = AddSource::Magnet(format!("magnet:?xt=urn:btih:{:040x}&dn=My+Linux%20ISO", 7));
+        let t0 = std::time::Instant::now();
+        let got = m.add_later(req, Some("Linux".into()), vec!["iso".into()]).await.unwrap();
+        assert!(t0.elapsed() < std::time::Duration::from_secs(1), "returns without waiting for the details");
+        assert_eq!(got, id(7));
+
+        let v = m.snapshot().await.unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].stats.name, "My Linux ISO");
+        assert_eq!(v[0].stats.state, TorrentState::Checking);
+        assert_eq!(v[0].stats.total_bytes, 0, "no size yet, so the list says it is fetching info");
+        assert_eq!((v[0].category.as_deref(), v[0].tags.clone()), (Some("Linux"), vec!["iso".to_string()]));
+
+        engine.hold_adds(false);
+        let mm = m.clone();
+        until("the real torrent", move || mm.state.lock().unwrap().adding.is_empty()).await;
+        let v = m.snapshot().await.unwrap();
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].stats.name, "fake-00000000", "the engine's own name replaces the temporary one");
+        assert_eq!(v[0].category.as_deref(), Some("Linux"));
+        assert!(m.state.lock().unwrap().lib[&id(7)].pending.is_none());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_failed_background_add_stays_in_the_list_as_an_error_and_can_be_removed() {
+        let (engine, m, _) = setup(0);
+        let m = Arc::new(m);
+        engine.fail_adds(Some("disk full"));
+        m.add_later(mag(8), None, vec![]).await.unwrap();
+        let mm = m.clone();
+        until("the failure", move || mm.state.lock().unwrap().adding.values().any(|a| a.error.is_some())).await;
+        let v = m.snapshot().await.unwrap();
+        assert_eq!(v[0].stats.state, TorrentState::Error);
+        assert!(v[0].stats.error.is_some());
+        m.remove(&id(8), false).await.unwrap();
+        assert!(m.snapshot().await.unwrap().is_empty());
+        assert!(!m.state.lock().unwrap().lib.contains_key(&id(8)));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pausing_a_torrent_that_is_still_waiting_for_details_pauses_it_when_it_arrives() {
+        let (engine, m, _) = setup(0);
+        let m = Arc::new(m);
+        engine.hold_adds(true);
+        m.add_later(mag(6), None, vec![]).await.unwrap();
+        m.pause(&id(6)).await.unwrap();
+        assert_eq!(m.snapshot().await.unwrap()[0].stats.state, TorrentState::Paused);
+        engine.hold_adds(false);
+        let mm = m.clone();
+        until("the real torrent", move || mm.state.lock().unwrap().adding.is_empty()).await;
+        let mm = m.clone();
+        for _ in 0..200 {
+            if mm.snapshot().await.unwrap().first().is_some_and(|t| t.stats.state == TorrentState::Paused && t.stats.total_bytes > 0) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        let v = m.snapshot().await.unwrap();
+        assert_eq!((v[0].stats.state, v[0].stats.total_bytes > 0), (TorrentState::Paused, true));
+        m.resume(&id(6)).await.unwrap();
+        assert_ne!(m.tick().await.unwrap()[0].stats.state, TorrentState::Paused);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn resume_on_a_failed_add_tries_again_and_the_torrent_then_appears() {
+        let (engine, m, _) = setup(0);
+        let m = Arc::new(m);
+        engine.fail_adds(Some("no route"));
+        m.add_later(mag(4), Some("Docs".into()), vec![]).await.unwrap();
+        let mm = m.clone();
+        until("the failure", move || mm.state.lock().unwrap().adding.values().any(|a| a.error.is_some())).await;
+        engine.fail_adds(None);
+        m.resume(&id(4)).await.unwrap(); // the Retry button
+        let mm = m.clone();
+        until("the retry to finish", move || mm.state.lock().unwrap().adding.is_empty()).await;
+        let v = m.snapshot().await.unwrap();
+        assert_eq!((v.len(), v[0].stats.name.as_str(), v[0].category.as_deref()), (1, "fake-00000000", Some("Docs")));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn pause_and_resume_reach_a_running_torrent_even_if_an_add_for_it_is_still_marked_waiting() {
+        let (engine, m, _) = setup(0);
+        let m = Arc::new(m);
+        m.add(mag(3), None, vec![]).await.unwrap();
+        // A second add of the same torrent by another route is still waiting (its row is in `adding`).
+        m.state.lock().unwrap().adding.insert(id(3), Adding { name: "x".into(), error: None, error_detail: None, paused: false, retry: Default::default(), task: None });
+        m.pause(&id(3)).await.unwrap();
+        assert_eq!(engine.details(&id(3)).await.unwrap().stats.state, TorrentState::Paused, "the guard's pause reaches the engine");
+        m.resume(&id(3)).await.unwrap();
+        assert_eq!(engine.details(&id(3)).await.unwrap().stats.state, TorrentState::Downloading);
+    }
+
+    #[test]
+    fn magnet_hashes_in_either_spelling_give_the_same_id() {
+        let hex = "0123456789abcdef0123456789abcdef01234567";
+        // base32 of the same 20 bytes
+        let b32 = "aerukz4jvpg66ajdivtytk6n54asgrlh";
+        assert_eq!(magnet_hash(&format!("magnet:?xt=urn:btih:{}&dn=x", hex.to_uppercase())).as_deref(), Some(hex));
+        assert_eq!(magnet_hash(&format!("magnet:?dn=x&xt=urn:btih:{b32}")).as_deref(), Some(hex));
+        assert_eq!(magnet_hash("magnet:?xt=urn:btih:nonsense"), None);
+        assert_eq!(magnet_name("magnet:?xt=urn:btih:aa&dn=My+Linux%20ISO%zz").as_deref(), Some("My Linux ISO%zz"));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn removing_a_torrent_still_waiting_for_its_details_stops_the_add() {
+        let (engine, m, _) = setup(0);
+        let m = Arc::new(m);
+        engine.hold_adds(true);
+        m.add_later(mag(9), None, vec![]).await.unwrap();
+        m.remove(&id(9), false).await.unwrap();
+        engine.hold_adds(false);
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        assert!(m.snapshot().await.unwrap().is_empty(), "nothing comes back");
+        assert!(m.state.lock().unwrap().lib.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn an_add_that_was_waiting_when_the_app_closed_carries_on_at_the_next_start() {
+        let engine = Arc::new(FakeEngine::new());
+        let settings = Arc::new(Mutex::new(Settings { download_dir: Some("D:/dl".into()), ..Settings::default() }));
+        let store = Arc::new(MemoryMetaStore::default());
+        // What the first run left in the library: an add that never got its details.
+        let mut lib = Library::new();
+        lib.insert(id(5), TorrentMeta { category: Some("Linux".into()), position: 1, pending: Some(PendingAdd { source: format!("{:040x}", 5), only_files: Some(vec![0]), paused: false }), ..Default::default() });
+        store.save(&lib).unwrap();
+
+        let second = Arc::new(Manager::new(engine.clone(), store, settings));
+        assert_eq!(second.snapshot().await.unwrap().len(), 0, "nothing is shown until the manager picks it up");
+        second.resume_pending().await;
+        assert_eq!(second.snapshot().await.unwrap().len(), 1);
+        let mm = second.clone();
+        until("the add to finish", move || mm.state.lock().unwrap().adding.is_empty()).await;
+        let v = second.snapshot().await.unwrap();
+        assert_eq!((v.len(), v[0].category.as_deref()), (1, Some("Linux")));
+    }
+
+    #[tokio::test]
+    async fn a_bad_link_is_refused_at_once_instead_of_becoming_a_row_that_fails() {
+        let (_, m, _) = setup(0);
+        let m = Arc::new(m);
+        let r = m.add_later(AddRequest::new(AddSource::Magnet("not a magnet".into())), None, vec![]).await;
+        assert!(r.is_err());
+        let r = m.add_later(AddRequest::new(AddSource::Url("ftp://x/y.torrent".into())), None, vec![]).await;
+        assert!(r.is_err());
+        assert!(m.snapshot().await.unwrap().is_empty());
     }
 
     #[tokio::test]

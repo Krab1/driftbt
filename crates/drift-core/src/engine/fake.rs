@@ -11,6 +11,10 @@ use crate::model::*;
 #[derive(Default)]
 pub struct FakeEngine {
     inner: Mutex<Inner>,
+    /// Test hook: while set, `add` waits (a magnet nobody has answered yet).
+    hold_adds: std::sync::atomic::AtomicBool,
+    /// Test hook: `add` fails with this text.
+    fail_adds: Mutex<Option<String>>,
 }
 
 #[derive(Default)]
@@ -33,6 +37,16 @@ const FAKE_TOTAL: u64 = 1000;
 impl FakeEngine {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Test helper: make `add` wait until released, like a magnet whose details have not arrived.
+    pub fn hold_adds(&self, hold: bool) {
+        self.hold_adds.store(hold, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// Test helper: make `add` fail (or work again with `None`).
+    pub fn fail_adds(&self, why: Option<&str>) {
+        *self.fail_adds.lock().unwrap() = why.map(str::to_string);
     }
 
     /// Test helper: what a restarted engine looks like, with no per-torrent limits in force.
@@ -184,6 +198,12 @@ fn parse_hash(s: &str) -> Option<String> {
 #[async_trait]
 impl TorrentEngine for FakeEngine {
     async fn add(&self, req: AddRequest) -> Result<TorrentId> {
+        while self.hold_adds.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+        if let Some(why) = self.fail_adds.lock().unwrap().clone() {
+            return Err(EngineError::Backend(why));
+        }
         let AddSource::Magnet(m) = &req.source else {
             return Err(EngineError::InvalidInput("fake engine only accepts magnets".into()));
         };

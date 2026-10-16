@@ -356,7 +356,8 @@ export interface Api {
   /** KiB/s per direction, 0 = no limit of its own. The torrent restarts briefly to take a change. */
   setTorrentLimits(id: string, downKib: number, upKib: number): Promise<void>;
   moveInQueue(id: string, to: QueueMove): Promise<void>;
-  setFiles(id: string, selected: number[]): Promise<void>;
+  /** `deleteUnchecked` also deletes what was downloaded of the files that are no longer chosen. */
+  setFiles(id: string, selected: number[], deleteUnchecked?: boolean): Promise<void>;
   /** Choose which torrent's details are pushed (or null). Returns its current details at once. */
   watchDetails(id: string | null): Promise<TorrentDetails | null>;
   onDetails(cb: (d: TorrentDetails) => void): Promise<() => void>;

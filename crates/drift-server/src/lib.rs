@@ -256,10 +256,12 @@ async fn move_in_queue(State(s): State<S>, Path(id): Path<String>, Json(b): Json
 #[derive(Deserialize)]
 struct FilesBody {
     selected: Vec<usize>,
+    #[serde(default)]
+    delete_unchecked: bool,
 }
 
 async fn set_files(State(s): State<S>, Path(id): Path<String>, Json(b): Json<FilesBody>) -> Res<()> {
-    Ok(Json(s.svc.engine.set_files(&TorrentId(id), b.selected).await?))
+    Ok(Json(s.svc.manager.set_files(&TorrentId(id), b.selected, b.delete_unchecked).await?))
 }
 
 async fn details(State(s): State<S>, Path(id): Path<String>) -> Res<TorrentDetails> {
@@ -444,7 +446,15 @@ mod tests {
         assert_eq!(list.as_array().unwrap().len(), 1);
 
         assert_eq!(call(&app, "POST", &format!("/api/torrents/{id}/pause"), Some(TOKEN), None).await.0, StatusCode::OK);
-        let (_, list) = call(&app, "GET", "/api/torrents", Some(TOKEN), None).await;
+        // The add finishes in the background; a pause pressed meanwhile is applied when the torrent exists.
+        let mut list = serde_json::Value::Null;
+        for _ in 0..200 {
+            list = call(&app, "GET", "/api/torrents", Some(TOKEN), None).await.1;
+            if list[0]["state"] == "paused" && list[0]["total_bytes"].as_u64().unwrap_or(0) > 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
         assert_eq!(list[0]["state"], "paused");
         assert_eq!(call(&app, "POST", &format!("/api/torrents/{id}/resume"), Some(TOKEN), None).await.0, StatusCode::OK);
 

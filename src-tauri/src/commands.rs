@@ -89,8 +89,8 @@ pub async fn move_in_queue(state: State<'_, AppState>, id: TorrentId, to: Move) 
 }
 
 #[tauri::command]
-pub async fn set_files(state: State<'_, AppState>, id: TorrentId, selected: Vec<usize>) -> ApiResult<()> {
-    Ok(state.engine.set_files(&id, selected).await?)
+pub async fn set_files(state: State<'_, AppState>, id: TorrentId, selected: Vec<usize>, delete_unchecked: Option<bool>) -> ApiResult<()> {
+    Ok(state.svc.manager.set_files(&id, selected, delete_unchecked.unwrap_or(false)).await?)
 }
 
 /// Tells the backend which torrent's details the UI shows (or `None`), and returns them right away;

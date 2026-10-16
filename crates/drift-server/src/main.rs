@@ -148,6 +148,12 @@ async fn run() -> Result<(), String> {
     let (tx, _) = broadcast::channel::<Event>(16);
     let shared = Arc::new(Shared { svc, token: token.clone(), events: tx.clone(), guard: Mutex::new(GuardStatus { state: drift_core::guard::Verdict::Off, paused: 0 }), ui_dir: args.ui_dir.clone() });
 
+    // Adds that were still waiting for their details when the server last stopped.
+    {
+        let manager = manager.clone();
+        tokio::spawn(async move { manager.resume_pending().await });
+    }
+
     // Snapshots every 2 s (1 s while somebody is listening), completion detection and playlists.
     {
         let (tx, settings, engine) = (tx.clone(), settings.clone(), engine.clone());
