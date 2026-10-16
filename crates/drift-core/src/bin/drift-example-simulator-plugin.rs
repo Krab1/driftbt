@@ -18,7 +18,7 @@ fn main() {
         let params = &req["params"];
         match method {
             "torrents_updated" => eprintln!("torrents_updated: {} torrents", params["torrents"].as_array().map_or(0, Vec::len)),
-            "selection_changed" => eprintln!("selection_changed: {} enabled={}", params["info_hash"], params["enabled"]),
+            "selection_changed" => eprintln!("selection_changed: {} enabled={} options={}", params["info_hash"], params["enabled"], params.get("options").map_or("none".to_string(), |o| o.to_string())),
             other => eprintln!("{other}"),
         }
         // A notification has no id and gets no reply.
@@ -37,6 +37,10 @@ fn main() {
                 let rows: Vec<Value> = selected.iter().map(|(h, on)| if *on { json!({"info_hash": h, "enabled": true, "label": "Simulating: example"}) } else { json!({"info_hash": h, "enabled": false}) }).collect();
                 json!({"selections": rows})
             }
+            // What a plugin with a per-torrent form returns: some values the form allows, some it doesn't.
+            "get_options" => json!({"options": {"mode": "a", "peers": 2, "junk": 9, "badmode": "zzz"}}),
+            // Statistics, with more and longer entries than the host will pass on.
+            "get_status" => json!({"tables": [{"title": "Peers", "columns": ["Peer", "Up"], "rows": [["bot-001", "x".repeat(500)]]}], "log": (0..70).map(|i| format!("line {i}")).collect::<Vec<_>>()}),
             "selection_changed" => {
                 let hash = params["info_hash"].as_str().unwrap_or("").to_string();
                 let on = params["enabled"].as_bool().unwrap_or(false);

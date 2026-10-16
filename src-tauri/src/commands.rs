@@ -253,8 +253,18 @@ pub async fn simulator_states(state: State<'_, AppState>) -> ApiResult<Vec<drift
 }
 
 #[tauri::command]
-pub async fn set_simulation(state: State<'_, AppState>, plugin: String, info_hash: String, enabled: bool) -> ApiResult<drift_core::plugins::SimulatorState> {
-    state.svc.set_simulation(&plugin, &info_hash, enabled).await
+pub async fn set_simulation(state: State<'_, AppState>, plugin: String, info_hash: String, enabled: bool, options: Option<serde_json::Value>) -> ApiResult<drift_core::plugins::SimulatorState> {
+    state.svc.set_simulation(&plugin, &info_hash, enabled, options).await
+}
+
+#[tauri::command]
+pub async fn simulator_options(state: State<'_, AppState>, plugin: String, info_hash: String) -> ApiResult<serde_json::Map<String, serde_json::Value>> {
+    state.svc.simulator_options(&plugin, &info_hash).await
+}
+
+#[tauri::command]
+pub async fn simulator_status(state: State<'_, AppState>, plugin: String, info_hash: String) -> ApiResult<drift_core::plugins::SimStatus> {
+    state.svc.simulator_status(&plugin, &info_hash).await
 }
 
 #[tauri::command]

@@ -57,6 +57,11 @@ class Ui {
   goalTarget = $state<{ id: string; name: string } | null>(null);
   limitTarget = $state<{ id: string; name: string } | null>(null);
   tagTarget = $state<{ id: string; name: string } | null>(null);
+  /** The per-torrent settings of a simulator plugin (asked when it is switched on, or from its menu entry). */
+  simTarget = $state<{ plugin: string; pluginName: string; id: string; name: string; enabled: boolean; fields: import("../api").PluginField[] } | null>(null);
+  simStatsTarget = $state<{ plugin: string; pluginName: string; id: string; name: string } | null>(null);
+  /** Torrents a simulator plugin is simulating, by info hash, with the plugin's own short status (for the list badge). */
+  simulated = $state<Record<string, string>>({});
   paletteOpen = $state(false);
   ratioOpen = $state(false);
   searchOpen = $state(false);
@@ -132,6 +137,21 @@ class Ui {
 
   guard = $state<GuardStatus>({ state: "off", paused: 0 });
   limits = $state<LimitsStatus>({ scheduled: false, down_bps: null, up_bps: null });
+
+  /** Updates the list badges from what the simulator plugins said (also used by the torrent menu, which asks them anyway). */
+  applySimulated(states: import("../api").SimulatorState[]) {
+    const m: Record<string, string> = {};
+    for (const s of states) for (const sel of s.selections) if (sel.enabled) m[sel.info_hash] = sel.label ?? `${s.name} is simulating this torrent`;
+    if (JSON.stringify(m) !== JSON.stringify(this.simulated)) this.simulated = m;
+  }
+
+  async refreshSimulated() {
+    try {
+      this.applySimulated(await api.simulatorStates());
+    } catch {
+      /* the badges keep their last state */
+    }
+  }
 
   async refreshLimits() {
     try {

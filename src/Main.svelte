@@ -14,6 +14,8 @@
   import { api, type OpenPayload } from "./lib/api";
   import GoalDialog from "./lib/components/GoalDialog.svelte";
   import TorrentLimitDialog from "./lib/components/TorrentLimitDialog.svelte";
+  import SimulationDialog from "./lib/components/SimulationDialog.svelte";
+  import SimulationStats from "./lib/components/SimulationStats.svelte";
   import TagsDialog from "./lib/components/TagsDialog.svelte";
   import UpdateBanner from "./lib/components/UpdateBanner.svelte";
   import GuardBanner from "./lib/components/GuardBanner.svelte";
@@ -46,6 +48,9 @@
     if (api.onOpenSettings) keep(api.onOpenSettings(() => (ui.settingsOpen = true)));
     keep(api.onShown(() => torrents.refresh().catch(() => {})));
     ui.loadSettings().then(() => ui.refreshLimits()).catch((e) => ui.fail(e));
+    void ui.refreshSimulated();
+    const simTimer = setInterval(() => ui.refreshSimulated(), 20_000);
+    stops.push(() => clearInterval(simTimer));
     api.guardStatus().then((g) => (ui.guard = g)).catch(() => {});
     keep(api.onGuard((g) => (ui.guard = g)));
     keep(api.onWatch((w) => (w.added ? ui.toast(`Added ${w.added} from the watch folder`) : ui.toast(`${w.invalid} isn't a valid torrent file, so it was set aside`, "error"))));
@@ -154,6 +159,8 @@
 {#if ui.goalTarget}<GoalDialog />{/if}
 {#if ui.limitTarget}<TorrentLimitDialog />{/if}
 {#if ui.tagTarget}<TagsDialog />{/if}
+{#if ui.simTarget}<SimulationDialog />{/if}
+{#if ui.simStatsTarget}<SimulationStats />{/if}
 {#if ui.paletteOpen}<Palette />{/if}
 {#if ui.ratioOpen}<RatioDialog />{/if}
 {#if ui.searchOpen}<SearchDialog />{/if}

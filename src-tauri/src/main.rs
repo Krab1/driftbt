@@ -398,6 +398,8 @@ fn main() {
             commands::plugin_log,
             commands::simulator_states,
             commands::set_simulation,
+            commands::simulator_options,
+            commands::simulator_status,
             commands::set_caption_rect,
             commands::check_update,
             commands::install_update,

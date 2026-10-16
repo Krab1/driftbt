@@ -168,6 +168,16 @@ export interface SimulatorState {
   name: string;
   ok: boolean;
   selections: SimulatorSelection[];
+  /** What the plugin lets the user set per torrent; empty means the menu item just switches it on or off. */
+  fields: PluginField[];
+  /** Whether it has statistics to show. */
+  has_status: boolean;
+}
+
+/** A simulator's live numbers for one torrent: a few tables of text and a short log. */
+export interface SimStatus {
+  tables: { title: string; columns: string[]; rows: string[][] }[];
+  log: string[];
 }
 
 /** A plugin the registry offers: its newest version that works with this Drift. */
@@ -185,6 +195,8 @@ export interface PluginField {
   label: string;
   type: "text" | "url" | "number" | "bool" | "secret" | "list";
   help: string | null;
+  /** For a text field: the only values it may have, drawn as a drop-down. */
+  options?: string[];
   /** For a list: the fields of one row. */
   item?: PluginField[];
 }
@@ -420,7 +432,11 @@ export interface Api {
   /** Asks every enabled simulator plugin which torrents it simulates. */
   simulatorStates(): Promise<SimulatorState[]>;
   /** Switches simulation of one torrent on or off in one plugin; resolves to that plugin's refreshed state. */
-  setSimulation(plugin: string, infoHash: string, enabled: boolean): Promise<SimulatorState>;
+  setSimulation(plugin: string, infoHash: string, enabled: boolean, options?: Record<string, PluginValue>): Promise<SimulatorState>;
+  /** The values the per-torrent form starts from: this torrent's own if it is simulated, else the plugin's defaults. */
+  simulatorOptions(plugin: string, infoHash: string): Promise<Record<string, PluginValue>>;
+  /** The plugin's live numbers for one torrent (asked each time, nothing is kept). */
+  simulatorStatus(plugin: string, infoHash: string): Promise<SimStatus>;
   /** Needs `plugin_registry` on. */
   pluginOffers(): Promise<PluginOffer[]>;
   /** Downloads and verifies a plugin; it takes over at the next start. */

@@ -211,10 +211,24 @@ impl Service {
     }
 
     /// Switches simulation of one torrent on or off in one plugin and returns that plugin's refreshed state.
-    pub async fn set_simulation(&self, plugin: &str, info_hash: &str, enabled: bool) -> Result<crate::plugins::SimulatorState, ApiError> {
+    pub async fn set_simulation(&self, plugin: &str, info_hash: &str, enabled: bool, options: Option<serde_json::Value>) -> Result<crate::plugins::SimulatorState, ApiError> {
         let on = self.settings.lock().unwrap().plugins.clone();
         let t = crate::simulator::torrent(&self.manager, info_hash).await.ok_or_else(|| ApiError::new("plugin", "That torrent isn't in the list."))?;
-        self.plugins.set_simulation(&on, plugin, &t.info_hash, enabled, &t).await.map_err(|m| ApiError::new("plugin", &m))
+        self.plugins.set_simulation(&on, plugin, &t.info_hash, enabled, &t, options.as_ref()).await.map_err(|m| ApiError::new("plugin", &m))
+    }
+
+    /// What the per-torrent form of a simulator plugin starts from for one torrent.
+    pub async fn simulator_options(&self, plugin: &str, info_hash: &str) -> Result<serde_json::Map<String, serde_json::Value>, ApiError> {
+        let on = self.settings.lock().unwrap().plugins.clone();
+        let hash = crate::search::normalize_hash(info_hash).ok_or_else(|| ApiError::new("plugin", "That isn't a torrent id."))?;
+        self.plugins.simulator_options(&on, plugin, &hash).await.map_err(|m| ApiError::new("plugin", &m))
+    }
+
+    /// A simulator plugin's live statistics for one torrent.
+    pub async fn simulator_status(&self, plugin: &str, info_hash: &str) -> Result<crate::plugins::SimStatus, ApiError> {
+        let on = self.settings.lock().unwrap().plugins.clone();
+        let hash = crate::search::normalize_hash(info_hash).ok_or_else(|| ApiError::new("plugin", "That isn't a torrent id."))?;
+        self.plugins.simulator_status(&on, plugin, &hash).await.map_err(|m| ApiError::new("plugin", &m))
     }
 
     pub async fn update_ip_lists(&self) -> Result<crate::netctl::FilterStatus, ApiError> {

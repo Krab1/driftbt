@@ -250,6 +250,19 @@ export function createMockApi(count = 40): Api {
   let pluginValues: Record<string, PluginValue> = {};
   let pluginSecrets: string[] = [];
   let simOn: string[] = [];
+  const simOptions: Record<string, Record<string, import("./types").PluginValue>> = {};
+  const simState = () => ({
+    id: "sim",
+    name: "Example simulator",
+    ok: true,
+    has_status: true,
+    fields: [
+      { key: "mode", label: "Mode", type: "text" as const, help: "What the simulated peers do.", options: ["seed_only", "partial_seed", "download_and_seed"] },
+      { key: "peers", label: "Peers", type: "number" as const, help: "How many simulated peers, 1 to 20." },
+      { key: "upload_max_kbps", label: "Upload max (KB/s)", type: "number" as const, help: null },
+    ],
+    selections: simOn.map((h) => ({ info_hash: h, enabled: true, label: "Simulating: example" })),
+  });
   let torznabValues: Record<string, PluginValue> = {};
   let torznabSecrets: string[] = [];
 
@@ -408,11 +421,17 @@ export function createMockApi(count = 40): Api {
       await new Promise((r) => setTimeout(r, 600));
       return id === "archive_org" ? { id, name: "Internet Archive", outcome: "ok", count: 1, message: null } : { id, name: id, outcome: "failed", count: 0, message: "This source refused the API key. Check it in Settings." };
     },
-    simulatorStates: async () => [{ id: "sim", name: "Example simulator", ok: true, selections: simOn.map((h) => ({ info_hash: h, enabled: true, label: "Simulating: example" })) }],
-    setSimulation: async (id, hash, enabled) => {
+    simulatorStates: async () => [simState()],
+    setSimulation: async (id, hash, enabled, options) => {
       simOn = enabled ? [...new Set([...simOn, hash])] : simOn.filter((h) => h !== hash);
-      return { id, name: "Example simulator", ok: true, selections: simOn.map((h) => ({ info_hash: h, enabled: true, label: "Simulating: example" })) };
+      if (enabled && options) simOptions[hash] = options;
+      return simState();
     },
+    simulatorOptions: async (_id, hash) => simOptions[hash] ?? { mode: "seed_only", peers: 1, upload_max_kbps: 800 },
+    simulatorStatus: async () => ({
+      tables: [{ title: "Peers", columns: ["Peer", "Client", "Uploaded", "Left", "Next announce"], rows: [["bot-001", "qbittorrent", "412 MB", "0 B", "in 14 s"], ["bot-002", "transmission", "96 MB", "0 B", "in 3 s"]] }],
+      log: ["12:00:03 bot-001 announce ok interval 1800", "12:00:41 bot-002 announce ok interval 1800"],
+    }),
     listPlugins: async () => [
       {
         id: "example",

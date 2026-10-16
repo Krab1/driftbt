@@ -402,6 +402,57 @@ fn install_sim(root: &Path, id: &str, mode: &str, kinds: &str) {
     std::fs::write(d.join("plugin.json"), format!(r#"{{"id":"{id}","name":"Sim","version":"1.0.0","api":1,"kinds":{kinds},"exec":{exec}}}"#)).unwrap();
 }
 
+/// A simulator whose manifest declares a per-torrent form.
+fn install_sim_form(root: &Path, id: &str, torrent_settings: &str) {
+    install_sim(root, id, "", r#"["simulator"]"#);
+    let p = root.join(id).join("plugin.json");
+    let m = std::fs::read_to_string(&p).unwrap().replacen('}', &format!(r#","torrent_status":true,"torrent_settings":{torrent_settings}}}"#), 1);
+    std::fs::write(p, m).unwrap();
+}
+
+const FORM: &str = r#"[{"key":"mode","label":"Mode","type":"text","options":["a","b"]},{"key":"peers","label":"Peers","type":"number"}]"#;
+
+#[tokio::test]
+async fn a_simulators_per_torrent_form_is_validated_and_what_goes_through_is_filtered() {
+    let root = scratch("simform");
+    install_sim_form(&root, "ok", FORM);
+    install_sim_form(&root, "secret", r#"[{"key":"k","label":"K","type":"secret"}]"#);
+    install_sim_form(&root, "dupe", r#"[{"key":"m","label":"M","type":"text","options":["a","a"]}]"#);
+    install_sim_form(&root, "num", r#"[{"key":"m","label":"M","type":"number","options":["a"]}]"#);
+    install_sim(&root, "plain", "", r#"["simulator"]"#);
+    let h = host(&root);
+    let on: Vec<String> = ["ok", "secret", "dupe", "num", "plain"].map(String::from).to_vec();
+    let info = h.list(&on);
+    let problem = |id: &str| info.iter().find(|p| p.id == id).unwrap().problem.clone();
+    assert_eq!(problem("ok"), None);
+    assert_eq!(problem("plain"), None);
+    for bad in ["secret", "dupe", "num"] {
+        assert!(problem(bad).is_some_and(|p| p.contains("per-torrent")), "{bad}: {:?}", problem(bad));
+    }
+
+    let on = vec!["ok".to_string(), "plain".to_string()];
+    assert!(h.torrents_updated("ok", &serde_json::json!({"torrents": []})).await);
+    assert_eq!(h.simulator_states(&on).await[0].fields.len(), 2, "the UI learns the form from the state");
+    assert!(h.simulator_states(&on).await[1].fields.is_empty());
+
+    // What the plugin offers as starting values is filtered to the declared fields and their allowed values.
+    let opts = h.simulator_options(&on, "ok", HASH).await.unwrap();
+    assert_eq!(serde_json::Value::Object(opts), serde_json::json!({"mode": "a", "peers": 2}));
+
+    // What the UI sends is filtered the same way, and only goes to a plugin that has a form.
+    let t = serde_json::json!({"info_hash": HASH, "name": "x"});
+    let chosen = serde_json::json!({"mode": "zzz", "peers": 3, "junk": 1});
+    h.set_simulation(&on, "ok", HASH, true, &t, Some(&chosen)).await.unwrap();
+    assert!(h.log("ok").unwrap().contains(r#"options={"peers":3}"#), "{}", h.log("ok").unwrap());
+    h.set_simulation(&on, "plain", HASH, true, &t, Some(&chosen)).await.unwrap();
+    assert!(h.log("plain").unwrap().contains("options=none"), "a plugin without a form is sent no options");
+
+    // Statistics are cut down to a few short lines.
+    let s = h.simulator_status(&on, "ok", HASH).await.unwrap();
+    assert_eq!((s.tables.len(), s.log.len(), s.tables[0].rows[0][1].chars().count()), (1, 60, 120));
+    std::fs::remove_dir_all(root).ok();
+}
+
 #[tokio::test]
 async fn simulator_kind_is_accepted_alone_and_with_the_others() {
     let root = scratch("simkinds");
@@ -431,15 +482,15 @@ async fn selection_round_trip_with_a_simulator() {
     assert!(s.ok && s.selections.is_empty());
 
     let t = serde_json::json!({"info_hash": HASH, "name": "x"});
-    let s = h.set_simulation(&on, "sim", HASH, true, &t).await.unwrap();
+    let s = h.set_simulation(&on, "sim", HASH, true, &t, None).await.unwrap();
     assert_eq!(s.selections.len(), 1);
     assert!(s.selections[0].enabled && s.selections[0].label.as_deref() == Some("Simulating: example"));
-    let s = h.set_simulation(&on, "sim", HASH, false, &t).await.unwrap();
+    let s = h.set_simulation(&on, "sim", HASH, false, &t, None).await.unwrap();
     assert!(!s.selections[0].enabled);
 
     let log = h.log("sim").unwrap();
     assert!(log.contains("torrents_updated: 1 torrents") && log.contains("enabled=true") && log.contains("enabled=false"), "{log}");
-    assert!(h.set_simulation(&[], "sim", HASH, true, &t).await.is_err(), "only enabled simulators");
+    assert!(h.set_simulation(&[], "sim", HASH, true, &t, None).await.is_err(), "only enabled simulators");
     std::fs::remove_dir_all(root).ok();
 }
 

@@ -18,7 +18,7 @@
 
   // Simulator plugins answer on their own time, so their section appears when they have; the rest of the menu never waits.
   let sims = $state<SimulatorState[]>([]);
-  if (t && t.state !== "error") api.simulatorStates().then((s) => (sims = s)).catch(() => {});
+  if (t && t.state !== "error") api.simulatorStates().then((s) => { sims = s; ui.applySimulated(s); }).catch(() => {});
   const simOn = (s: SimulatorState) => s.selections.find((x) => x.info_hash === t?.id);
 
   let el = $state<HTMLDivElement>();
@@ -136,13 +136,33 @@
     }
   }
 
+  /** A plugin with a per-torrent form asks for it when the torrent is switched on, so the first start already has the user's choices. */
+  function simTarget(s: SimulatorState, enabled: boolean) {
+    return { plugin: s.id, pluginName: s.name, id: t!.id, name: t!.name, enabled, fields: s.fields };
+  }
+
+  function simSettings(s: SimulatorState) {
+    close();
+    if (t) ui.simTarget = simTarget(s, true);
+  }
+
+  function simStats(s: SimulatorState) {
+    close();
+    if (t) ui.simStatsTarget = { plugin: s.id, pluginName: s.name, id: t.id, name: t.name };
+  }
+
   async function simulate(s: SimulatorState) {
     close();
     if (!t) return;
+    if (!simOn(s)?.enabled && s.fields.length) {
+      ui.simTarget = simTarget(s, false);
+      return;
+    }
     const on = !simOn(s)?.enabled;
     try {
       await api.setSimulation(s.id, t.id, on);
       ui.toast(on ? `${s.name} is simulating this torrent.` : `${s.name} stopped simulating this torrent.`);
+      void ui.refreshSimulated();
     } catch (e) {
       ui.fail(e);
     }
@@ -219,6 +239,8 @@
         {@const sel = simOn(s)}
         {#if s.ok}
           <button role="menuitemcheckbox" aria-checked={!!sel?.enabled} onclick={() => simulate(s)}><span class="tick">{sel?.enabled ? "✓" : ""}</span>{s.name}: Simulate this torrent{#if sel?.enabled && sel.label}<span class="cur">{sel.label}</span>{/if}</button>
+          {#if sel?.enabled && s.fields.length}<button role="menuitem" onclick={() => simSettings(s)}><Icon name="sliders" />Simulation settings…</button>{/if}
+          {#if sel?.enabled && s.has_status}<button role="menuitem" onclick={() => simStats(s)}><Icon name="list" />Simulation statistics…</button>{/if}
         {:else}
           <button role="menuitem" disabled title="It didn't answer. Look at its log in Settings → Plugins.">{s.name}: not responding</button>
         {/if}

@@ -49,6 +49,9 @@ pub struct Field {
     pub help: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub item: Vec<Field>,
+    /// For a `text` field: the only values it may have, drawn as a drop-down.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub options: Vec<String>,
 }
 
 const FIELD_KINDS: [&str; 6] = ["text", "url", "number", "bool", "secret", "list"];
@@ -78,12 +81,28 @@ fn valid_row(f: &Field, row: &Value) -> bool {
     o.get("id").and_then(Value::as_str).is_some_and(safe_id) && o.iter().all(|(k, v)| k == "id" || f.item.iter().any(|i| &i.key == k && i.kind != "secret" && valid_value(&i.kind, v)))
 }
 
+/// `options` belong to a text field, are few, short and different from each other.
+fn options_ok(f: &Field) -> bool {
+    f.options.is_empty() || (f.kind == "text" && f.options.len() <= 20 && f.options.iter().all(|o| !o.is_empty() && o.chars().count() <= 60) && f.options.iter().collect::<std::collections::HashSet<_>>().len() == f.options.len())
+}
+
+/// The value is allowed for this field of a torrent form (the field's own kind, and one of its options if it has any).
+fn valid_option(f: &Field, v: &Value) -> bool {
+    valid_value(&f.kind, v) && (f.options.is_empty() || v.as_str().is_some_and(|s| f.options.iter().any(|o| o == s)))
+}
+
+/// Keeps only the declared fields with an allowed value: what a plugin or the UI sends is not trusted.
+fn sanitize_options(fields: &[Field], v: &Value) -> Map<String, Value> {
+    let Some(o) = v.as_object() else { return Map::new() };
+    fields.iter().filter_map(|f| o.get(&f.key).filter(|x| valid_option(f, x)).map(|x| (f.key.clone(), x.clone()))).collect()
+}
+
 /// The form is well formed: known kinds, unique plain keys, lists only one level deep.
 fn form_ok(fields: &[Field], nested: bool) -> bool {
     let mut seen = std::collections::HashSet::new();
     fields.iter().all(|f| {
         let shape = if f.kind == "list" { !nested && !f.item.is_empty() && form_ok(&f.item, true) } else { f.item.is_empty() };
-        safe_id(&f.key) && FIELD_KINDS.contains(&f.kind.as_str()) && shape && seen.insert(f.key.as_str())
+        safe_id(&f.key) && FIELD_KINDS.contains(&f.kind.as_str()) && shape && options_ok(f) && seen.insert(f.key.as_str())
     })
 }
 
@@ -104,6 +123,12 @@ pub struct Manifest {
     /// The settings form the app draws for this plugin.
     #[serde(default)]
     pub settings: Vec<Field>,
+    /// Simulators only: what the user can set for one torrent (text, number or bool fields), asked in the torrent's menu.
+    #[serde(default)]
+    pub torrent_settings: Vec<Field>,
+    /// Simulators only: the plugin answers `get_status`, so the torrent's menu offers its statistics.
+    #[serde(default)]
+    pub torrent_status: bool,
 }
 
 /// What the user typed into plugin settings forms. Plain values live in `.settings.json`, secrets in
@@ -372,12 +397,18 @@ impl Plugin {
     }
 
     async fn call_within(self: &Arc<Self>, method: &str, params: Value, timeout: Duration) -> Result<Value, CallError> {
-        self.call_inner(method, params, timeout, false).await
+        self.call_inner(method, params, timeout, false, true).await
     }
 
     /// For UI-driven simulator calls: a timeout or a dropped pipe is counted apart from the lifecycle failures above.
     async fn call_soft(self: &Arc<Self>, method: &str, params: Value, timeout: Duration) -> Result<Value, CallError> {
-        self.call_inner(method, params, timeout, true).await
+        self.call_inner(method, params, timeout, true, true).await
+    }
+
+    /// For the reads the UI repeats on its own (the list of what is simulated, a form's values, the statistics): a timeout
+    /// or a plugin that doesn't know the method never counts as a failure, so looking can't switch a plugin off.
+    async fn call_view(self: &Arc<Self>, method: &str, params: Value, timeout: Duration) -> Result<Value, CallError> {
+        self.call_inner(method, params, timeout, true, false).await
     }
 
     /// Starts the process if it isn't running, unless it is switched off or backing off.
@@ -407,7 +438,7 @@ impl Plugin {
         Ok(())
     }
 
-    async fn call_inner(self: &Arc<Self>, method: &str, params: Value, timeout: Duration, soft: bool) -> Result<Value, CallError> {
+    async fn call_inner(self: &Arc<Self>, method: &str, params: Value, timeout: Duration, soft: bool, count: bool) -> Result<Value, CallError> {
         let mut st = self.state.lock().await;
         self.ensure_running(&mut st).await?;
         let r = st.running.as_mut().expect("started above");
@@ -431,7 +462,7 @@ impl Plugin {
                     if res.is_ok() {
                         st.running = None;
                     }
-                    st.soft_failures += 1;
+                    st.soft_failures += u32::from(count);
                     if st.soft_failures >= MAX_SOFT_FAILURES {
                         st.soft_failures = 0;
                         self.failed(&mut st);
@@ -544,6 +575,49 @@ pub struct SimulatorState {
     pub name: String,
     pub ok: bool,
     pub selections: Vec<Selection>,
+    /// What the plugin lets the user set per torrent (empty: the menu item just switches it on or off).
+    #[serde(default)]
+    pub fields: Vec<Field>,
+    /// Whether the plugin has statistics to show (`get_status`).
+    #[serde(default)]
+    pub has_status: bool,
+}
+
+/// A simulator's live numbers for one torrent, as tables of text and a short log. The plugin keeps it in memory; Drift
+/// only passes it on when the user opens the statistics.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SimStatus {
+    pub tables: Vec<SimTable>,
+    pub log: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct SimTable {
+    pub title: String,
+    pub columns: Vec<String>,
+    pub rows: Vec<Vec<String>>,
+}
+
+fn cut(v: &Value, max: usize) -> String {
+    v.as_str().map(|s| s.chars().filter(|c| !c.is_control()).take(max).collect()).unwrap_or_default()
+}
+
+/// Plugin output is untrusted: a handful of short tables and log lines.
+fn sanitize_status(v: &Value) -> Option<SimStatus> {
+    let s = v.get("status").unwrap_or(v);
+    let tables = s["tables"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .take(6)
+        .map(|t| SimTable {
+            title: cut(&t["title"], 60),
+            columns: t["columns"].as_array().into_iter().flatten().take(12).map(|c| cut(c, 40)).collect(),
+            rows: t["rows"].as_array().into_iter().flatten().take(50).map(|r| r.as_array().into_iter().flatten().take(12).map(|c| cut(c, 120)).collect()).collect(),
+        })
+        .collect();
+    let log = s["log"].as_array().into_iter().flatten().take(60).map(|l| cut(l, 200)).collect();
+    s.is_object().then_some(SimStatus { tables, log })
 }
 
 const SELECTION_TIMEOUT: Duration = Duration::from_secs(2);
@@ -585,6 +659,12 @@ fn check(m: &Manifest, dir: &Path) -> Result<(), String> {
     }
     if !form_ok(&m.settings, false) {
         return Err("Its settings form isn't valid.".into());
+    }
+    if m.settings.iter().chain(m.settings.iter().flat_map(|f| f.item.iter())).any(|f| !f.options.is_empty()) {
+        return Err("Its settings form isn't valid (drop-down options are only for per-torrent settings).".into());
+    }
+    if !form_ok(&m.torrent_settings, false) || m.torrent_settings.iter().any(|f| !matches!(f.kind.as_str(), "text" | "number" | "bool")) {
+        return Err("Its per-torrent settings form isn't valid.".into());
     }
     if m.exec.is_empty() || !inside(&m.exec[0]) || !dir.join(&m.exec[0]).is_file() {
         return Err("Its program is missing.".into());
@@ -813,7 +893,7 @@ impl Host {
     /// Asks one simulator what it simulates and remembers the answer. Failures are logged and leave the plugin unknown.
     async fn refresh_selection(&self, p: &Arc<Plugin>) -> SimulatorState {
         let id = p.manifest.id.clone();
-        let rows = match p.call_soft("get_selection", json!({}), SELECTION_TIMEOUT).await {
+        let rows = match p.call_view("get_selection", json!({}), SELECTION_TIMEOUT).await {
             Ok(v) => sanitize_selections(&v),
             Err(_) => None,
         };
@@ -821,12 +901,12 @@ impl Host {
         match rows {
             Some(rows) => {
                 sel.insert(id.clone(), rows.clone());
-                SimulatorState { id, name: p.manifest.name.clone(), ok: true, selections: rows }
+                SimulatorState { id, name: p.manifest.name.clone(), ok: true, selections: rows, fields: p.manifest.torrent_settings.clone(), has_status: p.manifest.torrent_status }
             }
             None => {
                 eprintln!("simulator plugin {id}: get_selection failed");
                 sel.remove(&id);
-                SimulatorState { id, name: p.manifest.name.clone(), ok: false, selections: vec![] }
+                SimulatorState { id, name: p.manifest.name.clone(), ok: false, selections: vec![], fields: vec![], has_status: false }
             }
         }
     }
@@ -842,11 +922,30 @@ impl Host {
 
     /// Tells one simulator the user switched a torrent on or off, then refreshes what it reports.
     /// `torrent` is the `selection_changed.torrent` object; the plugin decides what to do with it.
-    pub async fn set_simulation(&self, enabled_ids: &[String], id: &str, info_hash: &str, enabled: bool, torrent: &impl Serialize) -> Result<SimulatorState, String> {
+    /// `options` are the per-torrent settings the user chose (see `Manifest::torrent_settings`); only declared fields
+    /// with allowed values are passed on, and only to a plugin that declares any.
+    pub async fn set_simulation(&self, enabled_ids: &[String], id: &str, info_hash: &str, enabled: bool, torrent: &impl Serialize, options: Option<&Value>) -> Result<SimulatorState, String> {
         let p = self.simulators(enabled_ids).find(|p| p.manifest.id == id).ok_or("That plugin isn't turned on.")?;
-        let params = json!({"info_hash": info_hash, "enabled": enabled, "torrent": torrent});
+        let mut params = json!({"info_hash": info_hash, "enabled": enabled, "torrent": torrent});
+        if let Some(o) = options.filter(|_| enabled && !p.manifest.torrent_settings.is_empty()) {
+            params["options"] = Value::Object(sanitize_options(&p.manifest.torrent_settings, o));
+        }
         p.call_soft("selection_changed", params, SELECTION_CHANGED_TIMEOUT).await.map_err(|_| format!("{} didn't respond.", p.manifest.name))?;
         Ok(self.refresh_selection(p).await)
+    }
+
+    /// The values the dialog for one torrent starts from: the torrent's own if it is simulated, else the plugin's defaults.
+    pub async fn simulator_options(&self, enabled_ids: &[String], id: &str, info_hash: &str) -> Result<Map<String, Value>, String> {
+        let p = self.simulators(enabled_ids).find(|p| p.manifest.id == id).filter(|p| !p.manifest.torrent_settings.is_empty()).ok_or("That plugin isn't turned on, or has no settings per torrent.")?;
+        let v = p.call_view("get_options", json!({"info_hash": info_hash}), SELECTION_TIMEOUT).await.map_err(|_| format!("{} didn't respond.", p.manifest.name))?;
+        Ok(sanitize_options(&p.manifest.torrent_settings, &v["options"]))
+    }
+
+    /// The plugin's live numbers for one torrent. Nothing is kept here: it is asked each time the statistics are open.
+    pub async fn simulator_status(&self, enabled_ids: &[String], id: &str, info_hash: &str) -> Result<SimStatus, String> {
+        let p = self.simulators(enabled_ids).find(|p| p.manifest.id == id).filter(|p| p.manifest.torrent_status).ok_or("That plugin isn't turned on, or has no statistics.")?;
+        let v = p.call_view("get_status", json!({"info_hash": info_hash}), SELECTION_TIMEOUT).await.map_err(|_| format!("{} didn't respond.", p.manifest.name))?;
+        sanitize_status(&v).ok_or_else(|| format!("{} sent no statistics.", p.manifest.name))
     }
 
     /// Ends the processes of simulators that are no longer enabled (or all of them with an empty list, at app exit).

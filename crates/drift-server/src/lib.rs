@@ -131,6 +131,8 @@ pub fn router(shared: S) -> Router {
         .route("/plugins/{id}/log", get(plugin_log))
         .route("/simulators", get(simulator_states))
         .route("/simulators/{id}/{hash}", put(set_simulation))
+        .route("/simulators/{id}/{hash}/options", get(simulator_options))
+        .route("/simulators/{id}/{hash}/status", get(simulator_status))
         .route("/events", get(events))
         .layer(middleware::from_fn_with_state(shared.clone(), require_token))
         // Torrent files arrive as JSON number arrays, so allow generous bodies.
@@ -343,10 +345,21 @@ async fn simulator_states(State(s): State<S>) -> Json<Vec<drift_core::plugins::S
 #[derive(Deserialize)]
 struct EnabledBody {
     enabled: bool,
+    /// The per-torrent settings the user chose, if the plugin has any.
+    #[serde(default)]
+    options: Option<serde_json::Value>,
 }
 
 async fn set_simulation(State(s): State<S>, Path((id, hash)): Path<(String, String)>, Json(b): Json<EnabledBody>) -> Res<drift_core::plugins::SimulatorState> {
-    Ok(Json(s.svc.set_simulation(&id, &hash, b.enabled).await?))
+    Ok(Json(s.svc.set_simulation(&id, &hash, b.enabled, b.options).await?))
+}
+
+async fn simulator_options(State(s): State<S>, Path((id, hash)): Path<(String, String)>) -> Res<serde_json::Map<String, serde_json::Value>> {
+    Ok(Json(s.svc.simulator_options(&id, &hash).await?))
+}
+
+async fn simulator_status(State(s): State<S>, Path((id, hash)): Path<(String, String)>) -> Res<drift_core::plugins::SimStatus> {
+    Ok(Json(s.svc.simulator_status(&id, &hash).await?))
 }
 
 async fn plugins(State(s): State<S>) -> Json<Vec<drift_core::plugins::PluginInfo>> {

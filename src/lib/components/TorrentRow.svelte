@@ -77,6 +77,7 @@
       <span class="line">
         <span class="text" class:muted={fetching} title={t.name}>{fetching ? "New torrent" : t.name}</span>
         {#if t.limit_down_kib || t.limit_up_kib}<span class="own" title={ownLimit}>Limited</span>{/if}
+        {#if ui.simulated[t.id]}<span class="own sim" title={ui.simulated[t.id]}>Simulating</span>{/if}
         {#if caption}<span class="cap" class:bad={t.state === "error"} title={caption}>{caption}</span>{/if}
       </span>
       <div class="bar" role="progressbar" aria-valuenow={pct} aria-valuemin="0" aria-valuemax="100" aria-label="Progress">
@@ -183,6 +184,10 @@ ${t.error_detail}` }; }}>Details</button>
     font-size: 10px;
     line-height: 16px;
     color: var(--text-secondary);
+  }
+  .own.sim {
+    border-color: var(--accent);
+    color: var(--accent-fg);
   }
   .cap.bad {
     color: var(--danger-fg);

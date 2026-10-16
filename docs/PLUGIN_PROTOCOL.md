@@ -25,7 +25,7 @@ Optional `settings` describes a form Drift draws in Settings → Plugins:
 ]
 ```
 
-`type` is `text`, `url`, `number`, `bool`, `secret` or `list`; `key` follows the same rules as `id` and must be unique. Plain values are sent to the plugin in `initialize` (`settings: {key: value}`). Secrets are never sent that way: the plugin asks for them with `get_secret`. Saving a form replaces all of the plugin's saved plain values, ends the running plugin so it restarts with the new values, and gives a plugin that was switched off after failures another chance. Values for fields the manifest no longer declares, or now declares as `secret`, are never sent. Changing or removing a secret also clears the plugin's log. A form that isn't valid is listed as a problem and the plugin can't be turned on.
+`type` is `text`, `url`, `number`, `bool`, `secret` or `list`; a `text` field of `torrent_settings` (below) may also carry `options` (at most 20 different strings of up to 60 characters), which Drift draws as a drop-down and enforces; the settings form of Settings → Plugins has no drop-downs, and a plugin whose `settings` use `options` is listed as not valid; `key` follows the same rules as `id` and must be unique. Plain values are sent to the plugin in `initialize` (`settings: {key: value}`). Secrets are never sent that way: the plugin asks for them with `get_secret`. Saving a form replaces all of the plugin's saved plain values, ends the running plugin so it restarts with the new values, and gives a plugin that was switched off after failures another chance. Values for fields the manifest no longer declares, or now declares as `secret`, are never sent. Changing or removing a secret also clears the plugin's log. A form that isn't valid is listed as a problem and the plugin can't be turned on.
 
 A `list` field is a set of rows the user can add and remove (for example several indexers). Its `item` array describes one row with the same kinds except `list`; a list with no `item` fields, or a list inside a list, is an invalid form. Its value in `settings` is an array of objects: each has an `id` (letters, digits, `-`, `_`) plus the row's non-secret fields, at most 50 rows. A secret field of a row is asked for with `get_secret` using the key `<list key>.<row id>.<field key>`, for example `indexers.prowlarr.apikey`; the host answers only for rows that exist in the saved list, and removing a row deletes its secrets.
 
@@ -51,7 +51,9 @@ One JSON object per line (UTF-8, `\n`) on the plugin's stdin and stdout, JSON-RP
 | `completed` | `{id, name, save_path, files: [{path, size}], category, tags}` | `{actions: [Action]}` (kind `postprocess` only) |
 | `torrents_updated` | `{torrents: [Torrent]}` | none: a notification (kind `simulator` only) |
 | `get_selection` | `{}` | `{selections: [Selection]}` (kind `simulator` only) |
-| `selection_changed` | `{info_hash, enabled, torrent}` | `{}` (kind `simulator` only) |
+| `selection_changed` | `{info_hash, enabled, torrent, options?}` | `{}` (kind `simulator` only) |
+| `get_options` | `{info_hash}` | `{options: {key: value}}` (kind `simulator` with `torrent_settings`) |
+| `get_status` | `{info_hash}` | `{status: {tables, log}}` (kind `simulator` with `torrent_status`) |
 | `shutdown` | `{}` | `{}` (then exit) |
 
 `Result`: `title` (required), and at least one of `info_hash` (40 hex or 32 base32), `magnet` (`magnet:?…`), `torrent_url` (http/https). Optional: `size` (bytes), `seeders`, `leechers`, `published` (unix seconds), `category`. Rows without a title or any way to open them are dropped; titles are cut at 300 characters. A row may also carry `source`, a label (up to 60 characters) for its badge when one plugin searches several places, for example the indexer's name; without it the badge is the plugin's name.
@@ -95,7 +97,22 @@ Each row needs `info_hash` (40 hex or 32 base32) and `enabled`; `label` is optio
 {"jsonrpc":"2.0","id":11,"result":{}}
 ```
 
-Failures: `get_selection` and `selection_changed` that time out or fail are counted apart from the lifecycle failures below; five in a row count as one failure, so opening a menu can't switch a plugin off. The menu shows a plugin that didn't answer as "not responding". If the plugin doesn't read a `torrents_updated` line for 3 s, that is a lifecycle failure.
+**Per-torrent settings.** A simulator can ask the user for settings that belong to one torrent. It declares the form in `plugin.json` with the same field format as `settings`, but only `text`, `number` and `bool` fields:
+
+```json
+"torrent_settings": [
+  { "key": "mode", "label": "Mode", "type": "text", "options": ["seed_only", "loopback_pair"], "help": "What the peers do." },
+  { "key": "peers", "label": "Peers", "type": "number" }
+]
+```
+
+A plugin whose form is not valid is listed with the problem and can't be turned on. When the user ticks the torrent in its right-click menu, Drift first opens a dialog with this form instead of switching it on at once; a torrent that is already on gets a "Simulation settings…" entry to change them. The dialog starts from **`get_options`** (2 s): the plugin answers with the values it would use for that torrent (its own if it is simulated, else the plugin's defaults). Drift keeps only the declared keys whose values fit the field (right kind, and one of its `options`) and sends them as `options` in `selection_changed` with `enabled: true` (never with `false`). A plugin should keep only what differs from its own defaults, so what the user left alone keeps following the plugin's settings. `get_options` and `get_status` are only sent to a plugin that declares `torrent_settings` or `torrent_status`, for a valid info hash. For a torrent that is already on, `selection_changed` with changed `options` means "change the settings": the plugin applies them (restarting that torrent's job if it must) and answers `{}`. A plugin with no `torrent_settings` is never sent `options`, and the menu item just switches it on or off.
+
+**Statistics.** A simulator with `"torrent_status": true` in `plugin.json` gets a "Simulation statistics…" entry for torrents that are on. While that window is open Drift calls **`get_status`** (2 s) every two seconds and shows the answer; nothing is requested otherwise and Drift keeps nothing. The answer is plain text to draw: `{"status":{"tables":[{"title":"Peers","columns":["Peer","Up"],"rows":[["bot-001","12 MB"]]}],"log":["12:00:03 announce ok"]}}`. At most 6 tables of 12 columns and 50 rows, cells cut at 120 characters, at most 60 log lines of 200 characters. Keep what you report in memory and small: the window is for looking, not for history.
+
+The torrent list shows a "Simulating" badge on torrents a simulator reports as `enabled` in `get_selection` (asked after each change and every 20 s while Drift is open).
+
+Failures: `get_selection`, `get_options` and `get_status` never count against the plugin (Drift repeats them on its own, and looking must not switch anything off). `selection_changed` that times out or fails is counted apart from the lifecycle failures below; five in a row count as one failure, so opening a menu can't switch a plugin off. The menu shows a plugin that didn't answer as "not responding". If the plugin doesn't read a `torrents_updated` line for 3 s, that is a lifecycle failure.
 
 Try it: `crates/drift-core/src/bin/drift-example-simulator-plugin.rs` simulates nothing and logs every method to its log. Manual check: install it as a plugin with `"kinds":["simulator"]`, turn it on, add two torrents, right-click one → Simulator plugins → tick it; View log shows `selection_changed` with `enabled=true` for that hash only. Untick: `enabled=false`. Restart Drift and open the menu: the log shows `get_selection` again.
 
