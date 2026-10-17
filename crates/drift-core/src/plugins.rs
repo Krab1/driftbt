@@ -105,7 +105,7 @@ fn form_ok(fields: &[Field], nested: bool) -> bool {
     let mut seen = std::collections::HashSet::new();
     fields.iter().all(|f| {
         let shape = if f.kind == "list" { !nested && !f.item.is_empty() && form_ok(&f.item, true) } else { f.item.is_empty() };
-        safe_id(&f.key) && FIELD_KINDS.contains(&f.kind.as_str()) && shape && options_ok(f) && f.default.as_ref().is_none_or(|d| f.kind != "list" && valid_value(&f.kind, d)) && seen.insert(f.key.as_str())
+        safe_id(&f.key) && FIELD_KINDS.contains(&f.kind.as_str()) && shape && options_ok(f) && f.default.as_ref().is_none_or(|d| f.kind != "list" && valid_option(f, d)) && seen.insert(f.key.as_str())
     })
 }
 
@@ -465,7 +465,8 @@ impl Plugin {
                     if res.is_ok() {
                         st.running = None;
                     }
-                    st.soft_failures += u32::from(count);
+                    // A timeout of a repeated UI read costs nothing; a plugin that dies on one still counts, or it would be respawned forever.
+                    st.soft_failures += u32::from(count || res.is_ok());
                     if st.soft_failures >= MAX_SOFT_FAILURES {
                         st.soft_failures = 0;
                         self.failed(&mut st);
@@ -602,7 +603,8 @@ pub struct SimTable {
 }
 
 fn cut(v: &Value, max: usize) -> String {
-    v.as_str().map(|s| s.chars().filter(|c| !c.is_control()).take(max).collect()).unwrap_or_default()
+    // Control characters and the invisible direction marks that could make a cell read differently from what it holds.
+    v.as_str().map(|s| s.chars().filter(|c| !c.is_control() && !matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}')).take(max).collect()).unwrap_or_default()
 }
 
 /// Plugin output is untrusted: a handful of short tables and log lines.

@@ -64,7 +64,10 @@
 
   function addRow(p: PluginInfo, f: PluginField) {
     const row: PluginRow = { id: "r" + Math.random().toString(36).slice(2, 8) };
-    for (const i of f.item ?? []) if (i.type === "bool") row[i.key] = true;
+    for (const i of f.item ?? []) {
+      const d = i.default ?? (i.type === "bool" ? true : undefined);
+      if (d !== undefined) row[i.key] = d;
+    }
     drafts[p.id][f.key] = [...rowsOf(p, f), row];
   }
 

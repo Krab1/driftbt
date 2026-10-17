@@ -8,18 +8,18 @@
   let loading = $state(true);
   let values = $state<Record<string, PluginValue | null>>({});
   let before = $state("");
+  let busy = $state(false);
+  let problem = $state<string | null>(null);
 
   // What the plugin starts from: this torrent's own settings if it is simulated, else the plugin's defaults.
   onMount(async () => {
     try {
       values = { ...(await api.simulatorOptions(target.plugin, target.id)) };
-    } catch (e) {
-      if (ui.simTarget === target) {
-        ui.fail(e);
-        ui.simTarget = null;
-      }
-      return;
+    } catch {
+      // The form still opens, so a plugin that can't answer can be started with its own defaults.
+      problem = `${target.pluginName} didn't say what it would use, so empty boxes mean its own defaults.`;
     }
+    for (const f of target.fields) if (values[f.key] === undefined && f.default !== undefined) values[f.key] = f.default;
     before = JSON.stringify(values);
     loading = false;
   });
@@ -36,6 +36,8 @@
   }
 
   async function start() {
+    if (busy) return;
+    busy = true;
     try {
       await api.setSimulation(target.plugin, target.id, true, chosen());
       ui.toast(target.enabled ? `Saved. ${target.pluginName} restarted this torrent's simulation.` : `${target.pluginName} is simulating this torrent.`);
@@ -44,9 +46,12 @@
     } catch (e) {
       ui.fail(e);
     }
+    busy = false;
   }
 
   async function stop() {
+    if (busy) return;
+    busy = true;
     try {
       await api.setSimulation(target.plugin, target.id, false);
       ui.toast(`${target.pluginName} stopped simulating this torrent.`);
@@ -55,6 +60,7 @@
     } catch (e) {
       ui.fail(e);
     }
+    busy = false;
   }
 </script>
 
@@ -63,6 +69,7 @@
   {#if loading}
     <p class="note">Asking {target.pluginName}…</p>
   {:else}
+    {#if problem}<p class="note">{problem}</p>{/if}
     <div class="form">
       {#each target.fields as f (f.key)}
         <div class="fld">
@@ -83,12 +90,12 @@
         </div>
       {/each}
     </div>
-    <small>These apply to this torrent only. {target.pluginName}'s own settings (Settings → Plugins) cover the rest, such as the client it pretends to be and proxies.</small>
+    <small>These apply to this torrent only. {target.pluginName}'s own settings (Settings → Plugins) cover the rest, such as proxies and the custom client.</small>
   {/if}
   {#snippet footer()}
-    {#if target.enabled}<button class="btn" disabled={loading} onclick={stop}>Stop simulation</button>{/if}
+    {#if target.enabled}<button class="btn" disabled={loading || busy} onclick={stop}>Stop simulation</button>{/if}
     <button class="btn" onclick={() => (ui.simTarget = null)}>Cancel</button>
-    <button class="btn primary" disabled={loading || (target.enabled && JSON.stringify(values) === before)} onclick={start}>{target.enabled ? "Save" : "Start simulation"}</button>
+    <button class="btn primary" disabled={loading || busy || (target.enabled && JSON.stringify(values) === before)} onclick={start}>{target.enabled ? "Save" : "Start simulation"}</button>
   {/snippet}
 </Dialog>
 

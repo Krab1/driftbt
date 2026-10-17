@@ -140,6 +140,8 @@ class Ui {
 
   /** Updates the list badges from what the simulator plugins said (also used by the torrent menu, which asks them anyway). */
   applySimulated(states: import("../api").SimulatorState[]) {
+    // A plugin that didn't answer would drop its badges for a moment: keep the last ones until everyone answers.
+    if (states.some((s) => !s.ok)) return;
     const m: Record<string, string> = {};
     for (const s of states) for (const sel of s.selections) if (sel.enabled) m[sel.info_hash] = sel.label ?? `${s.name} is simulating this torrent`;
     if (JSON.stringify(m) !== JSON.stringify(this.simulated)) this.simulated = m;
