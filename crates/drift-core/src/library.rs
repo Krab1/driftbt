@@ -32,6 +32,10 @@ pub struct TorrentMeta {
     /// This torrent's own speed limits in KiB/s; 0 = none.
     pub limit_down_kib: u32,
     pub limit_up_kib: u32,
+    /// Bytes the torrent had on disk the last time it was running. A restart that finds much less holds it back.
+    pub progress_seen: u64,
+    /// The data went missing from disk while Drift was closed: the torrent is held paused until you choose.
+    pub files_missing: bool,
     /// Set while the torrent is being added in the background.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pending: Option<PendingAdd>,

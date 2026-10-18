@@ -20,6 +20,13 @@ pub type SharedSettings = Arc<Mutex<Settings>>;
 /// Metadata is saved at once when it changes shape, and at most this often for the seeding clock.
 const SAVE_EVERY_SECS: u64 = 30;
 const SEED_GOAL_NOTE: &str = "Seeding goal reached";
+const FILES_MISSING_NOTE: &str = "Files missing. Resume to download them again, or remove the torrent";
+
+/// The data on disk is clearly less than the last run left: all of it gone, or over 2% lost (a few pieces a crash
+/// didn't flush are not "missing").
+fn data_lost(seen: u64, now: u64) -> bool {
+    seen > 0 && (now == 0 || now.saturating_mul(100) < seen.saturating_mul(98))
+}
 /// Largest speed limit accepted, in KiB/s: the most the engine's 32-bit bytes-per-second can hold.
 const MAX_LIMIT_KIB: u32 = 4_000_000;
 
@@ -70,6 +77,8 @@ struct State {
     finished: Vec<TorrentId>,
     /// Adds running in the background: shown in the list at once, then replaced by the real torrent.
     adding: HashMap<TorrentId, Adding>,
+    /// Torrents whose data was compared with the last run (once, after the engine's own check of the files).
+    audited: HashSet<TorrentId>,
 }
 
 /// A torrent that is being added in the background, waiting for its details.
@@ -208,7 +217,7 @@ impl Manager {
 
     pub fn with_clock(engine: Arc<dyn TorrentEngine>, store: Arc<dyn MetaStore>, settings: SharedSettings, clock: Clock) -> Self {
         let lib = store.load();
-        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false, was_incomplete: HashSet::new(), pending_moves: Vec::new(), move_notes: Default::default(), finished: Vec::new(), adding: HashMap::new() };
+        let state = State { lib, applied_limits: None, queued: HashSet::new(), last_tick: None, last_save: Instant::now(), dirty: false, was_incomplete: HashSet::new(), pending_moves: Vec::new(), move_notes: Default::default(), finished: Vec::new(), adding: HashMap::new(), audited: HashSet::new() };
         Self { engine, store, settings, clock, guard: Mutex::new(Guard::default()), state: Mutex::new(state) }
     }
 
@@ -274,6 +283,27 @@ impl Manager {
         }
         st.dirty = false;
         st.last_save = Instant::now();
+    }
+
+    /// What the last run left is no longer the measure: the user chose (picked other files, rechecked, or said
+    /// "download again"), so the next start compares with what is there by then.
+    fn forget_seen(&self, id: &TorrentId) {
+        let mut st = self.state.lock().unwrap();
+        st.audited.insert(id.clone());
+        if let Some(m) = st.lib.get_mut(id) {
+            m.progress_seen = 0;
+        }
+        self.save(&mut st);
+    }
+
+    /// Lets a torrent run: clears a pause by the user and a "Files missing" hold.
+    fn release(&self, id: &TorrentId) {
+        self.with_meta(id, |m| {
+            if m.files_missing {
+                m.progress_seen = 0;
+            }
+            (m.user_paused, m.files_missing) = (false, false);
+        });
     }
 
     fn with_meta(&self, id: &TorrentId, f: impl FnOnce(&mut TorrentMeta)) {
@@ -494,7 +524,7 @@ impl Manager {
             return Err(EngineError::Blocked);
         }
         self.engine.resume(id).await?;
-        self.with_meta(id, |m| m.user_paused = false);
+        self.release(id);
         // If every slot is busy this immediately pushes the lowest-priority torrent back into the queue.
         self.tick().await.map(|_| ())
     }
@@ -585,6 +615,9 @@ impl Manager {
             return Err(EngineError::Blocked);
         }
         self.engine.recheck(id).await?;
+        // Checking the files again is you looking at them: whatever it finds is shown as it is.
+        self.forget_seen(id);
+        self.with_meta(id, |m| m.files_missing = false);
         self.tick().await.map(|_| ())
     }
 
@@ -600,7 +633,7 @@ impl Manager {
         if t.state == TorrentState::Paused {
             self.engine.resume(id).await?;
         }
-        self.with_meta(id, |m| m.user_paused = false);
+        self.release(id);
         if incomplete {
             self.move_in_queue(id, Move::Top).await
         } else {
@@ -645,6 +678,8 @@ impl Manager {
     /// neighbours, so those pieces are damaged by the delete; the torrent is checked again, which finds and re-fetches
     /// only them.
     pub async fn set_files(&self, id: &TorrentId, selected: Vec<usize>, delete_unchecked: bool) -> Result<()> {
+        // Picking other files changes how much counts as downloaded; that is not data going missing.
+        self.forget_seen(id);
         if !delete_unchecked {
             return self.engine.set_files(id, selected).await;
         }
@@ -797,6 +832,12 @@ impl Manager {
                     stats.state = TorrentState::Paused;
                 }
                 let moving = st.move_notes.get(&t.id).cloned();
+                if meta.is_some_and(|m| m.files_missing) {
+                    stats.state = TorrentState::Paused;
+                    stats.down_bps = 0;
+                    stats.eta_secs = None;
+                    note = Some(FILES_MISSING_NOTE.to_string());
+                }
                 if meta.is_some_and(|m| m.goal_reached) && stats.state == TorrentState::Paused && !meta.is_some_and(|m| m.user_paused) {
                     note = Some(SEED_GOAL_NOTE.to_string());
                 }
@@ -833,6 +874,7 @@ impl Manager {
 
             let mut structural = false;
             let mut goal_stopped = HashSet::new();
+            let mut lost = HashSet::new();
             let mut items = Vec::with_capacity(list.len());
             for t in &list {
                 if !st.lib.contains_key(&t.id) {
@@ -855,6 +897,27 @@ impl Manager {
                             st.pending_moves.push(t.id.clone());
                         }
                     }
+                }
+                // Once per run, when the engine has checked the files and the torrent is running: compare what is on
+                // disk with what the last run left. Anything clearly lost is held paused, not fetched again.
+                let running = matches!(t.state, TorrentState::Downloading | TorrentState::Seeding);
+                if running && t.total_bytes > 0 && st.audited.insert(t.id.clone()) {
+                    let m = st.lib.get_mut(&t.id).expect("inserted above");
+                    if data_lost(m.progress_seen, t.progress_bytes) {
+                        m.files_missing = true;
+                        m.user_paused = true;
+                        lost.insert(t.id.clone());
+                        structural = true;
+                    }
+                }
+                let audited = st.audited.contains(&t.id);
+                let m = st.lib.get_mut(&t.id).expect("inserted above");
+                if running && audited && !m.files_missing && m.progress_seen != t.progress_bytes {
+                    // The first bytes, and any drop (files unticked, a recheck), are saved at once: a close within the
+                    // next 30 s must not leave an old, larger number to be held against.
+                    structural |= m.progress_seen == 0 || t.progress_bytes < m.progress_seen;
+                    m.progress_seen = t.progress_bytes;
+                    st.dirty = true;
                 }
                 let m = st.lib.get_mut(&t.id).expect("inserted above");
                 if t.state == TorrentState::Seeding {
@@ -883,7 +946,7 @@ impl Manager {
             if structural || (st.dirty && st.last_save.elapsed().as_secs() >= SAVE_EVERY_SECS) {
                 self.save(&mut st);
             }
-            (plan, goal_stopped)
+            (plan, goal_stopped.union(&lost).cloned().collect::<HashSet<_>>())
         };
 
         // The engine forgets per-torrent limits when it restarts; setting the same ones again is a no-op.
@@ -1421,6 +1484,93 @@ mod tests {
         m.add(mag(1), None, vec![]).await.unwrap();
         assert_eq!(m.guard_check(&[]).await.unwrap().state, Verdict::Off);
         assert_eq!(m.tick().await.unwrap()[0].stats.state, TorrentState::Downloading);
+    }
+
+    /// A manager that restarts over the same engine and library, as the app does.
+    fn restarted(engine: &Arc<FakeEngine>, store: &Arc<dyn MetaStore>) -> Manager {
+        Manager::new(engine.clone(), store.clone(), Arc::new(Mutex::new(Settings::default())))
+    }
+
+    #[tokio::test]
+    async fn data_deleted_while_closed_is_held_paused_not_downloaded_again() {
+        use TorrentState::*;
+        let engine = Arc::new(FakeEngine::new());
+        let store: Arc<dyn MetaStore> = Arc::new(MemoryMetaStore::default());
+        let first = restarted(&engine, &store);
+        let a = first.add(mag(1), None, vec![]).await.unwrap();
+        first.tick().await.unwrap();
+        engine.advance(&a, 1 << 30);
+        let total = first.tick().await.unwrap()[0].stats.total_bytes;
+        assert!(total > 0, "the fake torrent has a size");
+        drop(first);
+
+        // The files are deleted while the app is closed: the engine starts over from nothing.
+        engine.set_progress(&a, 0);
+        let second = restarted(&engine, &store);
+        let v = second.tick().await.unwrap();
+        assert_eq!(v[0].stats.state, Paused);
+        assert!(v[0].note.as_deref().unwrap().starts_with("Files missing"));
+        assert_eq!(engine.list().await.unwrap()[0].state, Paused, "the engine itself is stopped");
+        assert_eq!(second.tick().await.unwrap()[0].stats.state, Paused, "and the queue leaves it alone");
+
+        // Resume is the user's "download it again": it runs, and isn't held a second time.
+        second.resume(&a).await.unwrap();
+        let v = second.tick().await.unwrap();
+        assert_eq!((v[0].stats.state, v[0].note.clone()), (Downloading, None));
+    }
+
+    #[tokio::test]
+    async fn download_again_is_remembered_even_if_the_app_closes_soon_after() {
+        let engine = Arc::new(FakeEngine::new());
+        let store: Arc<dyn MetaStore> = Arc::new(MemoryMetaStore::default());
+        let first = restarted(&engine, &store);
+        let a = first.add(mag(1), None, vec![]).await.unwrap();
+        first.tick().await.unwrap();
+        engine.advance(&a, 1 << 30);
+        let total = first.tick().await.unwrap()[0].stats.total_bytes;
+        drop(first);
+
+        engine.set_progress(&a, 0);
+        let second = restarted(&engine, &store);
+        assert!(second.tick().await.unwrap()[0].note.is_some());
+        second.resume(&a).await.unwrap();
+        engine.set_progress(&a, total / 33); // about 3% fetched, then the app closes without the 30 s save
+        second.tick().await.unwrap();
+        drop(second);
+
+        let third = restarted(&engine, &store);
+        assert!(third.tick().await.unwrap()[0].note.is_none(), "not held again for what it fetched itself");
+    }
+
+    #[tokio::test]
+    async fn a_few_lost_pieces_and_brand_new_torrents_are_not_held() {
+        let engine = Arc::new(FakeEngine::new());
+        let store: Arc<dyn MetaStore> = Arc::new(MemoryMetaStore::default());
+        let first = restarted(&engine, &store);
+        let a = first.add(mag(1), None, vec![]).await.unwrap();
+        first.tick().await.unwrap();
+        engine.advance(&a, 1 << 30);
+        let total = first.tick().await.unwrap()[0].stats.total_bytes;
+        drop(first);
+
+        // An unclean close that lost under 2%.
+        engine.set_progress(&a, total - total / 100);
+        let second = restarted(&engine, &store);
+        assert!(second.tick().await.unwrap()[0].note.is_none());
+
+        // A torrent added now has nothing to lose, even though its folder doesn't exist yet.
+        let b = second.add(mag(2), None, vec![]).await.unwrap();
+        let v = second.tick().await.unwrap();
+        assert!(v.iter().find(|t| t.stats.id == b).unwrap().note.is_none());
+    }
+
+    #[test]
+    fn what_counts_as_lost() {
+        assert!(!data_lost(0, 0), "never had anything");
+        assert!(data_lost(500, 0), "everything gone");
+        assert!(data_lost(1000, 900), "a file or more gone");
+        assert!(!data_lost(1000, 990), "a piece or two not flushed");
+        assert!(!data_lost(1000, 1000));
     }
 
     #[tokio::test]

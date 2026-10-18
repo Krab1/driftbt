@@ -77,6 +77,13 @@ impl FakeEngine {
         }
     }
 
+    /// Test helper: the data on disk is now `bytes` (files deleted or damaged while the app was closed).
+    pub fn set_progress(&self, id: &TorrentId, bytes: u64) {
+        if let Some(e) = self.inner.lock().unwrap().torrents.get_mut(id) {
+            e.stats.progress_bytes = bytes.min(e.stats.total_bytes);
+        }
+    }
+
     /// Test helper: pretend `bytes` have been uploaded for this torrent.
     pub fn set_uploaded(&self, id: &TorrentId, bytes: u64) {
         if let Some(e) = self.inner.lock().unwrap().torrents.get_mut(id) {
