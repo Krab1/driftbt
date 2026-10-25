@@ -200,7 +200,7 @@
         {:else if d.files.length === 0}
           <p class="hint">The file list appears once the torrent info has been fetched.</p>
         {:else}
-          {#key treeKey}<FileTree files={d.files} {selected} onchange={changeFiles} showProgress onplay={(i) => play(i)} />{/key}
+          {#key treeKey}<FileTree files={d.files} {selected} onchange={changeFiles} showProgress onplay={ui.settings?.media_player === false ? undefined : (i) => play(i)} />{/key}
         {/if}
       {:else if ui.detailTab === "peers"}
         {#if !d || d.peers.length === 0}

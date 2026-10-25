@@ -282,7 +282,7 @@ fn main() {
                         let state = handle.state::<AppState>();
                         let (notify, playlists) = {
                             let s = state.settings.lock().unwrap();
-                            (s.notify_on_complete, s.playlist_on_complete)
+                            (s.notify_on_complete, s.media_player && s.playlist_on_complete)
                         };
                         let stats: Vec<_> = list.iter().map(|v| v.stats.clone()).collect();
                         for t in completions(&prev, &stats) {

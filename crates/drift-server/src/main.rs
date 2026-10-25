@@ -168,7 +168,11 @@ async fn run() -> Result<(), String> {
                 let stats: Vec<_> = list.iter().map(|v| v.stats.clone()).collect();
                 for t in completions(&prev, &stats) {
                     let _ = tx.send(Event::new("completed", &serde_json::json!({ "id": t.id, "name": t.name })));
-                    if settings.lock().unwrap().playlist_on_complete {
+                    let playlists = {
+                        let s = settings.lock().unwrap();
+                        s.media_player && s.playlist_on_complete
+                    };
+                    if playlists {
                         let (engine, id) = (engine.clone(), t.id.clone());
                         tokio::spawn(async move {
                             let _ = write_playlist(engine.as_ref(), &id).await;

@@ -45,7 +45,8 @@ export function buildCommands(): Command[] {
   const sel = torrents.selected;
   if (sel) {
     const g = "Selected torrent";
-    add(g, "play", "Play", () => act(() => api.play(sel.id)));
+    const player = ui.settings?.media_player !== false;
+    if (player) add(g, "play", "Play", () => act(() => api.play(sel.id)));
     if (sel.state === "paused") add(g, "resume", "Resume", () => act(() => api.resume(sel.id)), "Space");
     else if (sel.state !== "error" && sel.state !== "checking") add(g, "pause", "Pause", () => act(() => api.pause(sel.id)), "Space");
     if (sel.queue_pos !== null) {
@@ -53,7 +54,7 @@ export function buildCommands(): Command[] {
       add(g, "q-bottom", "Move to bottom of queue", () => act(() => api.moveInQueue(sel.id, "bottom")));
     }
     add(g, "folder", "Show in folder", () => act(() => api.revealTorrent(sel.id)));
-    add(g, "playlist", "Create playlist", () => act(async () => ui.toast(`Playlist saved: ${await api.createPlaylist(sel.id)}`)));
+    if (player) add(g, "playlist", "Create playlist", () => act(async () => ui.toast(`Playlist saved: ${await api.createPlaylist(sel.id)}`)));
     add(g, "goal", "Set seeding goal…", () => void (ui.goalTarget = { id: sel.id, name: sel.name }));
     add(g, "remove", "Remove torrent…", () => void (ui.removeTarget = { id: sel.id, name: sel.name }), "Del");
   }

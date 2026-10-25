@@ -317,6 +317,7 @@ export interface Settings {
   categories: Category[];
   /** Write an .m3u8 next to finished torrents with several video/audio files. */
   playlist_on_complete: boolean;
+  media_player: boolean;
   /** Fixed incoming port; null = random at each start. */
   listen_port: number | null;
   upnp: boolean;

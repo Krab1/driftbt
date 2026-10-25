@@ -24,7 +24,7 @@ Scope control: anything not here needs approval. "Engine" = comes from librqbit;
 ## v1 (M4–M5): the useful extras
 | Feature | Source | Why it is useful |
 |---|---|---|
-| **Play while downloading** (stream to default player) | Engine (HTTP stream) + Ours | Sequential piece priority; button on video files. Differentiator. |
+| **Play while downloading** (stream to default player) | Engine (HTTP stream) + Ours | Sequential piece priority; button on video files. Differentiator. Optional: Settings → General → "Show Play and playlist options" (on by default) hides Play, the file-list Play buttons and playlists. |
 | Download queue (max active, drag to reorder, priority) | Ours | librqbit has no queue; implemented in `core::queue` |
 | Seeding goals: stop at ratio or time | Ours | `core::rules` |
 | Categories and tags, with default save path per category | Ours | Sidebar group, drag torrent to category |

@@ -76,6 +76,9 @@
     }
   }
 
+  // Settings → General can switch Play and the playlist off.
+  const player = $derived(ui.settings?.media_player !== false);
+
   async function play() {
     close();
     if (!t) return;
@@ -200,7 +203,7 @@
 <svelte:window onclick={close} onblur={close} onresize={close} {onkeydown} />
 
 <div class="menu" role="menu" tabindex="-1" bind:this={el} style="left: {pos.x}px; top: {pos.y}px" oncontextmenu={(e) => e.preventDefault()}>
-  {#if t && t.state !== "error"}
+  {#if t && t.state !== "error" && player}
     <button role="menuitem" onclick={play}><Icon name="play" />Play</button>
   {/if}
   {#if canToggle}
@@ -213,7 +216,7 @@
     <button role="menuitem" onclick={moveFiles}><Icon name="folder" />Move files…</button>
   {/if}
   <button role="menuitem" onclick={reveal}><Icon name="folder" />Show in folder</button>
-  <button role="menuitem" onclick={playlist}><Icon name="list" />Create playlist</button>
+  {#if player}<button role="menuitem" onclick={playlist}><Icon name="list" />Create playlist</button>{/if}
   <button role="menuitem" onclick={copyMagnet}><Icon name="file" />Copy magnet link</button>
   {#if inQueue}
     <hr />

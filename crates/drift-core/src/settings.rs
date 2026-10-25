@@ -59,6 +59,8 @@ pub struct Settings {
     pub categories: Vec<Category>,
     /// Write an .m3u8 next to a finished multi-file torrent that has several video or audio files.
     pub playlist_on_complete: bool,
+    /// Show Play (stream while downloading) and the playlist options. Off hides them everywhere and stops automatic playlists.
+    pub media_player: bool,
     /// Fixed incoming port; `None` picks a random one at each start.
     pub listen_port: Option<u16>,
     pub upnp: bool,
@@ -125,6 +127,7 @@ impl Default for Settings {
             min_seed_minutes: 0,
             categories: Vec::new(),
             playlist_on_complete: true,
+            media_player: true,
             listen_port: None,
             upnp: false,
             dht: true,

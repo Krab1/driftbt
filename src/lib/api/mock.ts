@@ -109,6 +109,7 @@ export function createMockApi(count = 40): Api {
     default_goal: { ratio: null, minutes: null },
     min_seed_minutes: 0,
     playlist_on_complete: true,
+    media_player: true,
     listen_port: null,
     upnp: false,
     dht: true,
