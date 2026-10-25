@@ -129,6 +129,8 @@ mod sparse_storage {
     struct LinkInner {
         session: RwLock<Weak<Session>>,
         set: AtomicBool,
+        /// The session is still starting and adding back the torrents it saved.
+        restoring: AtomicBool,
         /// Torrents whose files were already checked for a clash when first added.
         checked: Mutex<HashSet<Id20>>,
         /// One hidden file per torrent, shared by every storage the torrent goes through (a recheck makes a new one
@@ -140,11 +142,21 @@ mod sparse_storage {
     impl SessionLink {
         pub fn set(&self, session: &Arc<Session>) {
             *self.0.session.write().unwrap() = Arc::downgrade(session);
+            self.0.restoring.store(false, Ordering::Release);
             self.0.set.store(true, Ordering::Release);
+        }
+
+        pub fn begin_restore(&self) {
+            self.0.restoring.store(true, Ordering::Release);
+        }
+
+        fn restoring(&self) -> bool {
+            self.0.restoring.load(Ordering::Acquire)
         }
 
         /// The session could not be built: whoever is waiting for it gives up.
         pub fn fail(&self) {
+            self.0.restoring.store(false, Ordering::Release);
             self.0.set.store(true, Ordering::Release);
         }
 
@@ -810,7 +822,10 @@ mod sparse_storage {
             // the way (they are refused unless the add allows overwriting); its handles are closed again at once. Not
             // repeated when the same torrent is started again after an error, which would be refused for its own files.
             let first = self.files.link.0.checked.lock().unwrap().insert(shared.info_hash);
-            if first {
+            // Not while the session is restoring the torrents it saved: those are added with overwriting allowed, so
+            // nothing could be refused, and the check would open (and create) every file of every torrent before the
+            // window can show.
+            if first && !self.files.link.restoring() {
                 let mut probe = FilesystemStorageFactory::default().create(shared, metadata)?;
                 if let Err(e) = probe.init(shared, metadata) {
                     self.files.link.0.checked.lock().unwrap().remove(&shared.info_hash);
@@ -1048,6 +1063,8 @@ async fn build_session(cfg: &RqbitConfig) -> Result<(Arc<Session>, Link)> {
         opts.persistence = Some(SessionPersistenceConfig::Json { folder: Some(dir.clone()) });
         opts.fastresume = true;
     }
+    #[cfg(windows)]
+    link.begin_restore();
     let session = match Session::new_with_opts(cfg.output_dir.clone(), opts).await {
         Ok(s) => s,
         Err(e) => {
@@ -1779,6 +1796,36 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+    }
+
+    /// Starting up must not touch the files of the torrents it restores (that made the window wait for thousands of file
+    /// opens) and must not bring back a folder that was deleted while the app was closed.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn restoring_the_torrent_list_opens_no_files() {
+        let root = scratch("restore-no-files");
+        let (src, dl, state) = (root.join("src"), root.join("dl"), root.join("state"));
+        std::fs::create_dir_all(&state).unwrap();
+        let folder = src.join("album");
+        std::fs::create_dir_all(&folder).unwrap();
+        for i in 0..5u8 {
+            std::fs::write(folder.join(format!("f{i}.bin")), vec![i; 300]).unwrap();
+        }
+        let torrent = create_torrent(&folder, CreateTorrentOptions::default(), &BlockingSpawner::new(1)).await.unwrap().as_bytes().unwrap();
+        let cfg = || RqbitConfig { persistence_dir: Some(state.clone()), ..engine_cfg(&dl, None) };
+        let first = RqbitEngine::new(cfg()).await.unwrap();
+        let mut req = AddRequest::new(AddSource::FileBytes(torrent.to_vec()));
+        req.paused = true;
+        first.add(req).await.unwrap();
+        assert!(dl.join("album").exists(), "a new add still checks the folder for a clash");
+        first.shutdown().await;
+        drop(first);
+
+        std::fs::remove_dir_all(&dl).unwrap();
+        let second = RqbitEngine::new(cfg()).await.unwrap();
+        assert_eq!(second.list().await.unwrap().len(), 1, "the torrent came back");
+        assert!(!dl.exists(), "restoring created nothing on disk");
+        second.shutdown().await;
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// A damaged file is found by a recheck (progress drops, good pieces stay); a repaired one checks out clean.
