@@ -3,7 +3,7 @@
   import { ui } from "../stores/ui.svelte";
   import RateField from "./RateField.svelte";
 
-  let { anchor, onclose }: { anchor: HTMLElement; onclose: () => void } = $props();
+  let { dir, anchor, onclose }: { dir: "down" | "up"; anchor: HTMLElement; onclose: () => void } = $props();
 
   // What the two lines show is what is in force: with the limit switched off, both read Unlimited.
   const s = $derived(ui.settings);
@@ -57,11 +57,14 @@
   <!-- A refused save puts the old values back, so the lines are drawn again from them. -->
   {#key ui.settingsRev}
     <div class="lines">
-      <RateField label="↓ Download" value={down} onset={(k) => set("down", k)} />
-      <RateField label="↑ Upload" value={up} onset={(k) => set("up", k)} />
+      {#if dir === "down"}
+        <RateField label="↓ Download limit" value={down} onset={(k) => set("down", k)} />
+      {:else}
+        <RateField label="↑ Upload limit" value={up} onset={(k) => set("up", k)} />
+      {/if}
     </div>
   {/key}
-  <small>For all torrents together. To limit one torrent, right-click it and choose Speed limit.</small>
+  <small>For all torrents together. Click the other speed to limit it too. To limit one torrent, right-click it and choose Speed limit.</small>
 </div>
 
 <style>
