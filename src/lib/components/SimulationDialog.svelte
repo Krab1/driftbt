@@ -20,9 +20,26 @@
       problem = `${target.pluginName} didn't say what it would use, so empty boxes mean its own defaults.`;
     }
     for (const f of target.fields) if (values[f.key] === undefined && f.default !== undefined) values[f.key] = f.default;
+    // A torrent not simulated yet starts from what was used last time; one already simulated keeps its own.
+    if (!target.enabled) {
+      const last = lastUsed();
+      for (const f of target.fields) {
+        const v = last[f.key];
+        if (v !== undefined && (!f.options?.length || f.options.includes(String(v)))) values[f.key] = v;
+      }
+    }
     before = JSON.stringify(values);
     loading = false;
   });
+
+  const MEMORY = `drift.sim.${target.plugin}`;
+  function lastUsed(): Record<string, PluginValue> {
+    try {
+      return JSON.parse(localStorage.getItem(MEMORY) ?? "{}") ?? {};
+    } catch {
+      return {};
+    }
+  }
 
   /** Empty number boxes are left out, so the plugin keeps its own default for them. */
   function chosen(): Record<string, PluginValue> {
@@ -39,7 +56,13 @@
     if (busy) return;
     busy = true;
     try {
-      await api.setSimulation(target.plugin, target.id, true, chosen());
+      const picked = chosen();
+      await api.setSimulation(target.plugin, target.id, true, picked);
+      try {
+        localStorage.setItem(MEMORY, JSON.stringify(picked));
+      } catch {
+        // Not remembering is fine.
+      }
       ui.toast(target.enabled ? `Saved. ${target.pluginName} restarted this torrent's simulation.` : `${target.pluginName} is simulating this torrent.`);
       ui.simTarget = null;
       void ui.refreshSimulated();
