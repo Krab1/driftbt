@@ -86,6 +86,7 @@
               <input id="sim-{f.key}" class="txt" type={f.type === "number" ? "number" : "text"} autocomplete="off" value={values[f.key] ?? ""} oninput={(e) => (values[f.key] = f.type === "number" ? (e.currentTarget.value === "" ? null : e.currentTarget.valueAsNumber) : e.currentTarget.value)} />
             {/if}
           {/if}
+          {#if f.option_help?.[String(values[f.key] ?? f.default ?? "")]}<small class="tip">{f.option_help[String(values[f.key] ?? f.default ?? "")]}</small>{/if}
           {#if f.help}<small>{f.help}</small>{/if}
         </div>
       {/each}
@@ -135,6 +136,9 @@
     background: var(--bg);
     color: var(--text-primary);
     user-select: text;
+  }
+  .tip {
+    color: var(--text-secondary);
   }
   small {
     color: var(--text-muted);

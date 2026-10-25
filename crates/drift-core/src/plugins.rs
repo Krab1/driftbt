@@ -52,6 +52,9 @@ pub struct Field {
     /// For a `text` field: the only values it may have, drawn as a drop-down.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<String>,
+    /// What each option does, by option: shown under the drop-down while that option is chosen.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub option_help: std::collections::BTreeMap<String, String>,
     /// What the form shows until the user has chosen: a plain field of any kind but `secret`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
@@ -86,7 +89,8 @@ fn valid_row(f: &Field, row: &Value) -> bool {
 
 /// `options` belong to a text field, are few, short and different from each other.
 fn options_ok(f: &Field) -> bool {
-    f.options.is_empty() || (f.kind == "text" && f.options.len() <= 20 && f.options.iter().all(|o| !o.is_empty() && o.chars().count() <= 60) && f.options.iter().collect::<std::collections::HashSet<_>>().len() == f.options.len())
+    (f.options.is_empty() || (f.kind == "text" && f.options.len() <= 20 && f.options.iter().all(|o| !o.is_empty() && o.chars().count() <= 60) && f.options.iter().collect::<std::collections::HashSet<_>>().len() == f.options.len()))
+        && f.option_help.iter().all(|(k, v)| f.options.contains(k) && v.chars().count() <= 400)
 }
 
 /// The value is allowed for this field of a torrent form (the field's own kind, and one of its options if it has any).

@@ -197,6 +197,8 @@ export interface PluginField {
   help: string | null;
   /** For a text field: the only values it may have, drawn as a drop-down. */
   options?: string[];
+  /** What each option does; the one chosen is shown under the drop-down. */
+  option_help?: Record<string, string>;
   /** What the form shows until the user has chosen. */
   default?: string | number | boolean;
   /** For a list: the fields of one row. */

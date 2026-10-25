@@ -257,7 +257,7 @@ export function createMockApi(count = 40): Api {
     ok: true,
     has_status: true,
     fields: [
-      { key: "mode", label: "Mode", type: "text" as const, help: "What the simulated peers do.", options: ["seed_only", "partial_seed", "download_and_seed"] },
+      { key: "mode", label: "Mode", type: "text" as const, help: "What the simulated peers do.", options: ["seed_only", "partial_seed", "download_and_seed"], option_help: { seed_only: "Peers have everything and only upload.", partial_seed: "Peers start with part of the torrent, download the rest, then upload.", download_and_seed: "Peers start with nothing, download everything, then keep uploading." } },
       { key: "peers", label: "Peers", type: "number" as const, help: "How many simulated peers, 1 to 20." },
       { key: "upload_max_kbps", label: "Upload max (KB/s)", type: "number" as const, help: null },
     ],
