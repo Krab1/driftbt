@@ -75,6 +75,8 @@ impl Service {
     /// Saves and applies new settings. Returns the settings that were in force before, so the caller can react to
     /// what changed (the desktop app syncs its autostart entry). A failed network change puts everything back.
     pub async fn apply_settings(&self, new: Settings) -> Result<Settings, ApiError> {
+        // Checked and held to range first: what is stored (and handed back to the caller) is the checked copy.
+        let new = new.checked().map_err(|m| ApiError::new("invalid_input", &m))?;
         let fail = |what: &str, e: &dyn std::fmt::Display| {
             eprintln!("{what}: {e}");
             ApiError::new("settings", "Couldn't save your settings. Check that the app data folder is writable.")

@@ -24,6 +24,7 @@ pub mod schedule;
 pub mod search;
 pub mod service;
 pub mod settings;
+pub mod settings_check;
 pub mod simulator;
 pub mod stream;
 pub mod ticker;

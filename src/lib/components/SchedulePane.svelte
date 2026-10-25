@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ScheduleSlot } from "../api";
+  import { MAX_KIB } from "../rate";
   import { DAYS, describeSlot, fromTime, hasDay, toggleDay, toTime } from "../schedule";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
@@ -10,7 +11,7 @@
   const patch = (i: number, p: Partial<ScheduleSlot>) => save(schedule.slots.map((s, j) => (j === i ? { ...s, ...p } : s)));
   const kib = (e: Event) => {
     const n = Math.floor(Number((e.currentTarget as HTMLInputElement).value));
-    return Number.isFinite(n) && n > 0 ? Math.min(n, 4_000_000) : 0;
+    return Number.isFinite(n) && n > 0 ? Math.min(n, MAX_KIB) : 0;
   };
   const time = (e: Event, fallback: number) => fromTime((e.currentTarget as HTMLInputElement).value) ?? fallback;
 </script>

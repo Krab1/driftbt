@@ -6,6 +6,9 @@ use serde::{Deserialize, Serialize};
 
 pub const CURRENT_SCHEMA: u32 = 1;
 
+/// Largest speed limit accepted, in KiB/s: 10 Gbit/s. The engine counts bytes per second in 32 bits, so 100 Gbit/s would not fit.
+pub const MAX_LIMIT_KIB: u32 = 1_220_703;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {

@@ -1,11 +1,11 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { MAX_KIB } from "../rate";
 
   /** One speed line: a label and a choice of common speeds, or a custom number. Values are KiB/s; 0 = unlimited. */
   let { label, value, onset, live = false }: { label: string; value: number; onset: (kib: number) => void; live?: boolean } = $props();
 
   const PRESETS = [0, 128, 256, 512, 1024, 2048, 5120, 10240, 20480, 51200];
-  const MAX_KIB = 4_000_000;
   const text = (k: number) => (k === 0 ? "Unlimited" : k >= 1024 && k % 1024 === 0 ? `${k / 1024} MB/s` : `${k} KB/s`);
   const split = (k: number) => (k <= 0 ? { n: "", mb: false } : k % 1024 === 0 ? { n: String(k / 1024), mb: true } : { n: String(k), mb: false });
 

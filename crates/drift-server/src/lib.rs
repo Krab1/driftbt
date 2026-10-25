@@ -284,8 +284,8 @@ async fn get_settings(State(s): State<S>) -> Json<Settings> {
 }
 
 async fn put_settings(State(s): State<S>, Json(new): Json<Settings>) -> Res<Settings> {
-    s.svc.apply_settings(new.clone()).await?;
-    Ok(Json(new))
+    s.svc.apply_settings(new).await?;
+    Ok(Json(s.svc.settings.lock().unwrap().clone()))
 }
 
 async fn limits(State(s): State<S>) -> Json<LimitsStatus> {
@@ -511,6 +511,32 @@ mod tests {
         let (_, again) = call(&app, "GET", "/api/settings", Some(TOKEN), None).await;
         assert_eq!(again["down_limit_kib"], 512);
         assert!(dir.join("settings.json").exists(), "saved to disk, not just memory");
+
+        // Numbers are held to range and the answer shows what was stored; values that are not the right kind are refused.
+        let mut big = again.clone();
+        big["up_limit_kib"] = 4_294_967_295u64.into();
+        big["max_active_downloads"] = 99999.into();
+        let (st, kept) = call(&app, "PUT", "/api/settings", Some(TOKEN), Some(big)).await;
+        assert_eq!(st, StatusCode::OK, "{kept}");
+        assert_eq!((kept["up_limit_kib"].clone(), kept["max_active_downloads"].clone()), (1_220_703.into(), 1000.into()));
+        let (_, held) = call(&app, "GET", "/api/settings", Some(TOKEN), None).await;
+        assert_eq!(held["up_limit_kib"], 1_220_703);
+        let bad: [(&str, serde_json::Value); 8] = [
+            ("up_limit_kib", (-1).into()),
+            ("up_limit_kib", 1.5.into()),
+            ("up_limit_kib", "9".into()),
+            ("up_limit_kib", 4_294_967_296u64.into()),
+            ("listen_port", 0.into()),
+            ("listen_port", 70000.into()),
+            ("download_dir", "C:\\a\nb".into()),
+            ("categories", serde_json::json!([{ "name": " ", "save_path": null }])),
+        ];
+        for (k, v) in bad {
+            let mut b = held.clone();
+            b[k] = v.clone();
+            let (st, _) = call(&app, "PUT", "/api/settings", Some(TOKEN), Some(b)).await;
+            assert!(st.is_client_error(), "{k} = {v} gave {st}");
+        }
 
         let (st, e) = call(&app, "POST", "/api/search", Some(TOKEN), Some(serde_json::json!({ "text": "ubuntu" }))).await;
         assert_eq!((st, e["code"].as_str()), (StatusCode::BAD_REQUEST, Some("no_sources")));

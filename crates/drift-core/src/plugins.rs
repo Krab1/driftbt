@@ -70,7 +70,9 @@ fn valid_value(kind: &str, v: &Value) -> bool {
     match (kind, v) {
         ("text", Value::String(s)) => s.chars().count() <= 500,
         ("url", Value::String(s)) => s.is_empty() || (is_http_url(s) && s.len() <= 2048 && !s.contains(char::is_whitespace)),
-        ("number", Value::Number(_)) | ("bool", Value::Bool(_)) => true,
+        // A plain number of sensible size: no one needs 1e300 in a plugin form, and a plugin may not cope with it.
+        ("number", Value::Number(n)) => n.as_f64().is_some_and(|x| x.is_finite() && x.abs() <= 1e12),
+        ("bool", Value::Bool(_)) => true,
         _ => false,
     }
 }
@@ -817,8 +819,12 @@ impl Host {
             return Err("That isn't a secret setting. Save the list first if this is a new row.".into());
         }
         // The old value may be in the log; the log is only rewritten when the plugin next starts.
+        let value = value.trim();
+        if value.chars().count() > 4096 || value.chars().any(char::is_control) {
+            return Err("That key is too long or has line breaks in it.".into());
+        }
         let _ = std::fs::remove_file(&p.log);
-        self.cfg.secrets.set(&format!("{id}:{key}"), value.trim()).map_err(|_| "Couldn't save. Check that the app data folder is writable.".to_string())?;
+        self.cfg.secrets.set(&format!("{id}:{key}"), value).map_err(|_| "Couldn't save. Check that the app data folder is writable.".to_string())?;
         p.restart().await;
         Ok(())
     }

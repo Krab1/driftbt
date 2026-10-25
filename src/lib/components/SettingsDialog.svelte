@@ -1,5 +1,6 @@
 <script lang="ts">
   import { api, remote, type Theme } from "../api";
+  import { MAX_KIB } from "../rate";
   import { parsePack, warnings } from "../themepack";
   import { auth } from "../stores/auth.svelte";
   import { ui } from "../stores/ui.svelte";
@@ -126,14 +127,14 @@
   }
 
   /** Empty or invalid input means 0 / unset. */
-  function whole(e: Event, max = 1_000_000): number {
+  function whole(e: Event, max = 5_256_000): number {
     const n = Math.floor(Number((e.currentTarget as HTMLInputElement).value));
     return Number.isFinite(n) && n > 0 ? Math.min(n, max) : 0;
   }
 
   function ratio(e: Event): number | null {
     const n = Number((e.currentTarget as HTMLInputElement).value);
-    return Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : null;
+    return Number.isFinite(n) && n > 0 ? Math.min(1000, Math.round(n * 100) / 100) : null;
   }
 </script>
 
@@ -222,8 +223,8 @@
           <span>Speed limits</span>
           <label class="check"><input type="checkbox" checked={s.limits_enabled} onchange={(e) => ui.saveSettings({ limits_enabled: e.currentTarget.checked })} /> Limit transfer speed</label>
           <div class="limits">
-            <label>Download <input type="number" min="0" step="50" inputmode="numeric" value={s.down_limit_kib || ""} placeholder="No limit" onchange={(e) => ui.saveSettings({ down_limit_kib: whole(e, 4_000_000) })} /> KiB/s</label>
-            <label>Upload <input type="number" min="0" step="50" inputmode="numeric" value={s.up_limit_kib || ""} placeholder="No limit" onchange={(e) => ui.saveSettings({ up_limit_kib: whole(e, 4_000_000) })} /> KiB/s</label>
+            <label>Download <input type="number" min="0" step="50" inputmode="numeric" value={s.down_limit_kib || ""} placeholder="No limit" onchange={(e) => ui.saveSettings({ down_limit_kib: whole(e, MAX_KIB) })} /> KiB/s</label>
+            <label>Upload <input type="number" min="0" step="50" inputmode="numeric" value={s.up_limit_kib || ""} placeholder="No limit" onchange={(e) => ui.saveSettings({ up_limit_kib: whole(e, MAX_KIB) })} /> KiB/s</label>
           </div>
           <small>Leave a field empty for no limit in that direction. The switch also lives in the status bar.</small>
         </div>

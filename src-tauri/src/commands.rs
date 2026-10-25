@@ -295,7 +295,9 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 
 #[tauri::command]
 pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> ApiResult<Settings> {
-    let before = state.svc.apply_settings(settings.clone()).await?;
+    let before = state.svc.apply_settings(settings).await?;
+    // What was stored: the checked copy, which can differ from what was sent (numbers held to range).
+    let settings = state.settings.lock().unwrap().clone();
     if before.start_with_windows != settings.start_with_windows {
         platform::autostart::set(settings.start_with_windows).map_err(|e| {
             eprintln!("autostart change failed: {e}");

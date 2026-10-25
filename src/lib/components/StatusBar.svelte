@@ -3,6 +3,7 @@
   import { torrents } from "../stores/torrents.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
+  import CustomRateDialog from "./CustomRateDialog.svelte";
   import LimitMenu from "./LimitMenu.svelte";
   import Sparkline from "./Sparkline.svelte";
 
@@ -14,6 +15,14 @@
   // The limit in force for a direction in bytes/s (a schedule wins), or 0 for none.
   const cap = (dir: "down" | "up") =>
     ui.limits.scheduled ? ((dir === "down" ? ui.limits.down_bps : ui.limits.up_bps) ?? 0) : s?.limits_enabled ? (dir === "down" ? s.down_limit_kib : s.up_limit_kib) * 1024 : 0;
+  let custom = $state<"down" | "up" | null>(null);
+  const inForce = (dir: "down" | "up") => (s?.limits_enabled ? (dir === "down" ? s.down_limit_kib : s.up_limit_kib) : 0);
+  /** Sets the overall limit for one direction (0 = unlimited); the limit switches itself on or off with what is set. */
+  async function setLimit(dir: "down" | "up", kib: number): Promise<boolean> {
+    const d = dir === "down" ? kib : inForce("down");
+    const u = dir === "up" ? kib : inForce("up");
+    return ui.saveSettings({ limits_enabled: d > 0 || u > 0, down_limit_kib: d, up_limit_kib: u });
+  }
   function toggle(dir: "down" | "up", e: MouseEvent) {
     anchor = e.currentTarget as HTMLButtonElement;
     open = open === dir ? null : dir;
@@ -21,14 +30,15 @@
 </script>
 
 <footer>
-  <button class="lim num" class:on={cap("down") > 0} aria-haspopup="dialog" aria-expanded={open === "down"} title={cap("down") ? `Download speed, limited to ${formatBytes(cap("down"))}/s. Click to change.` : "Download speed, no limit. Click to set a limit."} onclick={(e) => toggle("down", e)}>
+  <button class="lim num" class:on={cap("down") > 0} aria-haspopup="menu" aria-expanded={open === "down"} title={cap("down") ? `Download speed, limited to ${formatBytes(cap("down"))}/s. Click to change.` : "Download speed, no limit. Click to set a limit."} onclick={(e) => toggle("down", e)}>
     <Icon name="down" size={13} /> {formatSpeed(torrents.totals.down)}{#if cap("down")}<span class="of">/ {formatBytes(cap("down"))}/s</span>{/if}
   </button>
-  <button class="lim num" class:on={cap("up") > 0} aria-haspopup="dialog" aria-expanded={open === "up"} title={cap("up") ? `Upload speed, limited to ${formatBytes(cap("up"))}/s. Click to change.` : "Upload speed, no limit. Click to set a limit."} onclick={(e) => toggle("up", e)}>
+  <button class="lim num" class:on={cap("up") > 0} aria-haspopup="menu" aria-expanded={open === "up"} title={cap("up") ? `Upload speed, limited to ${formatBytes(cap("up"))}/s. Click to change.` : "Upload speed, no limit. Click to set a limit."} onclick={(e) => toggle("up", e)}>
     <Icon name="up" size={13} /> {formatSpeed(torrents.totals.up)}{#if cap("up")}<span class="of">/ {formatBytes(cap("up"))}/s</span>{/if}
   </button>
   <Sparkline down={torrents.history.map((h) => h.d)} up={torrents.history.map((h) => h.u)} label="Transfer speed over the last two minutes: download in blue, upload in green" />
-  {#if open && anchor}<LimitMenu dir={open} {anchor} onclose={() => (open = null)} />{/if}
+  {#if open && anchor}<LimitMenu dir={open} {anchor} onset={setLimit} oncustom={() => (custom = open)} onclose={() => (open = null)} />{/if}
+  {#if custom}<CustomRateDialog dir={custom} current={inForce(custom)} onset={(k) => setLimit(custom!, k)} onclose={() => (custom = null)} />{/if}
   <button class="lim" onclick={() => (ui.ratioOpen = true)}>Ratios</button>
   <span class="end num">{torrents.counts.all} {torrents.counts.all === 1 ? "torrent" : "torrents"} · {torrents.counts.downloading - queued} active{#if queued}{" · "}{queued} queued{/if}</span>
 </footer>

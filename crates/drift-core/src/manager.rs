@@ -27,8 +27,7 @@ const FILES_MISSING_NOTE: &str = "Files missing. Resume to download them again, 
 fn data_lost(seen: u64, now: u64) -> bool {
     seen > 0 && (now == 0 || now.saturating_mul(100) < seen.saturating_mul(98))
 }
-/// Largest speed limit accepted, in KiB/s: the most the engine's 32-bit bytes-per-second can hold.
-const MAX_LIMIT_KIB: u32 = 4_000_000;
+use crate::settings::MAX_LIMIT_KIB;
 
 fn kib_limits(down_kib: u32, up_kib: u32) -> Limits {
     let bps = |kib: u32| (kib > 0).then(|| kib.min(MAX_LIMIT_KIB) * 1024);
@@ -1240,7 +1239,7 @@ mod tests {
 
         // Huge values are held to what the engine can take; zero on both takes the limits away.
         m.set_torrent_limits(&id(1), u32::MAX, 10).await.unwrap();
-        assert_eq!(m.snapshot().await.unwrap()[0].limit_down_kib, 4_000_000);
+        assert_eq!(m.snapshot().await.unwrap()[0].limit_down_kib, MAX_LIMIT_KIB);
         m.set_torrent_limits(&id(1), 0, 0).await.unwrap();
         engine.forget_torrent_limits();
         m.tick().await.unwrap();
