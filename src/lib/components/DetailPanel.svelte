@@ -171,7 +171,7 @@
       {:else if ui.detailTab === "overview"}
         {#if stats.state === "error"}
           <div class="banner" role="alert">
-            <Icon name="alert" /><span>{stats.error ?? "Something went wrong with this torrent."}</span>
+            <Icon name="alert" /><span>{stats.error ?? tr("Something went wrong with this torrent.")}</span>
             <button class="btn" onclick={retry}>{tr("Retry")}</button>
           </div>
         {/if}
@@ -205,7 +205,7 @@
         {/if}
       {:else if ui.detailTab === "peers"}
         {#if !d || d.peers.length === 0}
-          <p class="hint">{stats.state === "paused" ? "Resume the torrent to connect to peers." : "No peers connected yet."}</p>
+          <p class="hint">{stats.state === "paused" ? tr("Resume the torrent to connect to peers.") : tr("No peers connected yet.")}</p>
         {:else}
           <table>
             <thead><tr><th>{tr("Address")}</th><th>{tr("Client")}</th><th>{tr("Via")}</th><th class="r">{tr("Downloaded")}</th><th class="r">{tr("Uploaded")}</th></tr></thead>
@@ -231,7 +231,7 @@
   {@const have = dropping.files.reduce((a, f) => a + f.progress_bytes, 0)}
   <Dialog title="Stop downloading {dropping.files.length === 1 ? 'this file' : dropping.files.length + ' files'}?" onclose={cancelDrop}>
     <p class="ask">
-      {dropping.files.length === 1 ? "This file already has" : "These files already have"}
+      {dropping.files.length === 1 ? tr("This file already has") : tr("These files already have")}
       {formatBytes(have)} downloaded. Delete it to free the space, or keep it on disk?
     </p>
     <ul class="askfiles">

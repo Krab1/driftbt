@@ -28,7 +28,7 @@
               <td class="r num">{r.torrents}</td>
               <td class="r num">{formatBytes(r.uploaded)}</td>
               <td class="r num" class:ok={r.gap === 0}>{r.ratio.toFixed(2)}</td>
-              <td class="r num">{r.gap === 0 ? "Reached" : formatBytes(r.gap)}</td>
+              <td class="r num">{r.gap === 0 ? t("Reached") : formatBytes(r.gap)}</td>
               <td class="r num">{r.gap === 0 ? "—" : r.etaSecs === null ? `Not uploading` : `${formatEta(r.etaSecs)} (${formatSpeed(r.upBps)})`}</td>
             </tr>
           {/each}

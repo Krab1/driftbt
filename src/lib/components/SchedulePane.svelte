@@ -34,7 +34,7 @@
       <label>{t("Down")} <input type="number" min="0" step="50" inputmode="numeric" value={s.down_kib || ""} placeholder={t("None")} onchange={(e) => patch(i, { down_kib: kib(e) })} /> {t("KiB/s")}</label>
       <label>{t("Up")} <input type="number" min="0" step="50" inputmode="numeric" value={s.up_kib || ""} placeholder={t("None")} onchange={(e) => patch(i, { up_kib: kib(e) })} /> {t("KiB/s")}</label>
       <button class="btn ghost icon" aria-label="Remove slot {i + 1}" onclick={() => save(schedule.slots.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
-      <small class="sum">{describeSlot(s)}{s.from_min > s.to_min ? " — runs past midnight into the next day" : ""}</small>
+      <small class="sum">{describeSlot(s)}{s.from_min > s.to_min ? t(" — runs past midnight into the next day") : ""}</small>
     </div>
   {/each}
 

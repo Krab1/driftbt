@@ -162,8 +162,8 @@
         <div class="field">
           <span>{tr("Move finished downloads to")}</span>
           <div class="folder">
-            <code title={s.move_on_complete ?? ""}>{s.move_on_complete ?? "Off"}</code>
-            <button class="btn" onclick={changeMoveDone}><Icon name="folder" />{s.move_on_complete ? "Change" : "Choose…"}</button>
+            <code title={s.move_on_complete ?? ""}>{s.move_on_complete ?? tr("Off")}</code>
+            <button class="btn" onclick={changeMoveDone}><Icon name="folder" />{s.move_on_complete ? tr("Change") : tr("Choose…")}</button>
             {#if s.move_on_complete}<button class="btn" onclick={() => ui.saveSettings({ move_on_complete: null })}>{tr("Turn off")}</button>{/if}
           </div>
           <small>{tr("When a download finishes it is moved here and keeps seeding from the new place. Drift checks the files again after the move, which takes a while for big torrents. Torrents already finished are not moved; right-click one and choose Move files to do that.")}</small>
@@ -172,8 +172,8 @@
         <div class="field">
           <span>{tr("Watch folder")}</span>
           <div class="folder">
-            <code title={s.watch_dir ?? ""}>{s.watch_dir ?? "Off"}</code>
-            <button class="btn" onclick={changeWatch}><Icon name="folder" />{s.watch_dir ? "Change" : "Choose…"}</button>
+            <code title={s.watch_dir ?? ""}>{s.watch_dir ?? tr("Off")}</code>
+            <button class="btn" onclick={changeWatch}><Icon name="folder" />{s.watch_dir ? tr("Change") : tr("Choose…")}</button>
             {#if s.watch_dir}<button class="btn" onclick={() => ui.saveSettings({ watch_dir: null })}>{tr("Turn off")}</button>{/if}
           </div>
           <small>{tr("A .torrent file dropped in this folder is added automatically, then renamed to")} <code class="inl">{tr(".torrent.added")}</code> {tr("so it isn't added twice.")}</small>
@@ -190,7 +190,7 @@
           {#if api.checkUpdate}
             <label class="check"><input type="checkbox" checked={s.check_updates} onchange={(e) => ui.saveSettings({ check_updates: e.currentTarget.checked })} /> {tr("Check for updates once a day (contacts GitHub)")}</label>
             <div class="row">
-              <button class="btn" disabled={checking} onclick={checkNow}>{checking ? "Checking…" : "Check now"}</button>
+              <button class="btn" disabled={checking} onclick={checkNow}>{checking ? tr("Checking…") : tr("Check now")}</button>
               <small role="status">{updateNote || (version ? `Drift ${version}` : "")}</small>
             </div>
           {/if}
@@ -259,13 +259,13 @@
         <div class="field">
           <span>{tr("Categories")}</span>
           {#each s.categories as c (c.name)}
-            <div class="cat"><Icon name="folder" size={14} /><span class="cn">{c.name}</span><code title={c.save_path ?? "Default download folder"}>{c.save_path ?? "Default folder"}</code>
+            <div class="cat"><Icon name="folder" size={14} /><span class="cn">{c.name}</span><code title={c.save_path ?? "Default download folder"}>{c.save_path ?? tr("Default folder")}</code>
               <button class="btn ghost icon" aria-label="Remove category {c.name}" onclick={() => ui.saveSettings({ categories: s.categories.filter((x) => x.name !== c.name) })}><Icon name="x" size={14} /></button>
             </div>
           {/each}
           <div class="cat add">
             <input type="text" class="txt" placeholder={tr("New category")} aria-label={tr("New category name")} bind:value={newName} onkeydown={(e) => e.key === "Enter" && addCategory()} />
-            <button class="btn" onclick={pickCategoryFolder} title={newPath ?? "Use the default download folder"}><Icon name="folder" />{newPath ? "Folder set" : "Folder…"}</button>
+            <button class="btn" onclick={pickCategoryFolder} title={newPath ?? "Use the default download folder"}><Icon name="folder" />{newPath ? tr("Folder set") : tr("Folder…")}</button>
             <button class="btn" onclick={addCategory}><Icon name="plus" />{tr("Add")}</button>
           </div>
           {#if catError}<small class="bad" role="alert">{catError}</small>{/if}

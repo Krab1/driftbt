@@ -102,7 +102,7 @@
     <span>{t("Proxy")}</span>
     <div class="row">
       <input class="txt" type="text" placeholder={t("socks5://127.0.0.1:1080")} aria-label={t("SOCKS5 proxy address")} bind:value={proxyText} disabled={!!busy} onkeydown={(e) => e.key === "Enter" && apply("proxy", { proxy: proxyText.trim() || null })} />
-      <button class="btn" disabled={!!busy} onclick={() => apply("proxy", { proxy: proxyText.trim() || null })}>{s.proxy ? "Update" : "Use proxy"}</button>
+      <button class="btn" disabled={!!busy} onclick={() => apply("proxy", { proxy: proxyText.trim() || null })}>{s.proxy ? t("Update") : t("Use proxy")}</button>
       {#if s.proxy}<button class="btn" disabled={!!busy} onclick={() => { proxyText = ""; apply("proxy", { proxy: null }); }}>{t("Remove")}</button>{/if}
     </div>
     <small>{t("Outgoing connections go through the proxy. Incoming connections and DHT are switched off while it is set, so your real address isn't exposed around it.")}</small>
@@ -115,7 +115,7 @@
       <select aria-label={t("VPN adapter")} value={s.vpn_guard.adapter ?? ""} onchange={(e) => ui.saveSettings({ vpn_guard: { ...s.vpn_guard, adapter: e.currentTarget.value || null } })}>
         <option value="">{t("Choose your VPN adapter…")}</option>
         {#each adapters as a (a.name)}
-          <option value={a.name}>{a.name}{a.up && a.has_ipv4 ? "" : " (not connected)"} — {a.description}</option>
+          <option value={a.name}>{a.name}{a.up && a.has_ipv4 ? "" : t(" (not connected)")} — {a.description}</option>
         {/each}
         {#if s.vpn_guard.adapter && !adapters.some((a) => a.name === s.vpn_guard.adapter)}<option value={s.vpn_guard.adapter}>{s.vpn_guard.adapter} (not found)</option>{/if}
       </select>
@@ -142,7 +142,7 @@
             {#if st?.updated_at}{st.ranges.toLocaleString()} ranges · updated {age(st.updated_at)}{:else}{t("Not downloaded yet")}{/if}
             {#if st?.insecure} · <span class="warn">{t("plain http: it could be altered on the way")}</span>{/if}
           </small>
-          {#if st?.error}<small class="bad" role="alert">{st.error}{st.updated_at ? " The previous copy is still in use." : ""}</small>{/if}
+          {#if st?.error}<small class="bad" role="alert">{st.error}{st.updated_at ? t(" The previous copy is still in use.") : ""}</small>{/if}
         </div>
         <button class="btn ghost icon" aria-label="Remove {l.name}" disabled={!!busy} onclick={() => apply("list", { ip_filter: { ...s.ip_filter, lists: s.ip_filter.lists.filter((x) => x.id !== l.id) } })}><Icon name="x" size={14} /></button>
       </div>
@@ -160,7 +160,7 @@
       {#if !s.ip_filter.lists.some((l) => l.source === emule.source)}
         <button class="btn" disabled={!!busy} onclick={() => addList(emule.name, emule.source)}>Add suggested: {emule.name}</button>
       {/if}
-      <button class="btn" disabled={!!busy || !s.ip_filter.lists.length} onclick={updateNow}>{busy === "update" ? "Updating…" : "Update now"}</button>
+      <button class="btn" disabled={!!busy || !s.ip_filter.lists.length} onclick={updateNow}>{busy === "update" ? t("Updating…") : t("Update now")}</button>
       {#if filter?.enabled}<small class="num">{filter.active_ranges.toLocaleString()} ranges active</small>{/if}
     </div>
     <small>

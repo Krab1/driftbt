@@ -120,7 +120,7 @@
   {#snippet footer()}
     {#if target.enabled}<button class="btn" disabled={loading || busy} onclick={stop}>{t("Stop simulation")}</button>{/if}
     <button class="btn" onclick={() => (ui.simTarget = null)}>{t("Cancel")}</button>
-    <button class="btn primary" disabled={loading || busy || (target.enabled && JSON.stringify(values) === before)} onclick={start}>{target.enabled ? "Save" : "Start simulation"}</button>
+    <button class="btn primary" disabled={loading || busy || (target.enabled && JSON.stringify(values) === before)} onclick={start}>{target.enabled ? t("Save") : t("Start simulation")}</button>
   {/snippet}
 </Dialog>
 

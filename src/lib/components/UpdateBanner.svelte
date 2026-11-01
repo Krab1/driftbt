@@ -21,7 +21,7 @@
 <div class="banner" role="status">
   <Icon name="upload" />
   <span>Drift {ui.update?.version} is available.</span>
-  <button class="btn primary" disabled={busy} onclick={install}>{busy ? "Updating…" : "Install and restart"}</button>
+  <button class="btn primary" disabled={busy} onclick={install}>{busy ? t("Updating…") : t("Install and restart")}</button>
   <button class="btn ghost" disabled={busy} onclick={() => (ui.update = null)}>{t("Later")}</button>
 </div>
 

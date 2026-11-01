@@ -34,7 +34,7 @@
     <RateField label={t("↑ Upload")} value={up} live onset={(k) => (up = k)} />
   </div>
   <small>
-    The overall limit{overall ? " (set in the status bar)" : ""} still applies: this torrent never goes faster than it. Saving restarts the torrent briefly.
+    The overall limit{overall ? t(" (set in the status bar)") : ""} still applies: this torrent never goes faster than it. Saving restarts the torrent briefly.
   </small>
   {#snippet footer()}
     <button class="btn" onclick={() => (ui.limitTarget = null)}>{t("Cancel")}</button>

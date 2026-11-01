@@ -18,7 +18,7 @@
   <Icon name="alert" />
   <span>
     {t("Your VPN isn't connected.")}
-    {#if n}{n} {n === 1 ? "torrent is" : "torrents are"} paused{:else}{t("Torrents are on hold")}{/if}
+    {#if n}{n} {n === 1 ? t("torrent is") : t("torrents are")} paused{:else}{t("Torrents are on hold")}{/if}
     {t("until it is back.")}
   </span>
   <button class="btn" onclick={openSettings}>{t("VPN settings")}</button>

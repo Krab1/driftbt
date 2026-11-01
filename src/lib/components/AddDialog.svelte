@@ -191,7 +191,7 @@
 
   {#snippet footer()}
     <button class="btn" onclick={() => (ui.addOpen = false)}>{tr("Cancel")}</button>
-    <button class="btn primary" disabled={busy} onclick={submit}>{busy ? "Adding…" : "Add torrent"}</button>
+    <button class="btn primary" disabled={busy} onclick={submit}>{busy ? tr("Adding…") : tr("Add torrent")}</button>
   {/snippet}
 </Dialog>
 

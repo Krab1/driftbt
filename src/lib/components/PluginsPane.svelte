@@ -195,11 +195,11 @@
           {#if p.problem}
             <small class="bad">{p.problem}</small>
           {:else}
-            <small>Connects to: {p.permissions.net.length ? net(p) : "nothing on the internet"}</small>
+            <small>Connects to: {p.permissions.net.length ? net(p) : t("nothing on the internet")}</small>
           {/if}
           {#if p.kinds.includes("search") && p.enabled && !p.problem}
             <span class="test">
-              <button class="btn ghost" type="button" disabled={tests[p.id]?.busy} title={t("Send one sample search to this source")} onclick={() => test(p.id)}>{tests[p.id]?.busy ? "Testing…" : "Test"}</button>
+              <button class="btn ghost" type="button" disabled={tests[p.id]?.busy} title={t("Send one sample search to this source")} onclick={() => test(p.id)}>{tests[p.id]?.busy ? t("Testing…") : t("Test")}</button>
               {#if tests[p.id]?.text}<small class:bad={!tests[p.id].ok} class:good={tests[p.id].ok} role="status">{tests[p.id].text}</small>{/if}
             </span>
           {/if}
@@ -207,7 +207,7 @@
           {#if p.previous && !p.pending}<small>Earlier version {p.previous} is kept. <button class="link" onclick={() => rollback(p)}>{t("Go back to it")}</button></small>{/if}
           {#if p.enabled || !p.problem}
             <details class="more">
-              <summary>{p.fields.length ? "Settings and log" : "Log"}</summary>
+              <summary>{p.fields.length ? t("Settings and log") : t("Log")}</summary>
               {#if p.fields.length}
                 <form class="form" onsubmit={(e) => (e.preventDefault(), save(p))}>
                   {#each p.fields as f (f.key)}
@@ -217,8 +217,8 @@
                       {:else if f.type === "secret"}
                         <span class="lbl">{f.label}</span>
                         <span class="sec">
-                          <small>{p.secrets_set.includes(f.key) ? "Saved" : "Not set"}</small>
-                          <button type="button" class="link" onclick={() => secret(p, f.key, f.label)}>{p.secrets_set.includes(f.key) ? "Change" : "Set"}</button>
+                          <small>{p.secrets_set.includes(f.key) ? t("Saved") : t("Not set")}</small>
+                          <button type="button" class="link" onclick={() => secret(p, f.key, f.label)}>{p.secrets_set.includes(f.key) ? t("Change") : t("Set")}</button>
                           {#if p.secrets_set.includes(f.key)}<button type="button" class="link" onclick={() => secret(p, f.key, f.label, true)}>{t("Remove")}</button>{/if}
                         </span>
                       {:else if f.type === "list"}
@@ -231,8 +231,8 @@
                               {:else if i.type === "secret"}
                                 {@const saved = p.secrets_set.includes(`${f.key}.${row.id}.${i.key}`)}
                                 <span class="sec">
-                                  <small>{i.label}: {saved ? "saved" : "not set"}</small>
-                                  <button type="button" class="link" onclick={() => rowSecret(p, f, row, i)}>{saved ? "Change" : "Set"}</button>
+                                  <small>{i.label}: {saved ? "saved" : t("not set")}</small>
+                                  <button type="button" class="link" onclick={() => rowSecret(p, f, row, i)}>{saved ? t("Change") : t("Set")}</button>
                                   {#if saved}<button type="button" class="link" onclick={() => rowSecret(p, f, row, i, true)}>{t("Remove")}</button>{/if}
                                 </span>
                               {:else}
@@ -263,7 +263,7 @@
     {/each}
     <div class="online">
       <label class="check"><input type="checkbox" checked={s.plugin_registry} onchange={(e) => setOnline(e.currentTarget.checked)} /> {t("Look for plugins and updates online")} <small>{t("contacts github.com when you ask")}</small></label>
-      {#if s.plugin_registry}<button class="btn" disabled={looking} onclick={lookup}>{looking ? "Looking…" : offers ? "Check again" : "Check now"}</button>{/if}
+      {#if s.plugin_registry}<button class="btn" disabled={looking} onclick={lookup}>{looking ? t("Looking…") : offers ? t("Check again") : t("Check now")}</button>{/if}
     </div>
     {#if offers}
       {#each offers as o (o.id)}
@@ -276,7 +276,7 @@
           {#if o.installed === o.version}
             <small>{t("Up to date")}</small>
           {:else}
-            <button class="btn" disabled={busy === o.id} onclick={() => install(o)}>{busy === o.id ? "Downloading…" : o.installed ? "Update" : "Install"}</button>
+            <button class="btn" disabled={busy === o.id} onclick={() => install(o)}>{busy === o.id ? t("Downloading…") : o.installed ? t("Update") : t("Install")}</button>
           {/if}
         </div>
       {:else}

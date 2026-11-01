@@ -21,7 +21,7 @@
   <pre>{view.text}</pre>
   <small>{t("This is the technical text behind the message. It helps when asking for support, and it may contain file paths from this computer.")}</small>
   {#snippet footer()}
-    <button class="btn" onclick={copy}>{copied ? "Copied" : "Copy"}</button>
+    <button class="btn" onclick={copy}>{copied ? t("Copied") : t("Copy")}</button>
     <button class="btn primary" onclick={() => (ui.detailView = null)}>{t("Close")}</button>
   {/snippet}
 </Dialog>

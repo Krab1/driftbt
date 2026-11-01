@@ -208,7 +208,7 @@
     <button role="menuitem" onclick={play}><Icon name="play" />{tr("Play")}</button>
   {/if}
   {#if canToggle}
-    <button role="menuitem" onclick={toggle}><Icon name={t!.state === "paused" ? "play" : "pause"} />{t!.state === "paused" ? "Resume" : "Pause"}</button>
+    <button role="menuitem" onclick={toggle}><Icon name={t!.state === "paused" ? "play" : "pause"} />{t!.state === "paused" ? tr("Resume") : tr("Pause")}</button>
   {/if}
   {#if t && t.total_bytes > 0 && t.state !== "checking"}
     <button role="menuitem" onclick={recheck}><Icon name="check" />{tr("Check downloaded files")}</button>

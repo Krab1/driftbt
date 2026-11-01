@@ -58,7 +58,7 @@
       <Icon name="search" />
       <input bind:this={input} type="search" placeholder={t("Search your sources")} aria-label={t("Search your sources")} bind:value={text} />
     </label>
-    <button class="btn primary" type="submit" disabled={busy || !text.trim()}>{busy ? "Searching…" : "Search"}</button>
+    <button class="btn primary" type="submit" disabled={busy || !text.trim()}>{busy ? t("Searching…") : t("Search")}</button>
   </form>
 
   {#if error}
@@ -67,7 +67,7 @@
   {:else if report}
     <p class="status" role="status">
       {answered} of {report.sources.length} source{report.sources.length === 1 ? "" : "s"} answered · {report.results.length} result{report.results.length === 1 ? "" : "s"}
-      {#each problems as p (p.id)}<span class="bad"> · {p.name}: {p.message ?? "didn't answer"}</span>{/each}
+      {#each problems as p (p.id)}<span class="bad"> · {p.name}: {p.message ?? t("didn't answer")}</span>{/each}
     </p>
     {#if report.results.length}
       <ul class="results">

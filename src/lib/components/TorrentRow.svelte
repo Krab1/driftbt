@@ -76,7 +76,7 @@
     </span>
     <div class="nm">
       <span class="line">
-        <span class="text" class:muted={fetching} title={t.name}>{fetching ? "New torrent" : t.name}</span>
+        <span class="text" class:muted={fetching} title={t.name}>{fetching ? tr("New torrent") : t.name}</span>
         {#if t.limit_down_kib || t.limit_up_kib}<span class="own" title={ownLimit}>{tr("Limited")}</span>{/if}
         {#if ui.simulated[t.id]}<span class="own sim" title={ui.simulated[t.id]}>{tr("Simulating")}</span>{/if}
         {#if caption}<span class="cap" class:bad={t.state === "error"} title={caption}>{caption}</span>{/if}

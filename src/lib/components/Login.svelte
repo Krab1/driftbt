@@ -26,7 +26,7 @@
     </label>
     <label class="check"><input type="checkbox" bind:checked={remember} /> {t("Remember on this device")}</label>
     {#if error}<p id="login-err" class="bad" role="alert">{error}</p>{/if}
-    <button class="btn primary" type="submit" disabled={busy || !token.trim()}>{busy ? "Checking…" : "Sign in"}</button>
+    <button class="btn primary" type="submit" disabled={busy || !token.trim()}>{busy ? t("Checking…") : t("Sign in")}</button>
   </form>
 </main>
 
