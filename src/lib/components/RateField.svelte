@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { untrack } from "svelte";
   import { MAX_KIB } from "../rate";
 
@@ -39,12 +40,12 @@
   <label for="{id}-sel">{label}</label>
   <select id="{id}-sel" value={custom ? "custom" : String(value)} onchange={choose}>
     {#each PRESETS as p (p)}<option value={String(p)}>{text(p)}</option>{/each}
-    <option value="custom">Custom…</option>
+    <option value="custom">{t("Custom…")}</option>
   </select>
   {#if custom}
     <div class="own">
-      <input type="number" min="0" step="any" inputmode="decimal" placeholder="Unlimited" aria-label="{label} custom speed" bind:value={n} onchange={() => commit()} oninput={(e) => live && commit(e.currentTarget.value)} />
-      <select aria-label="{label} unit" bind:value={mb} onchange={() => commit()}><option value={false}>KB/s</option><option value={true}>MB/s</option></select>
+      <input type="number" min="0" step="any" inputmode="decimal" placeholder={t("Unlimited")} aria-label="{label} custom speed" bind:value={n} onchange={() => commit()} oninput={(e) => live && commit(e.currentTarget.value)} />
+      <select aria-label="{label} unit" bind:value={mb} onchange={() => commit()}><option value={false}>{t("KB/s")}</option><option value={true}>{t("MB/s")}</option></select>
     </div>
   {/if}
 </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { auth } from "../stores/auth.svelte";
 
   let token = $state("");
@@ -17,13 +18,13 @@
 
 <main class="wrap">
   <form onsubmit={submit}>
-    <h1>Drift</h1>
-    <p>Enter the access token for this server. <code>drift-server --show-token</code> prints it.</p>
+    <h1>{t("Drift")}</h1>
+    <p>{t("Enter the access token for this server.")} <code>{t("drift-server --show-token")}</code> {t("prints it.")}</p>
     <label>
-      <span>Access token</span>
+      <span>{t("Access token")}</span>
       <input type="password" autocomplete="current-password" bind:value={token} aria-invalid={!!error} aria-describedby={error ? "login-err" : undefined} />
     </label>
-    <label class="check"><input type="checkbox" bind:checked={remember} /> Remember on this device</label>
+    <label class="check"><input type="checkbox" bind:checked={remember} /> {t("Remember on this device")}</label>
     {#if error}<p id="login-err" class="bad" role="alert">{error}</p>{/if}
     <button class="btn primary" type="submit" disabled={busy || !token.trim()}>{busy ? "Checking…" : "Sign in"}</button>
   </form>

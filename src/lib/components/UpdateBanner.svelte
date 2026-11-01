@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { api } from "../api";
   import { ui, errorText } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
@@ -21,7 +22,7 @@
   <Icon name="upload" />
   <span>Drift {ui.update?.version} is available.</span>
   <button class="btn primary" disabled={busy} onclick={install}>{busy ? "Updating…" : "Install and restart"}</button>
-  <button class="btn ghost" disabled={busy} onclick={() => (ui.update = null)}>Later</button>
+  <button class="btn ghost" disabled={busy} onclick={() => (ui.update = null)}>{t("Later")}</button>
 </div>
 
 <style>

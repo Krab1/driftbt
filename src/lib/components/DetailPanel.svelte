@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t as tr } from "../i18n.svelte";
   import { api } from "../api";
   import { formatBytes, formatEta, formatSpeed, percent } from "../../format";
   import { torrents } from "../stores/torrents.svelte";
@@ -143,12 +144,12 @@
   const ratio = $derived(stats && stats.progress_bytes > 0 ? (stats.uploaded_bytes / stats.progress_bytes).toFixed(2) : "0.00");
 </script>
 
-<section class="panel" class:closed={!ui.detailOpen} style={ui.detailOpen ? `height: ${ui.detailHeight}px` : undefined} aria-label="Torrent details">
+<section class="panel" class:closed={!ui.detailOpen} style={ui.detailOpen ? `height: ${ui.detailHeight}px` : undefined} aria-label={tr("Torrent details")}>
   {#if ui.detailOpen}
-    <div class="grip" role="separator" aria-orientation="horizontal" aria-label="Resize details" onpointerdown={startResize}></div>
+    <div class="grip" role="separator" aria-orientation="horizontal" aria-label={tr("Resize details")} onpointerdown={startResize}></div>
   {/if}
   <div class="bar">
-    <div class="tabs" role="tablist" aria-label="Details" tabindex="-1" onkeydown={onTabKey}>
+    <div class="tabs" role="tablist" aria-label={tr("Details")} tabindex="-1" onkeydown={onTabKey}>
       {#each tabs as t (t.key)}
         <button role="tab" id="tab-{t.key}" aria-selected={ui.detailTab === t.key} aria-controls="pane" tabindex={ui.detailTab === t.key ? 0 : -1} class:on={ui.detailTab === t.key} onclick={() => { ui.setDetailTab(t.key); ui.setDetailOpen(true); }}>
           {t.label}{#if t.key === "peers" && d}<span class="n num">{d.peers.length}</span>{/if}
@@ -166,39 +167,39 @@
     <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
     <div class="pane" id="pane" role="tabpanel" aria-labelledby="tab-{ui.detailTab}" tabindex="0">
       {#if !stats}
-        <p class="hint">Select a torrent to see its details.</p>
+        <p class="hint">{tr("Select a torrent to see its details.")}</p>
       {:else if ui.detailTab === "overview"}
         {#if stats.state === "error"}
           <div class="banner" role="alert">
             <Icon name="alert" /><span>{stats.error ?? "Something went wrong with this torrent."}</span>
-            <button class="btn" onclick={retry}>Retry</button>
+            <button class="btn" onclick={retry}>{tr("Retry")}</button>
           </div>
         {/if}
         <dl class="grid">
-          <div><dt>Progress</dt><dd class="num">{percent(stats.progress_bytes, stats.total_bytes)}%</dd></div>
-          <div><dt>Size</dt><dd class="num">{stats.total_bytes ? formatBytes(stats.total_bytes) : "—"}</dd></div>
-          <div><dt>Downloaded</dt><dd class="num">{formatBytes(stats.progress_bytes)}</dd></div>
-          <div><dt>Uploaded</dt><dd class="num">{formatBytes(stats.uploaded_bytes)}</dd></div>
-          <div><dt>Ratio</dt><dd class="num">{ratio}</dd></div>
-          <div><dt>Download speed</dt><dd class="num">{formatSpeed(stats.down_bps)}</dd></div>
-          <div><dt>Upload speed</dt><dd class="num">{formatSpeed(stats.up_bps)}</dd></div>
-          <div><dt>Peers</dt><dd class="num">{stats.peers_live}</dd></div>
-          <div><dt>Time left</dt><dd class="num">{stats.state === "downloading" ? formatEta(stats.eta_secs) : "—"}</dd></div>
+          <div><dt>{tr("Progress")}</dt><dd class="num">{percent(stats.progress_bytes, stats.total_bytes)}%</dd></div>
+          <div><dt>{tr("Size")}</dt><dd class="num">{stats.total_bytes ? formatBytes(stats.total_bytes) : "—"}</dd></div>
+          <div><dt>{tr("Downloaded")}</dt><dd class="num">{formatBytes(stats.progress_bytes)}</dd></div>
+          <div><dt>{tr("Uploaded")}</dt><dd class="num">{formatBytes(stats.uploaded_bytes)}</dd></div>
+          <div><dt>{tr("Ratio")}</dt><dd class="num">{ratio}</dd></div>
+          <div><dt>{tr("Download speed")}</dt><dd class="num">{formatSpeed(stats.down_bps)}</dd></div>
+          <div><dt>{tr("Upload speed")}</dt><dd class="num">{formatSpeed(stats.up_bps)}</dd></div>
+          <div><dt>{tr("Peers")}</dt><dd class="num">{stats.peers_live}</dd></div>
+          <div><dt>{tr("Time left")}</dt><dd class="num">{stats.state === "downloading" ? formatEta(stats.eta_secs) : "—"}</dd></div>
         </dl>
         <div class="graph">
-          <Sparkline width={600} height={64} down={samples.map((x) => x.d)} up={samples.map((x) => x.u)} label="Speed of this torrent over the last two minutes: download in blue, upload in green" />
-          <span class="legend"><i class="d"></i>Download <i class="u"></i>Upload · last 2 min</span>
+          <Sparkline width={600} height={64} down={samples.map((x) => x.d)} up={samples.map((x) => x.u)} label={tr("Speed of this torrent over the last two minutes: download in blue, upload in green")} />
+          <span class="legend"><i class="d"></i>{tr("Download")} <i class="u"></i>{tr("Upload · last 2 min")}</span>
         </div>
         <div class="path">
-          <span class="lbl">Saved in</span>
+          <span class="lbl">{tr("Saved in")}</span>
           <code title={d?.save_path ?? ""}>{d?.save_path ?? "…"}</code>
-          <button class="btn" onclick={reveal}><Icon name="folder" />Show in folder</button>
+          <button class="btn" onclick={reveal}><Icon name="folder" />{tr("Show in folder")}</button>
         </div>
       {:else if ui.detailTab === "files"}
         {#if !d}
-          <p class="hint">Loading…</p>
+          <p class="hint">{tr("Loading…")}</p>
         {:else if d.files.length === 0}
-          <p class="hint">The file list appears once the torrent info has been fetched.</p>
+          <p class="hint">{tr("The file list appears once the torrent info has been fetched.")}</p>
         {:else}
           {#key treeKey}<FileTree files={d.files} {selected} onchange={changeFiles} showProgress onplay={ui.settings?.media_player === false ? undefined : (i) => play(i)} />{/key}
         {/if}
@@ -207,7 +208,7 @@
           <p class="hint">{stats.state === "paused" ? "Resume the torrent to connect to peers." : "No peers connected yet."}</p>
         {:else}
           <table>
-            <thead><tr><th>Address</th><th>Client</th><th>Via</th><th class="r">Downloaded</th><th class="r">Uploaded</th></tr></thead>
+            <thead><tr><th>{tr("Address")}</th><th>{tr("Client")}</th><th>{tr("Via")}</th><th class="r">{tr("Downloaded")}</th><th class="r">{tr("Uploaded")}</th></tr></thead>
             <tbody>
               {#each d.peers as p (p.addr)}
                 <tr><td class="mono"><span class="addr"><Flag code={p.country} />{p.addr}</span></td><td>{p.client ?? "—"}</td><td>{p.transport.toUpperCase() || "—"}</td><td class="r num">{formatBytes(p.downloaded_bytes)}</td><td class="r num">{formatBytes(p.uploaded_bytes)}</td></tr>
@@ -217,7 +218,7 @@
         {/if}
       {:else}
         {#if !d || d.trackers.length === 0}
-          <p class="hint">This torrent has no trackers; it finds peers through DHT.</p>
+          <p class="hint">{tr("This torrent has no trackers; it finds peers through DHT.")}</p>
         {:else}
           <ul class="trackers">{#each d.trackers as t (t)}<li class="mono">{t}</li>{/each}</ul>
         {/if}
@@ -237,11 +238,11 @@
       {#each dropping.files.slice(0, 5) as f (f.path)}<li title={f.path}>{f.path}</li>{/each}
       {#if dropping.files.length > 5}<li>and {dropping.files.length - 5} more</li>{/if}
     </ul>
-    <p class="hint">Deleting makes the torrent check itself again, which takes a moment. A few pieces next to the deleted files are fetched once more.</p>
+    <p class="hint">{tr("Deleting makes the torrent check itself again, which takes a moment. A few pieces next to the deleted files are fetched once more.")}</p>
     {#snippet footer()}
-      <button class="btn" onclick={cancelDrop}>Cancel</button>
-      <button class="btn" onclick={() => decide(false)}>Keep files</button>
-      <button class="btn danger" onclick={() => decide(true)}>Delete files</button>
+      <button class="btn" onclick={cancelDrop}>{tr("Cancel")}</button>
+      <button class="btn" onclick={() => decide(false)}>{tr("Keep files")}</button>
+      <button class="btn danger" onclick={() => decide(true)}>{tr("Delete files")}</button>
     {/snippet}
   </Dialog>
 {/if}

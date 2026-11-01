@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api, type PluginValue } from "../api";
   import { ui } from "../stores/ui.svelte";
@@ -87,7 +88,7 @@
   }
 </script>
 
-<Dialog title="Simulation settings" keep onclose={() => (ui.simTarget = null)}>
+<Dialog title={t("Simulation settings")} keep onclose={() => (ui.simTarget = null)}>
   <p class="name" title={target.name}>{target.name}</p>
   {#if loading}
     <p class="note">Asking {target.pluginName}…</p>
@@ -97,12 +98,12 @@
       {#each target.fields as f (f.key)}
         <div class="fld">
           {#if f.type === "bool"}
-            <label class="check"><input type="checkbox" checked={!!values[f.key]} onchange={(e) => (values[f.key] = e.currentTarget.checked)} /> {f.label}{#if values[f.key] === undefined}<small> (the plugin's own default)</small>{/if}</label>
+            <label class="check"><input type="checkbox" checked={!!values[f.key]} onchange={(e) => (values[f.key] = e.currentTarget.checked)} /> {f.label}{#if values[f.key] === undefined}<small> {t("(the plugin's own default)")}</small>{/if}</label>
           {:else}
-            <label for="sim-{f.key}">{f.label}{#if values[f.key] === undefined}<small> (the plugin's own default)</small>{/if}</label>
+            <label for="sim-{f.key}">{f.label}{#if values[f.key] === undefined}<small> {t("(the plugin's own default)")}</small>{/if}</label>
             {#if f.options?.length}
               <select id="sim-{f.key}" class="txt" value={values[f.key] ?? ""} onchange={(e) => (values[f.key] = e.currentTarget.value)}>
-                {#if values[f.key] === undefined}<option value="" selected>(the plugin's own default)</option>{/if}
+                {#if values[f.key] === undefined}<option value="" selected>{t("(the plugin's own default)")}</option>{/if}
                 {#each f.options as o (o)}<option value={o}>{o}</option>{/each}
               </select>
             {:else}
@@ -117,8 +118,8 @@
     <small>These apply to this torrent only. {target.pluginName}'s own settings (Settings → Plugins) cover the rest, such as proxies and the custom client.</small>
   {/if}
   {#snippet footer()}
-    {#if target.enabled}<button class="btn" disabled={loading || busy} onclick={stop}>Stop simulation</button>{/if}
-    <button class="btn" onclick={() => (ui.simTarget = null)}>Cancel</button>
+    {#if target.enabled}<button class="btn" disabled={loading || busy} onclick={stop}>{t("Stop simulation")}</button>{/if}
+    <button class="btn" onclick={() => (ui.simTarget = null)}>{t("Cancel")}</button>
     <button class="btn primary" disabled={loading || busy || (target.enabled && JSON.stringify(values) === before)} onclick={start}>{target.enabled ? "Save" : "Start simulation"}</button>
   {/snippet}
 </Dialog>

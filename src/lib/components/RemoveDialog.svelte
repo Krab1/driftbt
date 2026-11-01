@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { api } from "../api";
   import { torrents } from "../stores/torrents.svelte";
   import { ui, errorText } from "../stores/ui.svelte";
@@ -35,12 +36,12 @@
   }
 </script>
 
-<Dialog title="Remove torrent?" onclose={() => (ui.removeTarget = null)}>
+<Dialog title={t("Remove torrent?")} onclose={() => (ui.removeTarget = null)}>
   <p class="name" title={target.name}>{target.name}</p>
-  <label class="check"><input type="checkbox" bind:checked={deleteFiles} /> Also delete downloaded files</label>
+  <label class="check"><input type="checkbox" bind:checked={deleteFiles} /> {t("Also delete downloaded files")}</label>
   {#snippet footer()}
-    <button class="btn" onclick={() => (ui.removeTarget = null)}>Cancel</button>
-    <button class="btn danger" onclick={confirm}>Remove</button>
+    <button class="btn" onclick={() => (ui.removeTarget = null)}>{t("Cancel")}</button>
+    <button class="btn danger" onclick={confirm}>{t("Remove")}</button>
   {/snippet}
 </Dialog>
 

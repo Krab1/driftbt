@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { formatBytes, formatEta, formatSpeed } from "../../format";
   import { ratioTable } from "../ratio";
   import { torrents } from "../stores/torrents.svelte";
@@ -9,16 +10,16 @@
   const rows = $derived(ratioTable(torrents.all, target > 0 ? target : 0));
 </script>
 
-<Dialog title="Ratios per tracker" onclose={() => (ui.ratioOpen = false)}>
-  <label class="target">Target ratio <input type="number" min="0" step="0.1" inputmode="decimal" bind:value={target} /></label>
+<Dialog title={t("Ratios per tracker")} onclose={() => (ui.ratioOpen = false)}>
+  <label class="target">{t("Target ratio")} <input type="number" min="0" step="0.1" inputmode="decimal" bind:value={target} /></label>
 
   {#if rows.length === 0}
-    <p class="hint">Add a torrent to see how much you've shared.</p>
+    <p class="hint">{t("Add a torrent to see how much you've shared.")}</p>
   {:else}
     <div class="scroll">
       <table>
         <thead>
-          <tr><th>Tracker</th><th class="r">Torrents</th><th class="r">Uploaded</th><th class="r">Ratio</th><th class="r">Still to upload</th><th class="r">At current speed</th></tr>
+          <tr><th>{t("Tracker")}</th><th class="r">{t("Torrents")}</th><th class="r">{t("Uploaded")}</th><th class="r">{t("Ratio")}</th><th class="r">{t("Still to upload")}</th><th class="r">{t("At current speed")}</th></tr>
         </thead>
         <tbody>
           {#each rows as r (r.tracker)}
@@ -37,13 +38,11 @@
   {/if}
 
   <small>
-    These are true numbers from this app. Ratio here is uploaded bytes over torrent size, because Drift can't see what a tracker has recorded as
-    your lifetime download. "Still to upload" is real upload you'd have to do to reach the target; seeding the torrents that have leechers is the
-    fastest way, and an idle torrent with nobody to upload to can't earn ratio.
+    {t("These are true numbers from this app. Ratio here is uploaded bytes over torrent size, because Drift can't see what a tracker has recorded as your lifetime download. \"Still to upload\" is real upload you'd have to do to reach the target; seeding the torrents that have leechers is the fastest way, and an idle torrent with nobody to upload to can't earn ratio.")}
   </small>
 
   {#snippet footer()}
-    <button class="btn" onclick={() => (ui.ratioOpen = false)}>Done</button>
+    <button class="btn" onclick={() => (ui.ratioOpen = false)}>{t("Done")}</button>
   {/snippet}
 </Dialog>
 

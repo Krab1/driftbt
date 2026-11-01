@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api, type PluginField, type PluginInfo, type PluginOffer, type PluginRow, type PluginValue } from "../api";
   import { ui } from "../stores/ui.svelte";
@@ -180,9 +181,9 @@
 
 {#key ui.settingsRev}
   <div class="field">
-    <span>Plugins</span>
+    <span>{t("Plugins")}</span>
     <p class="intro">
-      Plugins add things to Drift. Each one is a small separate program. A <b>search</b> plugin adds a place that <b>Find online</b> can look for torrents, and a plugin can also act when a torrent finishes (move it, show a notice). Drift comes with two search plugins. Turn on only the ones you want, and only plugins you trust.
+      {t("Plugins add things to Drift. Each one is a small separate program. A")} <b>{t("search")}</b> {t("plugin adds a place that")} <b>{t("Find online")}</b> {t("can look for torrents, and a plugin can also act when a torrent finishes (move it, show a notice). Drift comes with two search plugins. Turn on only the ones you want, and only plugins you trust.")}
     </p>
     {#each list as p (p.id)}
       <div class="item">
@@ -198,12 +199,12 @@
           {/if}
           {#if p.kinds.includes("search") && p.enabled && !p.problem}
             <span class="test">
-              <button class="btn ghost" type="button" disabled={tests[p.id]?.busy} title="Send one sample search to this source" onclick={() => test(p.id)}>{tests[p.id]?.busy ? "Testing…" : "Test"}</button>
+              <button class="btn ghost" type="button" disabled={tests[p.id]?.busy} title={t("Send one sample search to this source")} onclick={() => test(p.id)}>{tests[p.id]?.busy ? "Testing…" : "Test"}</button>
               {#if tests[p.id]?.text}<small class:bad={!tests[p.id].ok} class:good={tests[p.id].ok} role="status">{tests[p.id].text}</small>{/if}
             </span>
           {/if}
           {#if p.pending}<small class="note">Version {p.pending} is ready and takes over when you restart Drift.</small>{/if}
-          {#if p.previous && !p.pending}<small>Earlier version {p.previous} is kept. <button class="link" onclick={() => rollback(p)}>Go back to it</button></small>{/if}
+          {#if p.previous && !p.pending}<small>Earlier version {p.previous} is kept. <button class="link" onclick={() => rollback(p)}>{t("Go back to it")}</button></small>{/if}
           {#if p.enabled || !p.problem}
             <details class="more">
               <summary>{p.fields.length ? "Settings and log" : "Log"}</summary>
@@ -218,7 +219,7 @@
                         <span class="sec">
                           <small>{p.secrets_set.includes(f.key) ? "Saved" : "Not set"}</small>
                           <button type="button" class="link" onclick={() => secret(p, f.key, f.label)}>{p.secrets_set.includes(f.key) ? "Change" : "Set"}</button>
-                          {#if p.secrets_set.includes(f.key)}<button type="button" class="link" onclick={() => secret(p, f.key, f.label, true)}>Remove</button>{/if}
+                          {#if p.secrets_set.includes(f.key)}<button type="button" class="link" onclick={() => secret(p, f.key, f.label, true)}>{t("Remove")}</button>{/if}
                         </span>
                       {:else if f.type === "list"}
                         <span class="lbl">{f.label}</span>
@@ -232,16 +233,16 @@
                                 <span class="sec">
                                   <small>{i.label}: {saved ? "saved" : "not set"}</small>
                                   <button type="button" class="link" onclick={() => rowSecret(p, f, row, i)}>{saved ? "Change" : "Set"}</button>
-                                  {#if saved}<button type="button" class="link" onclick={() => rowSecret(p, f, row, i, true)}>Remove</button>{/if}
+                                  {#if saved}<button type="button" class="link" onclick={() => rowSecret(p, f, row, i, true)}>{t("Remove")}</button>{/if}
                                 </span>
                               {:else}
                                 <input class="txt" type={i.type === "number" ? "number" : i.type === "url" ? "url" : "text"} autocomplete="off" placeholder={i.label} aria-label={i.label} value={row[i.key] ?? ""} oninput={(e) => (row[i.key] = i.type === "number" ? e.currentTarget.valueAsNumber : e.currentTarget.value)} />
                               {/if}
                             {/each}
-                            <button type="button" class="btn ghost icon" aria-label="Remove this row" onclick={() => removeRow(p, f, String(row.id))}>✕</button>
+                            <button type="button" class="btn ghost icon" aria-label={t("Remove this row")} onclick={() => removeRow(p, f, String(row.id))}>✕</button>
                           </div>
                         {/each}
-                        <div><button type="button" class="btn" onclick={() => addRow(p, f)}>Add</button></div>
+                        <div><button type="button" class="btn" onclick={() => addRow(p, f)}>{t("Add")}</button></div>
                       {:else}
                         <label class="lbl" for="pf-{p.id}-{f.key}">{f.label}</label>
                         <input id="pf-{p.id}-{f.key}" class="txt" type={f.type === "number" ? "number" : f.type === "url" ? "url" : "text"} autocomplete="off" value={drafts[p.id]?.[f.key] ?? ""} oninput={(e) => (drafts[p.id][f.key] = f.type === "number" ? (e.currentTarget.value === "" ? null : e.currentTarget.valueAsNumber) : e.currentTarget.value)} />
@@ -249,19 +250,19 @@
                       {#if f.help}<small>{f.help}</small>{/if}
                     </div>
                   {/each}
-                  <div><button class="btn primary" type="submit">Save</button></div>
+                  <div><button class="btn primary" type="submit">{t("Save")}</button></div>
                 </form>
               {/if}
-              <div><button class="btn ghost" type="button" onclick={() => showLog(p)}>View log</button></div>
+              <div><button class="btn ghost" type="button" onclick={() => showLog(p)}>{t("View log")}</button></div>
             </details>
           {/if}
         </div>
       </div>
     {:else}
-      {#if loaded}<small>No plugins installed.</small>{/if}
+      {#if loaded}<small>{t("No plugins installed.")}</small>{/if}
     {/each}
     <div class="online">
-      <label class="check"><input type="checkbox" checked={s.plugin_registry} onchange={(e) => setOnline(e.currentTarget.checked)} /> Look for plugins and updates online <small>contacts github.com when you ask</small></label>
+      <label class="check"><input type="checkbox" checked={s.plugin_registry} onchange={(e) => setOnline(e.currentTarget.checked)} /> {t("Look for plugins and updates online")} <small>{t("contacts github.com when you ask")}</small></label>
       {#if s.plugin_registry}<button class="btn" disabled={looking} onclick={lookup}>{looking ? "Looking…" : offers ? "Check again" : "Check now"}</button>{/if}
     </div>
     {#if offers}
@@ -273,18 +274,17 @@
             {#if o.changelog}<small>What's new: {o.changelog}</small>{/if}
           </div>
           {#if o.installed === o.version}
-            <small>Up to date</small>
+            <small>{t("Up to date")}</small>
           {:else}
             <button class="btn" disabled={busy === o.id} onclick={() => install(o)}>{busy === o.id ? "Downloading…" : o.installed ? "Update" : "Install"}</button>
           {/if}
         </div>
       {:else}
-        <small>The registry has no plugins for this version of Drift yet.</small>
+        <small>{t("The registry has no plugins for this version of Drift yet.")}</small>
       {/each}
     {/if}
     <small>
-      To add a plugin by hand, put its folder in <code>plugins</code> inside Drift's data folder and restart Drift. A plugin can't add or remove your torrents; the most one can do is move a finished
-      torrent.
+      {t("To add a plugin by hand, put its folder in")} <code>{t("plugins")}</code> {t("inside Drift's data folder and restart Drift. A plugin can't add or remove your torrents; the most one can do is move a finished torrent.")}
     </small>
   </div>
 {/key}

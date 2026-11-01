@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t as tr } from "../i18n.svelte";
   import { api, type AddInput, type TorrentPreview } from "../api";
   import { formatBytes } from "../../format";
   import { torrents } from "../stores/torrents.svelte";
@@ -133,29 +134,29 @@
   }
 </script>
 
-<Dialog title="Add torrent" keep onclose={() => (ui.addOpen = false)}>
+<Dialog title={tr("Add torrent")} keep onclose={() => (ui.addOpen = false)}>
   <label class="field">
-    <span>Magnet links or .torrent addresses, one per line</span>
-    <textarea rows="3" placeholder="magnet:?xt=urn:btih:…" bind:value={magnets} oninput={() => (error = "")}></textarea>
+    <span>{tr("Magnet links or .torrent addresses, one per line")}</span>
+    <textarea rows="3" placeholder={tr("magnet:?xt=urn:btih:…")} bind:value={magnets} oninput={() => (error = "")}></textarea>
   </label>
 
   <div class="field">
-    <span>Torrent files</span>
+    <span>{tr("Torrent files")}</span>
     <div class="files">
       {#each files as f, i (f.name + i)}
         <div class="chip"><Icon name="file" size={14} /><span class="fn">{f.name}</span>
           <button class="btn ghost icon" aria-label="Remove {f.name}" onclick={() => (files = files.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
         </div>
       {/each}
-      <button class="btn" onclick={() => picker?.click()}><Icon name="plus" />Choose files</button>
+      <button class="btn" onclick={() => picker?.click()}><Icon name="plus" />{tr("Choose files")}</button>
       <input bind:this={picker} type="file" accept=".torrent" multiple hidden onchange={(e) => (pickFiles(e.currentTarget.files), (e.currentTarget.value = ""))} />
     </div>
   </div>
 
   {#if previewing}
-    <p class="note busy" role="status"><span class="spinner" aria-hidden="true"></span>Fetching torrent info… You don't have to wait: add it now and everything gets downloaded. You can untick files later.</p>
+    <p class="note busy" role="status"><span class="spinner" aria-hidden="true"></span>{tr("Fetching torrent info… You don't have to wait: add it now and everything gets downloaded. You can untick files later.")}</p>
   {:else if previewError}
-    <p class="note warn" role="status">{previewError} You can still add it.{#if more} <button class="link" onclick={() => (ui.detailView = { title: previewError, text: more })}>More details</button>{/if}</p>
+    <p class="note warn" role="status">{previewError} You can still add it.{#if more} <button class="link" onclick={() => (ui.detailView = { title: previewError, text: more })}>{tr("More details")}</button>{/if}</p>
   {:else if preview}
     <div class="field">
       <div class="phead">
@@ -170,26 +171,26 @@
 
   {#if categories.length}
     <label class="field">
-      <span>Category</span>
+      <span>{tr("Category")}</span>
       <select bind:value={category}>
-        <option value="">None</option>
+        <option value="">{tr("None")}</option>
         {#each categories as c (c.name)}<option value={c.name}>{c.name}</option>{/each}
       </select>
     </label>
   {/if}
 
   <div class="field">
-    <span>Save to</span>
+    <span>{tr("Save to")}</span>
     <div class="folder">
       <code title={savePath}>{savePath}</code>
-      <button class="btn" onclick={changeFolder}><Icon name="folder" />Change</button>
+      <button class="btn" onclick={changeFolder}><Icon name="folder" />{tr("Change")}</button>
     </div>
   </div>
 
-  {#if error}<p class="err" role="alert">{error}{#if more} <button class="link" onclick={() => (ui.detailView = { title: error, text: more })}>More details</button>{/if}</p>{/if}
+  {#if error}<p class="err" role="alert">{error}{#if more} <button class="link" onclick={() => (ui.detailView = { title: error, text: more })}>{tr("More details")}</button>{/if}</p>{/if}
 
   {#snippet footer()}
-    <button class="btn" onclick={() => (ui.addOpen = false)}>Cancel</button>
+    <button class="btn" onclick={() => (ui.addOpen = false)}>{tr("Cancel")}</button>
     <button class="btn primary" disabled={busy} onclick={submit}>{busy ? "Adding…" : "Add torrent"}</button>
   {/snippet}
 </Dialog>

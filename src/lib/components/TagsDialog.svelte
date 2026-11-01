@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t as tr } from "../i18n.svelte";
   import { api } from "../api";
   import { torrents } from "../stores/torrents.svelte";
   import { ui, errorText } from "../stores/ui.svelte";
@@ -40,24 +41,24 @@
   }
 </script>
 
-<Dialog title="Tags" onclose={() => (ui.tagTarget = null)}>
+<Dialog title={tr("Tags")} onclose={() => (ui.tagTarget = null)}>
   <p class="name" title={target.name}>{target.name}</p>
   <div class="box">
     {#each tags as t (t)}
-      <span class="chip">{t}<button aria-label="Remove tag {t}" onclick={() => (tags = tags.filter((x) => x !== t))}>×</button></span>
+      <span class="chip">{t}<button aria-label="Remove tag {t}" onclick={() => (tags = tags.filter((x) => x !== t))}>{tr("×")}</button></span>
     {/each}
     <!-- svelte-ignore a11y_autofocus -->
-    <input type="text" aria-label="Add a tag" placeholder={tags.length ? "" : "Type a tag and press Enter"} maxlength="32" autofocus bind:value={text} {onkeydown} disabled={tags.length >= MAX} />
+    <input type="text" aria-label={tr("Add a tag")} placeholder={tags.length ? "" : "Type a tag and press Enter"} maxlength="32" autofocus bind:value={text} {onkeydown} disabled={tags.length >= MAX} />
   </div>
   {#if suggestions.length}
-    <div class="sug" role="group" aria-label="Existing tags">
+    <div class="sug" role="group" aria-label={tr("Existing tags")}>
       {#each suggestions as s (s)}<button class="btn" onclick={() => add(s)}>{s}</button>{/each}
     </div>
   {/if}
   <small>Separate tags with Enter or a comma. Up to {MAX} tags. Click a tag in the left list to show only its torrents.</small>
   {#snippet footer()}
-    <button class="btn" onclick={() => (ui.tagTarget = null)}>Cancel</button>
-    <button class="btn primary" onclick={save}>Save</button>
+    <button class="btn" onclick={() => (ui.tagTarget = null)}>{tr("Cancel")}</button>
+    <button class="btn primary" onclick={save}>{tr("Save")}</button>
   {/snippet}
 </Dialog>
 

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api, type Adapter, type FilterStatus, type NetworkStatus } from "../api";
   import { ui } from "../stores/ui.svelte";
@@ -84,52 +85,51 @@
 
 {#key ui.settingsRev}
   <div class="field">
-    <span>Incoming connections</span>
-    <label class="inline">Port <input type="number" min="1024" max="65535" inputmode="numeric" value={s.listen_port ?? ""} placeholder="Random" disabled={!!busy} onchange={(e) => apply("port", { listen_port: port(e) })} /></label>
-    <label class="check"><input type="checkbox" checked={s.upnp} disabled={!!busy || !!s.proxy} onchange={(e) => apply("upnp", { upnp: e.currentTarget.checked })} /> Open the port on my router automatically (UPnP)</label>
-    <label class="check"><input type="checkbox" checked={s.dht} disabled={!!busy || !!s.proxy} onchange={(e) => apply("dht", { dht: e.currentTarget.checked })} /> Find more peers through DHT</label>
+    <span>{t("Incoming connections")}</span>
+    <label class="inline">{t("Port")} <input type="number" min="1024" max="65535" inputmode="numeric" value={s.listen_port ?? ""} placeholder={t("Random")} disabled={!!busy} onchange={(e) => apply("port", { listen_port: port(e) })} /></label>
+    <label class="check"><input type="checkbox" checked={s.upnp} disabled={!!busy || !!s.proxy} onchange={(e) => apply("upnp", { upnp: e.currentTarget.checked })} /> {t("Open the port on my router automatically (UPnP)")}</label>
+    <label class="check"><input type="checkbox" checked={s.dht} disabled={!!busy || !!s.proxy} onchange={(e) => apply("dht", { dht: e.currentTarget.checked })} /> {t("Find more peers through DHT")}</label>
     <small role="status">
-      {#if busy}Applying… torrents pause for a moment.
-      {:else if net?.listen_port}Listening on port <b class="num">{net.listen_port}</b>.
-      {:else if s.proxy}Not listening: a proxy is set, so incoming connections and DHT are off.
-      {:else}Not listening right now.{/if}
-      A fixed port must be at least 1024; leave it empty to pick a random one at each start.
+      {#if busy}{t("Applying… torrents pause for a moment.")}
+      {:else if net?.listen_port}{t("Listening on port")} <b class="num">{net.listen_port}</b>.
+      {:else if s.proxy}{t("Not listening: a proxy is set, so incoming connections and DHT are off.")}
+      {:else}{t("Not listening right now.")}{/if}
+      {t("A fixed port must be at least 1024; leave it empty to pick a random one at each start.")}
     </small>
   </div>
 
   <div class="field">
-    <span>Proxy</span>
+    <span>{t("Proxy")}</span>
     <div class="row">
-      <input class="txt" type="text" placeholder="socks5://127.0.0.1:1080" aria-label="SOCKS5 proxy address" bind:value={proxyText} disabled={!!busy} onkeydown={(e) => e.key === "Enter" && apply("proxy", { proxy: proxyText.trim() || null })} />
+      <input class="txt" type="text" placeholder={t("socks5://127.0.0.1:1080")} aria-label={t("SOCKS5 proxy address")} bind:value={proxyText} disabled={!!busy} onkeydown={(e) => e.key === "Enter" && apply("proxy", { proxy: proxyText.trim() || null })} />
       <button class="btn" disabled={!!busy} onclick={() => apply("proxy", { proxy: proxyText.trim() || null })}>{s.proxy ? "Update" : "Use proxy"}</button>
-      {#if s.proxy}<button class="btn" disabled={!!busy} onclick={() => { proxyText = ""; apply("proxy", { proxy: null }); }}>Remove</button>{/if}
+      {#if s.proxy}<button class="btn" disabled={!!busy} onclick={() => { proxyText = ""; apply("proxy", { proxy: null }); }}>{t("Remove")}</button>{/if}
     </div>
-    <small>Outgoing connections go through the proxy. Incoming connections and DHT are switched off while it is set, so your real address isn't exposed around it.</small>
+    <small>{t("Outgoing connections go through the proxy. Incoming connections and DHT are switched off while it is set, so your real address isn't exposed around it.")}</small>
   </div>
 
   <div class="field">
-    <span>VPN guard</span>
-    <label class="check"><input type="checkbox" checked={s.vpn_guard.enabled} onchange={(e) => ui.saveSettings({ vpn_guard: { ...s.vpn_guard, enabled: e.currentTarget.checked } })} /> Pause all torrents when my VPN isn't connected</label>
+    <span>{t("VPN guard")}</span>
+    <label class="check"><input type="checkbox" checked={s.vpn_guard.enabled} onchange={(e) => ui.saveSettings({ vpn_guard: { ...s.vpn_guard, enabled: e.currentTarget.checked } })} /> {t("Pause all torrents when my VPN isn't connected")}</label>
     <div class="row">
-      <select aria-label="VPN adapter" value={s.vpn_guard.adapter ?? ""} onchange={(e) => ui.saveSettings({ vpn_guard: { ...s.vpn_guard, adapter: e.currentTarget.value || null } })}>
-        <option value="">Choose your VPN adapter…</option>
+      <select aria-label={t("VPN adapter")} value={s.vpn_guard.adapter ?? ""} onchange={(e) => ui.saveSettings({ vpn_guard: { ...s.vpn_guard, adapter: e.currentTarget.value || null } })}>
+        <option value="">{t("Choose your VPN adapter…")}</option>
         {#each adapters as a (a.name)}
           <option value={a.name}>{a.name}{a.up && a.has_ipv4 ? "" : " (not connected)"} — {a.description}</option>
         {/each}
         {#if s.vpn_guard.adapter && !adapters.some((a) => a.name === s.vpn_guard.adapter)}<option value={s.vpn_guard.adapter}>{s.vpn_guard.adapter} (not found)</option>{/if}
       </select>
-      <button class="btn" onclick={loadAdapters}>Refresh</button>
+      <button class="btn" onclick={loadAdapters}>{t("Refresh")}</button>
     </div>
-    <label class="check"><input type="checkbox" checked={s.vpn_guard.auto_resume} onchange={(e) => ui.saveSettings({ vpn_guard: { ...s.vpn_guard, auto_resume: e.currentTarget.checked } })} /> Resume what it paused when the VPN comes back</label>
+    <label class="check"><input type="checkbox" checked={s.vpn_guard.auto_resume} onchange={(e) => ui.saveSettings({ vpn_guard: { ...s.vpn_guard, auto_resume: e.currentTarget.checked } })} /> {t("Resume what it paused when the VPN comes back")}</label>
     <small>
-      Drift can't bind to an adapter on Windows, so this is a watchdog: within a few seconds of your VPN dropping it pauses everything and holds the queue.
-      A little traffic could leave in that gap. For a hard guarantee, use your VPN's own kill switch as well.
+      {t("Drift can't bind to an adapter on Windows, so this is a watchdog: within a few seconds of your VPN dropping it pauses everything and holds the queue. A little traffic could leave in that gap. For a hard guarantee, use your VPN's own kill switch as well.")}
     </small>
   </div>
 
   <div class="field">
-    <span>IP filter</span>
-    <label class="check"><input type="checkbox" checked={s.ip_filter.enabled} disabled={!!busy} onchange={(e) => apply("filter", { ip_filter: { ...s.ip_filter, enabled: e.currentTarget.checked } })} /> Block connections to and from addresses on these lists</label>
+    <span>{t("IP filter")}</span>
+    <label class="check"><input type="checkbox" checked={s.ip_filter.enabled} disabled={!!busy} onchange={(e) => apply("filter", { ip_filter: { ...s.ip_filter, enabled: e.currentTarget.checked } })} /> {t("Block connections to and from addresses on these lists")}</label>
 
     {#each s.ip_filter.lists as l (l.id)}
       {@const st = filter?.lists[l.id]}
@@ -139,8 +139,8 @@
           <div class="nm"><Icon name="file" size={14} />{l.name}</div>
           <code title={l.source}>{l.source}</code>
           <small>
-            {#if st?.updated_at}{st.ranges.toLocaleString()} ranges · updated {age(st.updated_at)}{:else}Not downloaded yet{/if}
-            {#if st?.insecure} · <span class="warn">plain http: it could be altered on the way</span>{/if}
+            {#if st?.updated_at}{st.ranges.toLocaleString()} ranges · updated {age(st.updated_at)}{:else}{t("Not downloaded yet")}{/if}
+            {#if st?.insecure} · <span class="warn">{t("plain http: it could be altered on the way")}</span>{/if}
           </small>
           {#if st?.error}<small class="bad" role="alert">{st.error}{st.updated_at ? " The previous copy is still in use." : ""}</small>{/if}
         </div>
@@ -149,10 +149,10 @@
     {/each}
 
     <div class="row">
-      <input class="txt" type="text" placeholder="Name (optional)" aria-label="List name" bind:value={newName} />
-      <input class="txt wide" type="text" placeholder="https://… or a file path" aria-label="List address or file" bind:value={newSource} onkeydown={(e) => e.key === "Enter" && addList(newName, newSource)} />
-      <button class="btn" onclick={chooseFile}><Icon name="folder" />File…</button>
-      <button class="btn" disabled={!!busy} onclick={() => addList(newName, newSource)}><Icon name="plus" />Add</button>
+      <input class="txt" type="text" placeholder={t("Name (optional)")} aria-label={t("List name")} bind:value={newName} />
+      <input class="txt wide" type="text" placeholder={t("https://… or a file path")} aria-label={t("List address or file")} bind:value={newSource} onkeydown={(e) => e.key === "Enter" && addList(newName, newSource)} />
+      <button class="btn" onclick={chooseFile}><Icon name="folder" />{t("File…")}</button>
+      <button class="btn" disabled={!!busy} onclick={() => addList(newName, newSource)}><Icon name="plus" />{t("Add")}</button>
     </div>
     {#if listError}<small class="bad" role="alert">{listError}</small>{/if}
 
@@ -164,9 +164,7 @@
       {#if filter?.enabled}<small class="num">{filter.active_ranges.toLocaleString()} ranges active</small>{/if}
     </div>
     <small>
-      Understands eMule <code>ipfilter.dat</code>, PeerGuardian and plain range lists, also zipped or gzipped. Lists are checked before use: empty ones, huge ones, and ones that would
-      block more than a quarter of the internet are ignored. This blocks connections; it doesn't hide your address, so it isn't a substitute for a VPN. Lists refresh weekly, and the
-      engine briefly restarts when one changes.
+      {t("Understands eMule")} <code>{t("ipfilter.dat")}</code>{t(", PeerGuardian and plain range lists, also zipped or gzipped. Lists are checked before use: empty ones, huge ones, and ones that would block more than a quarter of the internet are ignored. This blocks connections; it doesn't hide your address, so it isn't a substitute for a VPN. Lists refresh weekly, and the engine briefly restarts when one changes.")}
     </small>
   </div>
 {/key}

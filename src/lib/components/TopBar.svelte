@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { torrents } from "../stores/torrents.svelte";
   import { ui } from "../stores/ui.svelte";
   import { api } from "../api";
@@ -14,21 +15,21 @@
 </script>
 
 <header data-tauri-drag-region>
-  <button class="btn ghost icon gear" aria-label="Settings" title="Settings" onclick={() => ui.openSettings()}><Icon name="gear" size={18} /></button>
+  <button class="btn ghost icon gear" aria-label={t("Settings")} title={t("Settings")} onclick={() => ui.openSettings()}><Icon name="gear" size={18} /></button>
   <label class="search">
     <Icon name="search" />
     <input
       bind:this={input}
       type="search"
-      placeholder="Search torrents"
-      aria-label="Search torrents"
+      placeholder={t("Search torrents")}
+      aria-label={t("Search torrents")}
       value={torrents.query}
       oninput={(e) => (torrents.query = e.currentTarget.value)}
       onkeydown={(e) => e.key === "Escape" && ((torrents.query = ""), e.currentTarget.blur())}
     />
   </label>
-  <button class="btn" onclick={() => (ui.searchOpen = true)} title="Search for torrents (Ctrl+Shift+F)"><Icon name="search" />Find online</button>
-  <button class="btn primary" onclick={() => ui.openAdd()}><Icon name="plus" />Add torrent</button>
+  <button class="btn" onclick={() => (ui.searchOpen = true)} title={t("Search for torrents (Ctrl+Shift+F)")}><Icon name="search" />{t("Find online")}</button>
+  <button class="btn primary" onclick={() => ui.openAdd()}><Icon name="plus" />{t("Add torrent")}</button>
   {#if api.chrome}<WindowControls />{/if}
 </header>
 

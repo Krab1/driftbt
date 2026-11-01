@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t as tr } from "../i18n.svelte";
   import { api, type QueueMove, type SimulatorState } from "../api";
   import { torrents } from "../stores/torrents.svelte";
   import { ui, errorText } from "../stores/ui.svelte";
@@ -204,20 +205,20 @@
 
 <div class="menu" role="menu" tabindex="-1" bind:this={el} style="left: {pos.x}px; top: {pos.y}px" oncontextmenu={(e) => e.preventDefault()}>
   {#if t && t.state !== "error" && player}
-    <button role="menuitem" onclick={play}><Icon name="play" />Play</button>
+    <button role="menuitem" onclick={play}><Icon name="play" />{tr("Play")}</button>
   {/if}
   {#if canToggle}
     <button role="menuitem" onclick={toggle}><Icon name={t!.state === "paused" ? "play" : "pause"} />{t!.state === "paused" ? "Resume" : "Pause"}</button>
   {/if}
   {#if t && t.total_bytes > 0 && t.state !== "checking"}
-    <button role="menuitem" onclick={recheck}><Icon name="check" />Check downloaded files</button>
+    <button role="menuitem" onclick={recheck}><Icon name="check" />{tr("Check downloaded files")}</button>
   {/if}
   {#if t && t.total_bytes > 0 && t.state !== "checking"}
-    <button role="menuitem" onclick={moveFiles}><Icon name="folder" />Move files…</button>
+    <button role="menuitem" onclick={moveFiles}><Icon name="folder" />{tr("Move files…")}</button>
   {/if}
-  <button role="menuitem" onclick={reveal}><Icon name="folder" />Show in folder</button>
-  {#if player}<button role="menuitem" onclick={playlist}><Icon name="list" />Create playlist</button>{/if}
-  <button role="menuitem" onclick={copyMagnet}><Icon name="file" />Copy magnet link</button>
+  <button role="menuitem" onclick={reveal}><Icon name="folder" />{tr("Show in folder")}</button>
+  {#if player}<button role="menuitem" onclick={playlist}><Icon name="list" />{tr("Create playlist")}</button>{/if}
+  <button role="menuitem" onclick={copyMagnet}><Icon name="file" />{tr("Copy magnet link")}</button>
   {#if inQueue}
     <hr />
     {#each queueMoves as m (m.to)}
@@ -226,9 +227,9 @@
   {/if}
   {#if categories.length}
     <hr />
-    <div class="lbl" id="cm-cat">Category</div>
+    <div class="lbl" id="cm-cat">{tr("Category")}</div>
     <div role="group" aria-labelledby="cm-cat">
-      <button role="menuitemradio" aria-checked={!t?.category} onclick={() => setCategory(null)}><span class="tick">{!t?.category ? "✓" : ""}</span>None</button>
+      <button role="menuitemradio" aria-checked={!t?.category} onclick={() => setCategory(null)}><span class="tick">{!t?.category ? "✓" : ""}</span>{tr("None")}</button>
       {#each categories as c (c.name)}
         <button role="menuitemradio" aria-checked={t?.category === c.name} onclick={() => setCategory(c.name)}><span class="tick">{t?.category === c.name ? "✓" : ""}</span>{c.name}</button>
       {/each}
@@ -236,25 +237,25 @@
   {/if}
   {#if sims.length}
     <hr />
-    <div class="lbl" id="cm-sim">Simulator plugins</div>
+    <div class="lbl" id="cm-sim">{tr("Simulator plugins")}</div>
     <div role="group" aria-labelledby="cm-sim">
       {#each sims as s (s.id)}
         {@const sel = simOn(s)}
         {#if s.ok}
           <button role="menuitemcheckbox" aria-checked={!!sel?.enabled} onclick={() => simulate(s)}><span class="tick">{sel?.enabled ? "✓" : ""}</span>{s.name}: Simulate this torrent{#if sel?.enabled && sel.label}<span class="cur">{sel.label}</span>{/if}</button>
-          {#if sel?.enabled && s.fields.length}<button role="menuitem" onclick={() => simSettings(s)}><Icon name="sliders" />Simulation settings…</button>{/if}
-          {#if sel?.enabled && s.has_status}<button role="menuitem" onclick={() => simStats(s)}><Icon name="list" />Simulation statistics…</button>{/if}
+          {#if sel?.enabled && s.fields.length}<button role="menuitem" onclick={() => simSettings(s)}><Icon name="sliders" />{tr("Simulation settings…")}</button>{/if}
+          {#if sel?.enabled && s.has_status}<button role="menuitem" onclick={() => simStats(s)}><Icon name="list" />{tr("Simulation statistics…")}</button>{/if}
         {:else}
-          <button role="menuitem" disabled title="It didn't answer. Look at its log in Settings → Plugins.">{s.name}: not responding</button>
+          <button role="menuitem" disabled title={tr("It didn't answer. Look at its log in Settings → Plugins.")}>{s.name}: not responding</button>
         {/if}
       {/each}
     </div>
   {/if}
   <hr />
-  <button role="menuitem" onclick={tags}><Icon name="file" />Tags…</button>
-  <button role="menuitem" onclick={limit}><Icon name="sliders" />Speed limit…{#if t && (t.limit_down_kib || t.limit_up_kib)}<span class="cur">on</span>{/if}</button>
-  <button role="menuitem" onclick={goal}><Icon name="clock" />Seeding goal…</button>
-  <button role="menuitem" onclick={remove}><Icon name="trash" />Remove…</button>
+  <button role="menuitem" onclick={tags}><Icon name="file" />{tr("Tags…")}</button>
+  <button role="menuitem" onclick={limit}><Icon name="sliders" />{tr("Speed limit…")}{#if t && (t.limit_down_kib || t.limit_up_kib)}<span class="cur">{tr("on")}</span>{/if}</button>
+  <button role="menuitem" onclick={goal}><Icon name="clock" />{tr("Seeding goal…")}</button>
+  <button role="menuitem" onclick={remove}><Icon name="trash" />{tr("Remove…")}</button>
 </div>
 
 <style>

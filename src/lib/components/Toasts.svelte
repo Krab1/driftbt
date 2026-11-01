@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t as tr } from "../i18n.svelte";
   import { ui } from "../stores/ui.svelte";
 </script>
 
@@ -6,7 +7,7 @@
   {#each ui.toasts as t (t.id)}
     <div class="toast" class:error={t.kind === "error"} role={t.kind === "error" ? "alert" : "status"}>
       <span>{t.text}</span>
-      {#if t.detail}<button class="more" onclick={() => (ui.detailView = { title: t.text, text: t.detail ?? "" })}>More details</button>{/if}
+      {#if t.detail}<button class="more" onclick={() => (ui.detailView = { title: t.text, text: t.detail ?? "" })}>{tr("More details")}</button>{/if}
     </div>
   {/each}
 </div>

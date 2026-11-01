@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { ui } from "../stores/ui.svelte";
   import Dialog from "./Dialog.svelte";
 
@@ -15,13 +16,13 @@
   }
 </script>
 
-<Dialog title="Error details" onclose={() => (ui.detailView = null)}>
+<Dialog title={t("Error details")} onclose={() => (ui.detailView = null)}>
   <p class="what">{view.title}</p>
   <pre>{view.text}</pre>
-  <small>This is the technical text behind the message. It helps when asking for support, and it may contain file paths from this computer.</small>
+  <small>{t("This is the technical text behind the message. It helps when asking for support, and it may contain file paths from this computer.")}</small>
   {#snippet footer()}
     <button class="btn" onclick={copy}>{copied ? "Copied" : "Copy"}</button>
-    <button class="btn primary" onclick={() => (ui.detailView = null)}>Close</button>
+    <button class="btn primary" onclick={() => (ui.detailView = null)}>{t("Close")}</button>
   {/snippet}
 </Dialog>
 

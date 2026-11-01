@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { torrents, type Filter } from "../stores/torrents.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
@@ -12,7 +13,7 @@
   ];
 </script>
 
-<nav aria-label="Filters">
+<nav aria-label={t("Filters")}>
   {#each items as it (it.key)}
     <button class="item" title="{it.label} ({torrents.counts[it.key]})" class:on={torrents.filter === it.key} aria-current={torrents.filter === it.key ? "page" : undefined} onclick={() => (torrents.filter = it.key)}>
       <Icon name={it.icon} />
@@ -21,7 +22,7 @@
     </button>
   {/each}
   {#if ui.settings?.categories.length}
-    <div class="group" id="cat-label">Categories</div>
+    <div class="group" id="cat-label">{t("Categories")}</div>
     <div role="group" aria-labelledby="cat-label" class="cats">
       {#each ui.settings.categories as c (c.name)}
         <button class="item" class:on={torrents.category === c.name} aria-pressed={torrents.category === c.name} title="{c.name} ({torrents.categoryCounts.get(c.name) ?? 0})" onclick={() => (torrents.category = torrents.category === c.name ? null : c.name)}>
@@ -33,7 +34,7 @@
     </div>
   {/if}
   {#if torrents.tagCounts.size}
-    <div class="group" id="tag-label">Tags</div>
+    <div class="group" id="tag-label">{t("Tags")}</div>
     <div role="group" aria-labelledby="tag-label" class="cats">
       {#each [...torrents.tagCounts] as [tag, n] (tag)}
         <button class="item" class:on={torrents.tag === tag} aria-pressed={torrents.tag === tag} title="{tag} ({n})" onclick={() => (torrents.tag = torrents.tag === tag ? null : tag)}>

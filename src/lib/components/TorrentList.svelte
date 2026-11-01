@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t as tr } from "../i18n.svelte";
   import { api } from "../api";
   import { torrents, type SortKey } from "../stores/torrents.svelte";
   import { ui, errorText } from "../stores/ui.svelte";
@@ -64,7 +65,7 @@
   }
 </script>
 
-<div class="list" style="--cols-full: {columns.template}" role="grid" aria-label="Torrents" aria-rowcount={items.length + 1} aria-activedescendant={torrents.selectedId ? `row-${torrents.selectedId}` : undefined} tabindex="0" {onkeydown}>
+<div class="list" style="--cols-full: {columns.template}" role="grid" aria-label={tr("Torrents")} aria-rowcount={items.length + 1} aria-activedescendant={torrents.selectedId ? `row-${torrents.selectedId}` : undefined} tabindex="0" {onkeydown}>
   <div class="head" role="row" aria-rowindex="1">
     {#each heads as h (h.key)}
       <div class="hcell c-{h.key}" class:r={h.right} role="columnheader" aria-sort={torrents.sortKey === h.key ? (torrents.sortDir === 1 ? "ascending" : "descending") : "none"}>
@@ -74,15 +75,15 @@
       </div>
     {/each}
     <div class="pick">
-      <button class="btn ghost icon" aria-label="Choose columns" aria-haspopup="true" aria-expanded={picking} title="Choose columns" onclick={() => (picking = !picking)}><Icon name="sliders" size={14} /></button>
+      <button class="btn ghost icon" aria-label={tr("Choose columns")} aria-haspopup="true" aria-expanded={picking} title={tr("Choose columns")} onclick={() => (picking = !picking)}><Icon name="sliders" size={14} /></button>
       {#if picking}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div class="scrim" onclick={() => (picking = false)} onkeydown={(e) => e.key === "Escape" && (picking = false)}></div>
-        <div class="menu" role="group" aria-label="Columns">
+        <div class="menu" role="group" aria-label={tr("Columns")}>
           {#each COLUMNS as c (c.key)}
             <label><input type="checkbox" checked={columns.on.includes(c.key)} onchange={(e) => columns.set(c.key, e.currentTarget.checked)} /> {c.label}</label>
           {/each}
-          <button class="btn ghost reset" onclick={() => columns.reset()}>Reset to default</button>
+          <button class="btn ghost reset" onclick={() => columns.reset()}>{tr("Reset to default")}</button>
         </div>
       {/if}
     </div>
@@ -91,14 +92,14 @@
   {#if torrents.all.length === 0}
     <div class="empty">
       <Icon name="upload" size={28} />
-      <h2>Add your first torrent</h2>
-      <p>Drop a .torrent file here, or paste a magnet link anywhere in the window.</p>
-      <button class="btn primary" onclick={() => ui.openAdd()}><Icon name="plus" />Add torrent</button>
+      <h2>{tr("Add your first torrent")}</h2>
+      <p>{tr("Drop a .torrent file here, or paste a magnet link anywhere in the window.")}</p>
+      <button class="btn primary" onclick={() => ui.openAdd()}><Icon name="plus" />{tr("Add torrent")}</button>
     </div>
   {:else if items.length === 0}
     <div class="empty">
-      <h2>No matches</h2>
-      <p>Nothing in this view fits the current search or filter.</p>
+      <h2>{tr("No matches")}</h2>
+      <p>{tr("Nothing in this view fits the current search or filter.")}</p>
     </div>
   {:else}
     <div class="viewport" bind:this={viewport} bind:clientHeight={height} onscroll={(e) => (scrollTop = e.currentTarget.scrollTop)}>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api } from "../api";
 
@@ -35,7 +36,7 @@
 </script>
 
 <div class="controls">
-  <button aria-label="Minimize" onclick={() => chrome.minimize()}>
+  <button aria-label={t("Minimize")} onclick={() => chrome.minimize()}>
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" /></svg>
   </button>
   <button bind:this={maxBtn} class:hover={maxHover} aria-label={maximized ? "Restore" : "Maximize"} onclick={() => chrome.toggleMaximize()}>
@@ -45,7 +46,7 @@
       <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><rect x=".5" y=".5" width="9" height="9" fill="none" stroke="currentColor" /></svg>
     {/if}
   </button>
-  <button class="close" aria-label="Close" onclick={() => chrome.close()}>
+  <button class="close" aria-label={t("Close")} onclick={() => chrome.close()}>
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" /></svg>
   </button>
 </div>

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api, type SearchReport, type SearchResult } from "../api";
   import { formatBytes } from "../../format";
@@ -51,18 +52,18 @@
   const problems = $derived(report?.sources.filter((s) => s.outcome !== "ok") ?? []);
 </script>
 
-<Dialog title="Search" wide onclose={() => (ui.searchOpen = false)}>
+<Dialog title={t("Search")} wide onclose={() => (ui.searchOpen = false)}>
   <form class="bar" onsubmit={(e) => (e.preventDefault(), run())}>
     <label class="q">
       <Icon name="search" />
-      <input bind:this={input} type="search" placeholder="Search your sources" aria-label="Search your sources" bind:value={text} />
+      <input bind:this={input} type="search" placeholder={t("Search your sources")} aria-label={t("Search your sources")} bind:value={text} />
     </label>
     <button class="btn primary" type="submit" disabled={busy || !text.trim()}>{busy ? "Searching…" : "Search"}</button>
   </form>
 
   {#if error}
     <p class="note bad" role="alert">{error}</p>
-    <button class="btn" onclick={() => ((ui.searchOpen = false), (ui.settingsOpen = true))}>Open settings</button>
+    <button class="btn" onclick={() => ((ui.searchOpen = false), (ui.settingsOpen = true))}>{t("Open settings")}</button>
   {:else if report}
     <p class="status" role="status">
       {answered} of {report.sources.length} source{report.sources.length === 1 ? "" : "s"} answered · {report.results.length} result{report.results.length === 1 ? "" : "s"}
@@ -81,16 +82,16 @@
                 {#if r.published}<span>{age(r.published)}</span>{/if}
               </span>
             </div>
-            <span class="peers num" title="Seeders / leechers">{#if r.seeders !== null}<b class="seed">{r.seeders}</b> / {r.leechers ?? "–"}{:else}–{/if}</span>
-            <button class="btn" aria-label="Add {r.title}" disabled={!r.magnet && !r.torrent_url} onclick={() => add(r)}><Icon name="plus" />Add</button>
+            <span class="peers num" title={t("Seeders / leechers")}>{#if r.seeders !== null}<b class="seed">{r.seeders}</b> / {r.leechers ?? "–"}{:else}–{/if}</span>
+            <button class="btn" aria-label="Add {r.title}" disabled={!r.magnet && !r.torrent_url} onclick={() => add(r)}><Icon name="plus" />{t("Add")}</button>
           </li>
         {/each}
       </ul>
     {:else}
-      <p class="note">Nothing found. Try fewer or different words.</p>
+      <p class="note">{t("Nothing found. Try fewer or different words.")}</p>
     {/if}
   {:else if !busy}
-    <p class="note">Searches every source you turned on in Settings at once, and merges the same torrent into one result.</p>
+    <p class="note">{t("Searches every source you turned on in Settings at once, and merges the same torrent into one result.")}</p>
   {/if}
 </Dialog>
 

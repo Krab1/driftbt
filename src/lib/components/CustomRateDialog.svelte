@@ -32,7 +32,7 @@
     <div class="row">
       <!-- svelte-ignore a11y_autofocus -->
       <input class="txt" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="12" autofocus placeholder={t("Speed")} aria-label={t("Speed")} aria-invalid={shown !== null} aria-describedby="rate-why" bind:value={text} />
-      <select class="txt" aria-label={t("Unit")} bind:value={mb}><option value={false}>KB/s</option><option value={true}>MB/s</option></select>
+      <select class="txt" aria-label={t("Unit")} bind:value={mb}><option value={false}>{t("KB/s")}</option><option value={true}>{t("MB/s")}</option></select>
     </div>
     <small id="rate-why" class:bad={shown !== null} role="status">{shown ?? t("Applies to all torrents together. Between 1 KB/s and {max} MB/s (10 Gbit/s).", { max: Math.floor(MAX_KIB / 1024) })}</small>
   </form>

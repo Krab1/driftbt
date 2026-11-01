@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
 
@@ -16,11 +17,11 @@
 <div class="banner" role="alert">
   <Icon name="alert" />
   <span>
-    Your VPN isn't connected.
-    {#if n}{n} {n === 1 ? "torrent is" : "torrents are"} paused{:else}Torrents are on hold{/if}
-    until it is back.
+    {t("Your VPN isn't connected.")}
+    {#if n}{n} {n === 1 ? "torrent is" : "torrents are"} paused{:else}{t("Torrents are on hold")}{/if}
+    {t("until it is back.")}
   </span>
-  <button class="btn" onclick={openSettings}>VPN settings</button>
+  <button class="btn" onclick={openSettings}>{t("VPN settings")}</button>
 </div>
 
 <style>

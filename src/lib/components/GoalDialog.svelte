@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { api, type Goal } from "../api";
   import { torrents } from "../stores/torrents.svelte";
   import { ui, errorText } from "../stores/ui.svelte";
@@ -34,22 +35,22 @@
   }
 </script>
 
-<Dialog title="Seeding goal" onclose={() => (ui.goalTarget = null)}>
+<Dialog title={t("Seeding goal")} onclose={() => (ui.goalTarget = null)}>
   <p class="name" title={target.name}>{target.name}</p>
-  <div class="opts" role="radiogroup" aria-label="Goal">
-    <label class="opt"><input type="radio" name="goal" checked={!custom} onchange={() => (custom = false)} /> Use the default <span class="sub">({describe(dflt)})</span></label>
-    <label class="opt"><input type="radio" name="goal" checked={custom} onchange={() => (custom = true)} /> Set a goal for this torrent</label>
+  <div class="opts" role="radiogroup" aria-label={t("Goal")}>
+    <label class="opt"><input type="radio" name="goal" checked={!custom} onchange={() => (custom = false)} /> {t("Use the default")} <span class="sub">({describe(dflt)})</span></label>
+    <label class="opt"><input type="radio" name="goal" checked={custom} onchange={() => (custom = true)} /> {t("Set a goal for this torrent")}</label>
   </div>
   {#if custom}
     <div class="fields">
-      <label>Stop at ratio <input type="number" min="0" step="0.1" inputmode="decimal" placeholder="Never" bind:value={ratio} /></label>
-      <label>or after <input type="number" min="0" step="10" inputmode="numeric" placeholder="Never" bind:value={minutes} /> minutes</label>
+      <label>{t("Stop at ratio")} <input type="number" min="0" step="0.1" inputmode="decimal" placeholder={t("Never")} bind:value={ratio} /></label>
+      <label>{t("or after")} <input type="number" min="0" step="10" inputmode="numeric" placeholder={t("Never")} bind:value={minutes} /> {t("minutes")}</label>
     </div>
-    <small>Leave a field empty to ignore it. Whichever is reached first stops seeding.</small>
+    <small>{t("Leave a field empty to ignore it. Whichever is reached first stops seeding.")}</small>
   {/if}
   {#snippet footer()}
-    <button class="btn" onclick={() => (ui.goalTarget = null)}>Cancel</button>
-    <button class="btn primary" onclick={save}>Save</button>
+    <button class="btn" onclick={() => (ui.goalTarget = null)}>{t("Cancel")}</button>
+    <button class="btn primary" onclick={save}>{t("Save")}</button>
   {/snippet}
 </Dialog>
 

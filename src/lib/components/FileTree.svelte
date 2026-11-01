@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { formatBytes, percent } from "../../format";
   import { buildTree, checkState, isMedia, toggleNode, type FileLike, type TreeNode } from "../filetree";
   import Icon from "./Icon.svelte";
@@ -48,7 +49,7 @@
     {#if showProgress}<span class="pc num">{percent(n.progress, n.size)}%</span>{/if}
     <span class="sz num">{formatBytes(n.size)}</span>
     {#if onplay && n.isFile && isMedia(n.key)}
-      <button class="play" aria-label="Play {n.name}" title="Play while downloading" onclick={() => onplay(n.indices[0])}><Icon name="play" size={13} /></button>
+      <button class="play" aria-label="Play {n.name}" title={t("Play while downloading")} onclick={() => onplay(n.indices[0])}><Icon name="play" size={13} /></button>
     {:else if onplay}
       <span class="play-gap"></span>
     {/if}
@@ -58,7 +59,7 @@
   {/if}
 {/snippet}
 
-<div class="tree" role="tree" aria-label="Files">
+<div class="tree" role="tree" aria-label={t("Files")}>
   {#each tree as n (n.key)}{@render row(n, 0)}{/each}
 </div>
 

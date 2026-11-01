@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { untrack } from "svelte";
   import { api } from "../api";
   import { torrents } from "../stores/torrents.svelte";
@@ -26,18 +27,18 @@
   }
 </script>
 
-<Dialog title="Speed limit for this torrent" onclose={() => (ui.limitTarget = null)}>
+<Dialog title={t("Speed limit for this torrent")} onclose={() => (ui.limitTarget = null)}>
   <p class="name" title={target.name}>{target.name}</p>
   <div class="lines">
-    <RateField label="↓ Download" value={down} live onset={(k) => (down = k)} />
-    <RateField label="↑ Upload" value={up} live onset={(k) => (up = k)} />
+    <RateField label={t("↓ Download")} value={down} live onset={(k) => (down = k)} />
+    <RateField label={t("↑ Upload")} value={up} live onset={(k) => (up = k)} />
   </div>
   <small>
     The overall limit{overall ? " (set in the status bar)" : ""} still applies: this torrent never goes faster than it. Saving restarts the torrent briefly.
   </small>
   {#snippet footer()}
-    <button class="btn" onclick={() => (ui.limitTarget = null)}>Cancel</button>
-    <button class="btn primary" disabled={!changed} onclick={save}>Save</button>
+    <button class="btn" onclick={() => (ui.limitTarget = null)}>{t("Cancel")}</button>
+    <button class="btn primary" disabled={!changed} onclick={save}>{t("Save")}</button>
   {/snippet}
 </Dialog>
 

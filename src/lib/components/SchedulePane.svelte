@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import type { ScheduleSlot } from "../api";
   import { MAX_KIB } from "../rate";
   import { DAYS, describeSlot, fromTime, hasDay, toggleDay, toTime } from "../schedule";
@@ -17,27 +18,27 @@
 </script>
 
 <div class="field">
-  <span>Scheduled speed limits</span>
-  <label class="check"><input type="checkbox" checked={schedule.enabled} onchange={(e) => save(schedule.slots, e.currentTarget.checked)} /> Use different limits at certain times</label>
-  <small>While a slot is active its limits replace the ones above, even when "Limit transfer speed" is off. Zero means no limit in that direction.</small>
+  <span>{t("Scheduled speed limits")}</span>
+  <label class="check"><input type="checkbox" checked={schedule.enabled} onchange={(e) => save(schedule.slots, e.currentTarget.checked)} /> {t("Use different limits at certain times")}</label>
+  <small>{t("While a slot is active its limits replace the ones above, even when \"Limit transfer speed\" is off. Zero means no limit in that direction.")}</small>
 
   {#each schedule.slots as s, i (i)}
     <div class="slot" role="group" aria-label="Slot {i + 1}: {describeSlot(s)}">
-      <div class="days" role="group" aria-label="Days">
+      <div class="days" role="group" aria-label={t("Days")}>
         {#each DAYS as d, day (d)}
           <button class="day" class:on={hasDay(s.days, day)} aria-pressed={hasDay(s.days, day)} aria-label={d} onclick={() => patch(i, { days: toggleDay(s.days, day) })}>{d[0]}</button>
         {/each}
       </div>
-      <label>From <input type="time" value={toTime(s.from_min)} onchange={(e) => patch(i, { from_min: time(e, s.from_min) })} /></label>
-      <label>to <input type="time" value={toTime(s.to_min)} onchange={(e) => patch(i, { to_min: time(e, s.to_min) })} /></label>
-      <label>Down <input type="number" min="0" step="50" inputmode="numeric" value={s.down_kib || ""} placeholder="None" onchange={(e) => patch(i, { down_kib: kib(e) })} /> KiB/s</label>
-      <label>Up <input type="number" min="0" step="50" inputmode="numeric" value={s.up_kib || ""} placeholder="None" onchange={(e) => patch(i, { up_kib: kib(e) })} /> KiB/s</label>
+      <label>{t("From")} <input type="time" value={toTime(s.from_min)} onchange={(e) => patch(i, { from_min: time(e, s.from_min) })} /></label>
+      <label>{t("to")} <input type="time" value={toTime(s.to_min)} onchange={(e) => patch(i, { to_min: time(e, s.to_min) })} /></label>
+      <label>{t("Down")} <input type="number" min="0" step="50" inputmode="numeric" value={s.down_kib || ""} placeholder={t("None")} onchange={(e) => patch(i, { down_kib: kib(e) })} /> {t("KiB/s")}</label>
+      <label>{t("Up")} <input type="number" min="0" step="50" inputmode="numeric" value={s.up_kib || ""} placeholder={t("None")} onchange={(e) => patch(i, { up_kib: kib(e) })} /> {t("KiB/s")}</label>
       <button class="btn ghost icon" aria-label="Remove slot {i + 1}" onclick={() => save(schedule.slots.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
       <small class="sum">{describeSlot(s)}{s.from_min > s.to_min ? " — runs past midnight into the next day" : ""}</small>
     </div>
   {/each}
 
-  <button class="btn add" onclick={() => save([...schedule.slots, { days: 127, from_min: 23 * 60, to_min: 7 * 60, down_kib: 0, up_kib: 0 }], true)}><Icon name="plus" />Add a time slot</button>
+  <button class="btn add" onclick={() => save([...schedule.slots, { days: 127, from_min: 23 * 60, to_min: 7 * 60, down_kib: 0, up_kib: 0 }], true)}><Icon name="plus" />{t("Add a time slot")}</button>
 </div>
 
 <style>

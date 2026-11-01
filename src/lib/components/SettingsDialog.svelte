@@ -2,7 +2,7 @@
   import { api, remote, type Theme } from "../api";
   import { MAX_KIB } from "../rate";
   import { parsePack, warnings } from "../themepack";
-  import { LANGUAGES, t } from "../i18n.svelte";
+  import { LANGUAGES, t as tr } from "../i18n.svelte";
   import { auth } from "../stores/auth.svelte";
   import { ui } from "../stores/ui.svelte";
   import Dialog from "./Dialog.svelte";
@@ -139,10 +139,10 @@
   }
 </script>
 
-<Dialog title="Settings" wide keep onclose={() => (ui.settingsOpen = false)}>
+<Dialog title={tr("Settings")} wide keep onclose={() => (ui.settingsOpen = false)}>
   {#if ui.settings}
     {@const s = ui.settings}
-    <div class="tabs" role="tablist" aria-label="Settings sections" tabindex="-1" onkeydown={onTabKey}>
+    <div class="tabs" role="tablist" aria-label={tr("Settings sections")} tabindex="-1" onkeydown={onTabKey}>
       {#each tabs as t (t.key)}
         <button role="tab" id="stab-{t.key}" aria-selected={tab === t.key} aria-controls="spane" tabindex={tab === t.key ? 0 : -1} class:on={tab === t.key} onclick={() => pick(t.key)}>{t.label}</button>
       {/each}
@@ -151,62 +151,62 @@
     <div class="pane" id="spane" role="tabpanel" aria-labelledby="stab-{tab}">
       {#if tab === "general"}
         <div class="field">
-          <span>Download folder</span>
+          <span>{tr("Download folder")}</span>
           <div class="folder">
             <code title={s.download_dir ?? ""}>{s.download_dir ?? "…"}</code>
-            <button class="btn" onclick={changeFolder}><Icon name="folder" />Change</button>
+            <button class="btn" onclick={changeFolder}><Icon name="folder" />{tr("Change")}</button>
           </div>
-          <small>New torrents are saved here. Existing torrents keep their folder.</small>
+          <small>{tr("New torrents are saved here. Existing torrents keep their folder.")}</small>
         </div>
 
         <div class="field">
-          <span>Move finished downloads to</span>
+          <span>{tr("Move finished downloads to")}</span>
           <div class="folder">
             <code title={s.move_on_complete ?? ""}>{s.move_on_complete ?? "Off"}</code>
             <button class="btn" onclick={changeMoveDone}><Icon name="folder" />{s.move_on_complete ? "Change" : "Choose…"}</button>
-            {#if s.move_on_complete}<button class="btn" onclick={() => ui.saveSettings({ move_on_complete: null })}>Turn off</button>{/if}
+            {#if s.move_on_complete}<button class="btn" onclick={() => ui.saveSettings({ move_on_complete: null })}>{tr("Turn off")}</button>{/if}
           </div>
-          <small>When a download finishes it is moved here and keeps seeding from the new place. Drift checks the files again after the move, which takes a while for big torrents. Torrents already finished are not moved; right-click one and choose Move files to do that.</small>
+          <small>{tr("When a download finishes it is moved here and keeps seeding from the new place. Drift checks the files again after the move, which takes a while for big torrents. Torrents already finished are not moved; right-click one and choose Move files to do that.")}</small>
         </div>
 
         <div class="field">
-          <span>Watch folder</span>
+          <span>{tr("Watch folder")}</span>
           <div class="folder">
             <code title={s.watch_dir ?? ""}>{s.watch_dir ?? "Off"}</code>
             <button class="btn" onclick={changeWatch}><Icon name="folder" />{s.watch_dir ? "Change" : "Choose…"}</button>
-            {#if s.watch_dir}<button class="btn" onclick={() => ui.saveSettings({ watch_dir: null })}>Turn off</button>{/if}
+            {#if s.watch_dir}<button class="btn" onclick={() => ui.saveSettings({ watch_dir: null })}>{tr("Turn off")}</button>{/if}
           </div>
-          <small>A .torrent file dropped in this folder is added automatically, then renamed to <code class="inl">.torrent.added</code> so it isn't added twice.</small>
+          <small>{tr("A .torrent file dropped in this folder is added automatically, then renamed to")} <code class="inl">{tr(".torrent.added")}</code> {tr("so it isn't added twice.")}</small>
         </div>
 
         <div class="field">
-          <span>Window and startup</span>
-          <label class="check"><input type="checkbox" checked={s.close_to_tray} onchange={(e) => ui.saveSettings({ close_to_tray: e.currentTarget.checked })} /> Keep running in the tray when the window is closed</label>
-          <label class="check"><input type="checkbox" checked={s.start_with_windows} onchange={(e) => ui.saveSettings({ start_with_windows: e.currentTarget.checked })} /> Start Drift when Windows starts</label>
-          <label class="check sub"><input type="checkbox" checked={s.start_minimized} onchange={(e) => ui.saveSettings({ start_minimized: e.currentTarget.checked })} /> Start minimized to the tray</label>
-          <label class="check"><input type="checkbox" checked={s.folder_for_single_files} onchange={(e) => ui.saveSettings({ folder_for_single_files: e.currentTarget.checked })} /> Save a single-file torrent in a folder of its own</label>
-          <label class="check"><input type="checkbox" checked={s.media_player} onchange={(e) => ui.saveSettings({ media_player: e.currentTarget.checked })} /> Show Play (watch while downloading) and playlist options</label>
-          {#if s.media_player}<label class="check sub"><input type="checkbox" checked={s.playlist_on_complete} onchange={(e) => ui.saveSettings({ playlist_on_complete: e.currentTarget.checked })} /> Create a playlist when a multi-file download finishes</label>{/if}
+          <span>{tr("Window and startup")}</span>
+          <label class="check"><input type="checkbox" checked={s.close_to_tray} onchange={(e) => ui.saveSettings({ close_to_tray: e.currentTarget.checked })} /> {tr("Keep running in the tray when the window is closed")}</label>
+          <label class="check"><input type="checkbox" checked={s.start_with_windows} onchange={(e) => ui.saveSettings({ start_with_windows: e.currentTarget.checked })} /> {tr("Start Drift when Windows starts")}</label>
+          <label class="check sub"><input type="checkbox" checked={s.start_minimized} onchange={(e) => ui.saveSettings({ start_minimized: e.currentTarget.checked })} /> {tr("Start minimized to the tray")}</label>
+          <label class="check"><input type="checkbox" checked={s.folder_for_single_files} onchange={(e) => ui.saveSettings({ folder_for_single_files: e.currentTarget.checked })} /> {tr("Save a single-file torrent in a folder of its own")}</label>
+          <label class="check"><input type="checkbox" checked={s.media_player} onchange={(e) => ui.saveSettings({ media_player: e.currentTarget.checked })} /> {tr("Show Play (watch while downloading) and playlist options")}</label>
+          {#if s.media_player}<label class="check sub"><input type="checkbox" checked={s.playlist_on_complete} onchange={(e) => ui.saveSettings({ playlist_on_complete: e.currentTarget.checked })} /> {tr("Create a playlist when a multi-file download finishes")}</label>{/if}
           {#if api.checkUpdate}
-            <label class="check"><input type="checkbox" checked={s.check_updates} onchange={(e) => ui.saveSettings({ check_updates: e.currentTarget.checked })} /> Check for updates once a day (contacts GitHub)</label>
+            <label class="check"><input type="checkbox" checked={s.check_updates} onchange={(e) => ui.saveSettings({ check_updates: e.currentTarget.checked })} /> {tr("Check for updates once a day (contacts GitHub)")}</label>
             <div class="row">
               <button class="btn" disabled={checking} onclick={checkNow}>{checking ? "Checking…" : "Check now"}</button>
               <small role="status">{updateNote || (version ? `Drift ${version}` : "")}</small>
             </div>
           {/if}
-          <label class="check"><input type="checkbox" checked={s.notify_on_complete} onchange={(e) => ui.saveSettings({ notify_on_complete: e.currentTarget.checked })} /> Notify me when a download finishes</label>
+          <label class="check"><input type="checkbox" checked={s.notify_on_complete} onchange={(e) => ui.saveSettings({ notify_on_complete: e.currentTarget.checked })} /> {tr("Notify me when a download finishes")}</label>
         </div>
 
         <div class="field">
-          <span id="lang-label">{t("Language")}</span>
+          <span id="lang-label">{tr("Language")}</span>
           <select class="txt" aria-labelledby="lang-label" value={LANGUAGES.some((l) => l.code === s.language) || (import.meta.env.DEV && s.language === "xx") ? s.language : "system"} onchange={(e) => ui.saveSettings({ language: e.currentTarget.value })}>
-            <option value="system">{t("System default")}</option>
+            <option value="system">{tr("System default")}</option>
             {#each LANGUAGES as l (l.code)}<option value={l.code}>{l.name}</option>{/each}
-            {#if import.meta.env.DEV}<option value="xx">Pseudo (long text, dev)</option>{/if}
+            {#if import.meta.env.DEV}<option value="xx">{tr("Pseudo (long text, dev)")}</option>{/if}
           </select>
         </div>
-        <div class="field" role="radiogroup" aria-label="Theme">
-          <span>Theme</span>
+        <div class="field" role="radiogroup" aria-label={tr("Theme")}>
+          <span>{tr("Theme")}</span>
           <div class="seg">
             {#each themes as th (th.key)}
               <button role="radio" aria-checked={s.theme === th.key} class:on={s.theme === th.key} onclick={() => ui.saveSettings({ theme: th.key })}>{th.label}</button>
@@ -214,62 +214,62 @@
           </div>
         </div>
         <div class="field">
-          <span>Theme pack</span>
+          <span>{tr("Theme pack")}</span>
           <div class="row">
             {#if s.theme_pack}
               <small>{s.theme_pack.name}</small>
-              <button class="btn" onclick={() => ui.saveSettings({ theme_pack: null })}>Remove</button>
+              <button class="btn" onclick={() => ui.saveSettings({ theme_pack: null })}>{tr("Remove")}</button>
             {:else}
-              <button class="btn" onclick={() => packInput?.click()}>Import a theme pack…</button>
+              <button class="btn" onclick={() => packInput?.click()}>{tr("Import a theme pack…")}</button>
             {/if}
             <input bind:this={packInput} type="file" accept=".json,application/json" hidden onchange={importPack} />
           </div>
           {#if packNote}<small role="status" class:bad={packBad}>{packNote}</small>{/if}
           {#each packWarnings as w}<small class="warn">{w}</small>{/each}
         </div>
-        <small class="credit">Country flags: flag-icons (MIT). Peer countries: IP Geolocation by DB-IP.com (CC BY 4.0), built into the app and used offline.</small>
+        <small class="credit">{tr("Country flags: flag-icons (MIT). Peer countries: IP Geolocation by DB-IP.com (CC BY 4.0), built into the app and used offline.")}</small>
       {:else if tab === "speed"}
         <div class="field">
-          <span>Speed limits</span>
-          <label class="check"><input type="checkbox" checked={s.limits_enabled} onchange={(e) => ui.saveSettings({ limits_enabled: e.currentTarget.checked })} /> Limit transfer speed</label>
+          <span>{tr("Speed limits")}</span>
+          <label class="check"><input type="checkbox" checked={s.limits_enabled} onchange={(e) => ui.saveSettings({ limits_enabled: e.currentTarget.checked })} /> {tr("Limit transfer speed")}</label>
           <div class="limits">
-            <label>Download <input type="number" min="0" step="50" inputmode="numeric" value={s.down_limit_kib || ""} placeholder="No limit" onchange={(e) => ui.saveSettings({ down_limit_kib: whole(e, MAX_KIB) })} /> KiB/s</label>
-            <label>Upload <input type="number" min="0" step="50" inputmode="numeric" value={s.up_limit_kib || ""} placeholder="No limit" onchange={(e) => ui.saveSettings({ up_limit_kib: whole(e, MAX_KIB) })} /> KiB/s</label>
+            <label>{tr("Download")} <input type="number" min="0" step="50" inputmode="numeric" value={s.down_limit_kib || ""} placeholder={tr("No limit")} onchange={(e) => ui.saveSettings({ down_limit_kib: whole(e, MAX_KIB) })} /> {tr("KiB/s")}</label>
+            <label>{tr("Upload")} <input type="number" min="0" step="50" inputmode="numeric" value={s.up_limit_kib || ""} placeholder={tr("No limit")} onchange={(e) => ui.saveSettings({ up_limit_kib: whole(e, MAX_KIB) })} /> {tr("KiB/s")}</label>
           </div>
-          <small>Leave a field empty for no limit in that direction. The switch also lives in the status bar.</small>
+          <small>{tr("Leave a field empty for no limit in that direction. The switch also lives in the status bar.")}</small>
         </div>
         {#key ui.settingsRev}<SchedulePane />{/key}
       {:else if tab === "queue"}
         <div class="field">
-          <span>Download queue</span>
-          <label class="inline">Download at most <input type="number" min="0" step="1" inputmode="numeric" value={s.max_active_downloads || ""} placeholder="All" onchange={(e) => ui.saveSettings({ max_active_downloads: whole(e, 100) })} /> torrents at a time</label>
-          <small>Others wait in the queue and start when a slot frees up. Leave empty to download everything at once.</small>
+          <span>{tr("Download queue")}</span>
+          <label class="inline">{tr("Download at most")} <input type="number" min="0" step="1" inputmode="numeric" value={s.max_active_downloads || ""} placeholder={tr("All")} onchange={(e) => ui.saveSettings({ max_active_downloads: whole(e, 100) })} /> {tr("torrents at a time")}</label>
+          <small>{tr("Others wait in the queue and start when a slot frees up. Leave empty to download everything at once.")}</small>
         </div>
 
         <div class="field">
-          <span>Seeding goals</span>
+          <span>{tr("Seeding goals")}</span>
           <div class="limits">
-            <label>Stop at ratio <input type="number" min="0" step="0.1" inputmode="decimal" value={s.default_goal.ratio ?? ""} placeholder="Never" onchange={(e) => ui.saveSettings({ default_goal: { ...s.default_goal, ratio: ratio(e) } })} /></label>
-            <label>or after <input type="number" min="0" step="10" inputmode="numeric" value={s.default_goal.minutes ?? ""} placeholder="Never" onchange={(e) => ui.saveSettings({ default_goal: { ...s.default_goal, minutes: whole(e) || null } })} /> minutes</label>
+            <label>{tr("Stop at ratio")} <input type="number" min="0" step="0.1" inputmode="decimal" value={s.default_goal.ratio ?? ""} placeholder={tr("Never")} onchange={(e) => ui.saveSettings({ default_goal: { ...s.default_goal, ratio: ratio(e) } })} /></label>
+            <label>{tr("or after")} <input type="number" min="0" step="10" inputmode="numeric" value={s.default_goal.minutes ?? ""} placeholder={tr("Never")} onchange={(e) => ui.saveSettings({ default_goal: { ...s.default_goal, minutes: whole(e) || null } })} /> {tr("minutes")}</label>
           </div>
-          <label class="inline">Always seed for at least <input type="number" min="0" step="10" inputmode="numeric" value={s.min_seed_minutes || ""} placeholder="0" onchange={(e) => ui.saveSettings({ min_seed_minutes: whole(e) })} /> minutes</label>
-          <small>Applies to every torrent without its own goal (right-click a torrent to set one). Nothing stops before the minimum, whatever the ratio.</small>
+          <label class="inline">{tr("Always seed for at least")} <input type="number" min="0" step="10" inputmode="numeric" value={s.min_seed_minutes || ""} placeholder="0" onchange={(e) => ui.saveSettings({ min_seed_minutes: whole(e) })} /> {tr("minutes")}</label>
+          <small>{tr("Applies to every torrent without its own goal (right-click a torrent to set one). Nothing stops before the minimum, whatever the ratio.")}</small>
         </div>
 
         <div class="field">
-          <span>Categories</span>
+          <span>{tr("Categories")}</span>
           {#each s.categories as c (c.name)}
             <div class="cat"><Icon name="folder" size={14} /><span class="cn">{c.name}</span><code title={c.save_path ?? "Default download folder"}>{c.save_path ?? "Default folder"}</code>
               <button class="btn ghost icon" aria-label="Remove category {c.name}" onclick={() => ui.saveSettings({ categories: s.categories.filter((x) => x.name !== c.name) })}><Icon name="x" size={14} /></button>
             </div>
           {/each}
           <div class="cat add">
-            <input type="text" class="txt" placeholder="New category" aria-label="New category name" bind:value={newName} onkeydown={(e) => e.key === "Enter" && addCategory()} />
+            <input type="text" class="txt" placeholder={tr("New category")} aria-label={tr("New category name")} bind:value={newName} onkeydown={(e) => e.key === "Enter" && addCategory()} />
             <button class="btn" onclick={pickCategoryFolder} title={newPath ?? "Use the default download folder"}><Icon name="folder" />{newPath ? "Folder set" : "Folder…"}</button>
-            <button class="btn" onclick={addCategory}><Icon name="plus" />Add</button>
+            <button class="btn" onclick={addCategory}><Icon name="plus" />{tr("Add")}</button>
           </div>
           {#if catError}<small class="bad" role="alert">{catError}</small>{/if}
-          <small>A category can send its torrents to their own folder. Assign one in the Add dialog or from a torrent's right-click menu.</small>
+          <small>{tr("A category can send its torrents to their own folder. Assign one in the Add dialog or from a torrent's right-click menu.")}</small>
         </div>
       {:else if tab === "plugins"}
         <PluginsPane />
@@ -280,8 +280,8 @@
   {/if}
 
   {#snippet footer()}
-    {#if remote}<button class="btn" onclick={() => ((ui.settingsOpen = false), auth.logout())}>Sign out</button>{/if}
-    <button class="btn" onclick={() => (ui.settingsOpen = false)}>Done</button>
+    {#if remote}<button class="btn" onclick={() => ((ui.settingsOpen = false), auth.logout())}>{tr("Sign out")}</button>{/if}
+    <button class="btn" onclick={() => (ui.settingsOpen = false)}>{tr("Done")}</button>
   {/snippet}
 </Dialog>
 

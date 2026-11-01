@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t as tr } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api, type SimStatus } from "../api";
   import { ui, errorText } from "../stores/ui.svelte";
@@ -34,7 +35,7 @@
   });
 </script>
 
-<Dialog title="Simulation statistics" wide onclose={() => (ui.simStatsTarget = null)}>
+<Dialog title={tr("Simulation statistics")} wide onclose={() => (ui.simStatsTarget = null)}>
   <p class="name" title={target.name}>{target.name}</p>
   {#if problem}<p class="bad">{problem}</p>{/if}
   {#if !status && !problem}<p class="note">Asking {target.pluginName}…</p>{/if}
@@ -54,14 +55,14 @@
     {/each}
     {#if status.log.length}
       <section>
-        <h3>Recent</h3>
+        <h3>{tr("Recent")}</h3>
         <pre class="log">{status.log.join("\n")}</pre>
       </section>
     {/if}
   {/if}
   {#snippet footer()}
     <small>Kept by {target.pluginName} in memory only; gone when Drift closes.</small>
-    <button class="btn" onclick={() => (ui.simStatsTarget = null)}>Close</button>
+    <button class="btn" onclick={() => (ui.simStatsTarget = null)}>{tr("Close")}</button>
   {/snippet}
 </Dialog>
 

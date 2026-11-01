@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t as tr } from "./lib/i18n.svelte";
   import { onMount } from "svelte";
   import AddDialog from "./lib/components/AddDialog.svelte";
   import ContextMenu from "./lib/components/ContextMenu.svelte";
@@ -144,7 +145,7 @@
   <div class="main">
     <Rail />
     <main class="content">
-      <h1 class="sr-only">Drift</h1>
+      <h1 class="sr-only">{tr("Drift")}</h1>
       <div class="listwrap"><TorrentList /></div>
       <DetailPanel />
       {#if ui.menu}<ContextMenu />{/if}
@@ -168,7 +169,7 @@
 <Toasts />
 
 {#if dragging}
-  <div class="drop" aria-hidden="true"><Icon name="upload" size={28} />Drop .torrent files to add</div>
+  <div class="drop" aria-hidden="true"><Icon name="upload" size={28} />{tr("Drop .torrent files to add")}</div>
 {/if}
 
 <style>

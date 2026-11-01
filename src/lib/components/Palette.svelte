@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from "../i18n.svelte";
   import { buildCommands } from "../commands";
   import { rank } from "../fuzzy";
   import { ui } from "../stores/ui.svelte";
@@ -35,7 +36,7 @@
   }
 </script>
 
-<dialog bind:this={el} aria-label="Command palette" onclose={() => (ui.paletteOpen = false)} onclick={(e) => e.target === el && el?.close()}>
+<dialog bind:this={el} aria-label={t("Command palette")} onclose={() => (ui.paletteOpen = false)} onclick={(e) => e.target === el && el?.close()}>
   <div class="box">
     <input
       bind:this={input}
@@ -46,19 +47,19 @@
       aria-expanded="true"
       aria-controls="cmd-list"
       aria-activedescendant={results.length ? `cmd-${active}` : undefined}
-      aria-label="Type a command"
-      placeholder="Type a command…"
+      aria-label={t("Type a command")}
+      placeholder={t("Type a command…")}
       autocomplete="off"
       spellcheck="false"
     />
-    <ul id="cmd-list" role="listbox" aria-label="Commands">
+    <ul id="cmd-list" role="listbox" aria-label={t("Commands")}>
       {#each results as c, i (c.id)}
         <li id="cmd-{i}" role="option" aria-selected={i === active} class:on={i === active} onmousemove={() => (active = i)} onclick={() => run(i)} onkeydown={() => {}}>
           <span class="t">{c.title}</span>
           {#if c.shortcut}<kbd>{c.shortcut}</kbd>{:else}<span class="g">{c.group}</span>{/if}
         </li>
       {:else}
-        <li class="none" role="presentation">No matching command.</li>
+        <li class="none" role="presentation">{t("No matching command.")}</li>
       {/each}
     </ul>
   </div>
