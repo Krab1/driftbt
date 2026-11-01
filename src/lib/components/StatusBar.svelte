@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatBytes, formatSpeed } from "../../format";
+  import { t, tn } from "../i18n.svelte";
   import { torrents } from "../stores/torrents.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
@@ -23,6 +24,11 @@
     const u = dir === "up" ? kib : inForce("up");
     return ui.saveSettings({ limits_enabled: d > 0 || u > 0, down_limit_kib: d, up_limit_kib: u });
   }
+  function speedTitle(dir: "down" | "up"): string {
+    const limit = cap(dir) ? `${formatBytes(cap(dir))}/s` : "";
+    if (dir === "down") return limit ? t("Download speed, limited to {limit}. Click to change.", { limit }) : t("Download speed, no limit. Click to set a limit.");
+    return limit ? t("Upload speed, limited to {limit}. Click to change.", { limit }) : t("Upload speed, no limit. Click to set a limit.");
+  }
   function toggle(dir: "down" | "up", e: MouseEvent) {
     anchor = e.currentTarget as HTMLButtonElement;
     open = open === dir ? null : dir;
@@ -30,17 +36,17 @@
 </script>
 
 <footer>
-  <button class="lim num" class:on={cap("down") > 0} aria-haspopup="menu" aria-expanded={open === "down"} title={cap("down") ? `Download speed, limited to ${formatBytes(cap("down"))}/s. Click to change.` : "Download speed, no limit. Click to set a limit."} onclick={(e) => toggle("down", e)}>
+  <button class="lim num" class:on={cap("down") > 0} aria-haspopup="menu" aria-expanded={open === "down"} title={speedTitle("down")} onclick={(e) => toggle("down", e)}>
     <Icon name="down" size={13} /> {formatSpeed(torrents.totals.down)}{#if cap("down")}<span class="of">/ {formatBytes(cap("down"))}/s</span>{/if}
   </button>
-  <button class="lim num" class:on={cap("up") > 0} aria-haspopup="menu" aria-expanded={open === "up"} title={cap("up") ? `Upload speed, limited to ${formatBytes(cap("up"))}/s. Click to change.` : "Upload speed, no limit. Click to set a limit."} onclick={(e) => toggle("up", e)}>
+  <button class="lim num" class:on={cap("up") > 0} aria-haspopup="menu" aria-expanded={open === "up"} title={speedTitle("up")} onclick={(e) => toggle("up", e)}>
     <Icon name="up" size={13} /> {formatSpeed(torrents.totals.up)}{#if cap("up")}<span class="of">/ {formatBytes(cap("up"))}/s</span>{/if}
   </button>
-  <Sparkline down={torrents.history.map((h) => h.d)} up={torrents.history.map((h) => h.u)} label="Transfer speed over the last two minutes: download in blue, upload in green" />
+  <Sparkline down={torrents.history.map((h) => h.d)} up={torrents.history.map((h) => h.u)} label={t("Transfer speed over the last two minutes: download in blue, upload in green")} />
   {#if open && anchor}<LimitMenu dir={open} {anchor} onset={setLimit} oncustom={() => (custom = open)} onclose={() => (open = null)} />{/if}
   {#if custom}<CustomRateDialog dir={custom} current={inForce(custom)} onset={(k) => setLimit(custom!, k)} onclose={() => (custom = null)} />{/if}
-  <button class="lim" onclick={() => (ui.ratioOpen = true)}>Ratios</button>
-  <span class="end num">{torrents.counts.all} {torrents.counts.all === 1 ? "torrent" : "torrents"} · {torrents.counts.downloading - queued} active{#if queued}{" · "}{queued} queued{/if}</span>
+  <button class="lim" onclick={() => (ui.ratioOpen = true)}>{t("Ratios")}</button>
+  <span class="end num">{tn("{n} torrent", "{n} torrents", torrents.counts.all)} · {t("{n} active", { n: torrents.counts.downloading - queued })}{#if queued}{" · "}{t("{n} queued", { n: queued })}{/if}</span>
 </footer>
 
 <style>

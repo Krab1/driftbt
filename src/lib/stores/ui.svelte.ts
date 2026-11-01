@@ -1,4 +1,5 @@
 import { api, type GuardStatus, type LimitsStatus, type Settings, type TorrentDetails } from "../api";
+import { chosenLanguage, setLanguage } from "../i18n.svelte";
 
 function remembered<T extends string | number | boolean>(key: string, fallback: T): T {
   try {
@@ -111,6 +112,13 @@ class Ui {
 
   async loadSettings() {
     this.settings = await api.getSettings();
+    this.followLanguage();
+  }
+
+  /** The saved language is the truth: whenever settings are read or saved, the window switches to it if it shows another. */
+  private followLanguage() {
+    const pref = this.settings?.language;
+    if (pref && pref !== chosenLanguage()) void setLanguage(pref);
   }
 
   /** Bumped when the backend refuses a settings change, so inputs remount showing the values actually in use. */
@@ -121,6 +129,7 @@ class Ui {
     if (!this.settings) return false;
     try {
       this.settings = await api.setSettings({ ...this.settings, ...patch });
+      this.followLanguage();
       void this.refreshLimits();
       return true;
     } catch (e) {

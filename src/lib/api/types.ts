@@ -296,6 +296,8 @@ export interface Settings {
   schema: number;
   download_dir: string | null;
   theme: Theme;
+  /** `system` or a language code such as `ru`. */
+  language: string;
   /** Imported colours that replace the theme's; null = none. */
   theme_pack: { name: string; base: "light" | "dark"; tokens: Record<string, string> } | null;
   limits_enabled: boolean;

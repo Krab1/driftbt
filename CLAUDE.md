@@ -11,6 +11,7 @@ Read this file first, then the doc for your task. Do not skim.
 | `docs/UI_SPEC.md` | any frontend work (tokens, layout, states, copy) |
 | `docs/ROADMAP.md` | picking up work; tasks have IDs and acceptance criteria |
 | `docs/PLUGINS.md` | anything about plugins, search providers, or independently updatable modules |
+| `docs/I18N.md` | any user-visible text: new strings go through `t()`, languages are `src/locales/*.json` |
 | `docs/DECISIONS.md` | before questioning a stack/design choice; append new decisions |
 
 ## Stack (decided, see DECISIONS.md)

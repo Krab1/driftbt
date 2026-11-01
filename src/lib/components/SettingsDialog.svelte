@@ -2,6 +2,7 @@
   import { api, remote, type Theme } from "../api";
   import { MAX_KIB } from "../rate";
   import { parsePack, warnings } from "../themepack";
+  import { LANGUAGES, t } from "../i18n.svelte";
   import { auth } from "../stores/auth.svelte";
   import { ui } from "../stores/ui.svelte";
   import Dialog from "./Dialog.svelte";
@@ -196,6 +197,14 @@
           <label class="check"><input type="checkbox" checked={s.notify_on_complete} onchange={(e) => ui.saveSettings({ notify_on_complete: e.currentTarget.checked })} /> Notify me when a download finishes</label>
         </div>
 
+        <div class="field">
+          <span id="lang-label">{t("Language")}</span>
+          <select class="txt" aria-labelledby="lang-label" value={LANGUAGES.some((l) => l.code === s.language) || (import.meta.env.DEV && s.language === "xx") ? s.language : "system"} onchange={(e) => ui.saveSettings({ language: e.currentTarget.value })}>
+            <option value="system">{t("System default")}</option>
+            {#each LANGUAGES as l (l.code)}<option value={l.code}>{l.name}</option>{/each}
+            {#if import.meta.env.DEV}<option value="xx">Pseudo (long text, dev)</option>{/if}
+          </select>
+        </div>
         <div class="field" role="radiogroup" aria-label="Theme">
           <span>Theme</span>
           <div class="seg">

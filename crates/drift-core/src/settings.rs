@@ -34,6 +34,8 @@ pub struct Settings {
     /// `None` until the app resolves the OS Downloads folder on first run.
     pub download_dir: Option<PathBuf>,
     pub theme: Theme,
+    /// The interface language: `system` (follow the computer) or a language code such as `ru` or `pt-BR`.
+    pub language: String,
     /// Replaces the colours of the chosen theme when set.
     pub theme_pack: Option<ThemePack>,
     /// Global speed limits apply only while this is on, so the values survive being toggled off.
@@ -113,6 +115,7 @@ impl Default for Settings {
             schema: CURRENT_SCHEMA,
             download_dir: None,
             theme: Theme::System,
+            language: "system".into(),
             theme_pack: None,
             limits_enabled: false,
             down_limit_kib: 0,
@@ -223,7 +226,15 @@ impl SettingsStore for JsonFileStore {
         let Ok(bytes) = read else {
             return Settings::default();
         };
-        parse(&bytes).unwrap_or_else(|| {
+        parse(&bytes)
+            .map(|mut s| {
+                // A hand-edited code that isn't one would make every later save fail.
+                if !crate::settings_check::language_ok(&s.language) {
+                    s.language = "system".into();
+                }
+                s
+            })
+            .unwrap_or_else(|| {
             // Keep the unreadable file for inspection instead of silently overwriting it.
             let _ = std::fs::rename(&self.path, bad_path(&self.path));
             Settings::default()
@@ -309,6 +320,19 @@ mod tests {
         let s = JsonFileStore::new(&path).load();
         assert_eq!(s.theme, Theme::Dark);
         assert!(s.notify_on_complete && !s.limits_enabled);
+        assert_eq!(s.language, "system", "a file from before languages follows the computer");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_hand_edited_language_that_is_not_a_code_falls_back_to_system() {
+        let dir = tmp("lang");
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, br#"{"schema":1,"language":"pt_BR"}"#).unwrap();
+        assert_eq!(JsonFileStore::new(&path).load().language, "system");
+        std::fs::write(&path, br#"{"schema":1,"language":"pt-BR"}"#).unwrap();
+        assert_eq!(JsonFileStore::new(&path).load().language, "pt-BR");
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { formatBytes } from "../../format";
+  import { t } from "../i18n.svelte";
   import { ui } from "../stores/ui.svelte";
 
   let { dir, anchor, onset, oncustom, onclose }: { dir: "down" | "up"; anchor: HTMLElement; onset: (dir: "down" | "up", kib: number) => Promise<boolean>; oncustom: () => void; onclose: () => void } = $props();
@@ -9,7 +10,7 @@
   const now = $derived(s?.limits_enabled ? (dir === "down" ? s.down_limit_kib : s.up_limit_kib) : 0);
   const CHOICES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   const isPreset = $derived(now === 0 || (now % 1024 === 0 && now / 1024 >= 1 && now / 1024 <= 10));
-  const word = (k: number) => (k === 0 ? "Unlimited" : `${k} MB/s`);
+  const word = (k: number) => (k === 0 ? t("Unlimited") : t("{n} MB/s", { n: k }));
 
   async function pick(mb: number) {
     // The save starts before the menu goes away, so nothing it needs is torn down under it.
@@ -57,20 +58,20 @@
 <div class="pop" bind:this={el} style="left: {pos.left}px; bottom: {pos.bottom}px">
   {#if ui.limits.scheduled}
     <p class="note">
-      A schedule is limiting speed right now{ui.limits.down_bps ? ` (↓ ${formatBytes(ui.limits.down_bps)}/s)` : ""}. What you pick here applies outside its time slots.
-      <button class="link" onclick={schedule}>Edit the schedule</button>
+      {t("A schedule is limiting speed right now{detail}. What you pick here applies outside its time slots.", { detail: ui.limits.down_bps ? ` (↓ ${formatBytes(ui.limits.down_bps)}/s)` : "" })}
+      <button class="link" onclick={schedule}>{t("Edit the schedule")}</button>
     </p>
   {/if}
-  <p class="head">{dir === "down" ? "↓ Download limit" : "↑ Upload limit"}</p>
-  <div class="items" role="menu" aria-label={dir === "down" ? "Download limit" : "Upload limit"}>
+  <p class="head">{dir === "down" ? t("↓ Download limit") : t("↑ Upload limit")}</p>
+  <div class="items" role="menu" aria-label={dir === "down" ? t("Download limit") : t("Upload limit")}>
   {#each CHOICES as k (k)}
     <button role="menuitemradio" aria-checked={now === k * 1024} class:on={now === k * 1024} onclick={() => pick(k)}><span class="tick">{now === k * 1024 ? "✓" : ""}</span>{word(k)}</button>
   {/each}
   <button role="menuitemradio" aria-checked={!isPreset} class:on={!isPreset} onclick={() => { oncustom(); close(); }}>
-    <span class="tick">{isPreset ? "" : "✓"}</span>Custom…{#if !isPreset}<span class="cur">{formatBytes(now * 1024)}/s</span>{/if}
+    <span class="tick">{isPreset ? "" : "✓"}</span>{t("Custom…")}{#if !isPreset}<span class="cur">{formatBytes(now * 1024)}/s</span>{/if}
   </button>
   </div>
-  <small>For all torrents together. To limit one torrent, right-click it and choose Speed limit.</small>
+  <small>{t("For all torrents together. To limit one torrent, right-click it and choose Speed limit.")}</small>
 </div>
 
 <style>

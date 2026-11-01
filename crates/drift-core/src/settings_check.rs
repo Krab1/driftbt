@@ -31,6 +31,12 @@ fn id_ok(s: &str) -> bool {
     !s.is_empty() && s.len() <= 64 && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
+/// `system`, or a short code like `ru`, `pt-BR` or `zh-Hans`: a language of 2 or 3 letters, then up to two parts of 2 to 4 letters or digits.
+pub(crate) fn language_ok(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    s == "system" || (s.len() <= 12 && parts.len() <= 3 && parts[0].len() >= 2 && parts[0].len() <= 3 && parts[0].bytes().all(|b| b.is_ascii_alphabetic()) && parts[1..].iter().all(|p| (2..=4).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_alphanumeric())))
+}
+
 fn path_ok(p: &Path) -> bool {
     p.to_str().is_some_and(|s| !s.trim().is_empty() && plain(s, PATH_CHARS))
 }
@@ -56,6 +62,9 @@ impl Settings {
         }
         g.minutes = g.minutes.map(|m| m.min(MAX_MINUTES));
 
+        if !language_ok(&self.language) {
+            return Err("That isn't a language code.".into());
+        }
         if self.listen_port == Some(0) {
             return Err("The port must be between 1 and 65535.".into());
         }
@@ -151,6 +160,13 @@ mod tests {
     #[test]
     fn values_of_the_wrong_kind_are_refused() {
         assert!(bad(|s| s.listen_port = Some(0)));
+        for l in ["", "x", "english", "ru_RU", "ru-", "<b>", "ru-RU-x-y", "ru
+", "123", "12-34"] {
+            assert!(bad(|s| s.language = l.into()), "{l:?}");
+        }
+        for l in ["system", "ru", "pt-BR", "zh-Hans", "fil"] {
+            assert!(!bad(|s| s.language = l.into()), "{l:?}");
+        }
         assert!(bad(|s| s.default_goal.ratio = Some(f32::NAN)));
         assert!(bad(|s| s.default_goal.ratio = Some(-1.0)));
         assert!(bad(|s| s.download_dir = Some("C:\\a\nb".into())));

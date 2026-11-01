@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { t } from "../i18n.svelte";
   import { MAX_KIB, parseRate } from "../rate";
   import Dialog from "./Dialog.svelte";
 
@@ -26,18 +27,18 @@
   }
 </script>
 
-<Dialog title={dir === "down" ? "Custom download limit" : "Custom upload limit"} keep {onclose}>
+<Dialog title={dir === "down" ? t("Custom download limit") : t("Custom upload limit")} keep {onclose}>
   <form onsubmit={(e) => { e.preventDefault(); void save(); }}>
     <div class="row">
       <!-- svelte-ignore a11y_autofocus -->
-      <input class="txt" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="12" autofocus placeholder="Speed" aria-label="Speed" aria-invalid={shown !== null} aria-describedby="rate-why" bind:value={text} />
-      <select class="txt" aria-label="Unit" bind:value={mb}><option value={false}>KB/s</option><option value={true}>MB/s</option></select>
+      <input class="txt" type="text" inputmode="decimal" autocomplete="off" spellcheck="false" maxlength="12" autofocus placeholder={t("Speed")} aria-label={t("Speed")} aria-invalid={shown !== null} aria-describedby="rate-why" bind:value={text} />
+      <select class="txt" aria-label={t("Unit")} bind:value={mb}><option value={false}>KB/s</option><option value={true}>MB/s</option></select>
     </div>
-    <small id="rate-why" class:bad={shown !== null} role="status">{shown ?? `Applies to all torrents together. Between 1 KB/s and ${Math.floor(MAX_KIB / 1024)} MB/s (10 Gbit/s).`}</small>
+    <small id="rate-why" class:bad={shown !== null} role="status">{shown ?? t("Applies to all torrents together. Between 1 KB/s and {max} MB/s (10 Gbit/s).", { max: Math.floor(MAX_KIB / 1024) })}</small>
   </form>
   {#snippet footer()}
-    <button class="btn" onclick={onclose}>Cancel</button>
-    <button class="btn primary" disabled={!rate.ok || busy} onclick={save}>Set limit</button>
+    <button class="btn" onclick={onclose}>{t("Cancel")}</button>
+    <button class="btn primary" disabled={!rate.ok || busy} onclick={save}>{t("Set limit")}</button>
   {/snippet}
 </Dialog>
 
