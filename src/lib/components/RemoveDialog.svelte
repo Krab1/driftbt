@@ -28,7 +28,7 @@
       await api.remove(target.id, deleteFiles);
       if (torrents.selectedId === target.id) torrents.selectedId = null;
       await torrents.refresh();
-      ui.toast(deleteFiles ? "Torrent and files removed" : "Torrent removed");
+      ui.toast(deleteFiles ? t("Torrent and files removed") : t("Torrent removed"));
     } catch (e) {
       ui.fail(e);
     }

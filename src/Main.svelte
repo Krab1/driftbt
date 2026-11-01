@@ -43,7 +43,7 @@
     const focusSearch = () => topbar?.focusSearch();
     window.addEventListener("drift:focus-search", focusSearch);
     keep(api.onDetails((d) => (ui.details = d)));
-    keep(api.onCompleted((c) => ui.toast(`${c.name} finished downloading`)));
+    keep(api.onCompleted((c) => ui.toast(tr("{name} finished downloading", { name: c.name }))));
     keep(api.onOpenSources(openSources));
     if (api.onUpdateAvailable) keep(api.onUpdateAvailable((u) => (ui.update = u)));
     if (api.onOpenSettings) keep(api.onOpenSettings(() => (ui.settingsOpen = true)));
@@ -123,7 +123,7 @@
     dragging = false;
     dragDepth = 0;
     const dropped = [...(e.dataTransfer?.files ?? [])].filter((f) => f.name.toLowerCase().endsWith(".torrent"));
-    if (!dropped.length) return ui.toast("Only .torrent files can be dropped here.", "error");
+    if (!dropped.length) return ui.toast(tr("Only .torrent files can be dropped here."), "error");
     const files = await Promise.all(dropped.map(async (f) => ({ name: f.name, bytes: [...new Uint8Array(await f.arrayBuffer())] })));
     ui.openAdd("", files);
   }

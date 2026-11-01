@@ -11,7 +11,7 @@
     e.preventDefault();
     busy = true;
     error = "";
-    if (!(await auth.login(token, remember))) error = "That token isn't right, or the server can't be reached.";
+    if (!(await auth.login(token, remember))) error = t("That token isn't right, or the server can't be reached.");
     busy = false;
   }
 </script>

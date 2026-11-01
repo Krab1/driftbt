@@ -13,8 +13,10 @@
   let minutes = $state("");
 
   const describe = (g: Goal | undefined) => {
-    const parts = [g?.ratio ? `ratio ${g.ratio}` : "", g?.minutes ? `${g.minutes} minutes` : ""].filter(Boolean);
-    return parts.length ? `Stop at ${parts.join(" or after ")}` : "Never stop on its own";
+    if (g?.ratio && g?.minutes) return t("Stop at ratio {ratio} or after {minutes} minutes", { ratio: g.ratio, minutes: g.minutes });
+    if (g?.ratio) return t("Stop at ratio {ratio}", { ratio: g.ratio });
+    if (g?.minutes) return t("Stop after {minutes} minutes", { minutes: g.minutes });
+    return t("Never stop on its own");
   };
 
   const num = (v: string): number | null => {
@@ -27,7 +29,7 @@
     try {
       await api.setGoal(target.id, goal);
       await torrents.refresh();
-      ui.toast(custom ? "Seeding goal saved" : "Using the default seeding goal");
+      ui.toast(custom ? t("Seeding goal saved") : t("Using the default seeding goal"));
       ui.goalTarget = null;
     } catch (e) {
       ui.fail(e);

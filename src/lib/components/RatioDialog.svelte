@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "../i18n.svelte";
+  import { t, td } from "../i18n.svelte";
   import { formatBytes, formatEta, formatSpeed } from "../../format";
   import { ratioTable } from "../ratio";
   import { torrents } from "../stores/torrents.svelte";
@@ -24,7 +24,7 @@
         <tbody>
           {#each rows as r (r.tracker)}
             <tr>
-              <td class="tr" title={r.tracker}>{r.tracker}</td>
+              <td class="tr" title={td(r.tracker)}>{td(r.tracker)}</td>
               <td class="r num">{r.torrents}</td>
               <td class="r num">{formatBytes(r.uploaded)}</td>
               <td class="r num" class:ok={r.gap === 0}>{r.ratio.toFixed(2)}</td>

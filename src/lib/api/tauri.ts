@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open } from "@tauri-apps/plugin-dialog";
+import { t } from "../i18n.svelte";
 import type { Api, ApiError, Completed, GuardStatus, OpenPayload, Torrent, TorrentDetails } from "./types";
 
 /** Backend errors arrive already serialized as {code, message}; anything else is a bug worth a generic message. */
@@ -12,7 +13,7 @@ async function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> 
   } catch (e) {
     const err = e as Partial<ApiError>;
     if (err && typeof err.message === "string") throw err as ApiError;
-    throw { code: "unknown", message: "Something went wrong. Try again.", detail: typeof e === "string" ? e : JSON.stringify(e) } satisfies ApiError;
+    throw { code: "unknown", message: t("Something went wrong. Try again."), detail: typeof e === "string" ? e : JSON.stringify(e) } satisfies ApiError;
   }
 }
 

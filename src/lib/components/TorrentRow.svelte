@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t as tr } from "../i18n.svelte";
+  import { t as tr, td } from "../i18n.svelte";
   import type { Torrent } from "../api";
   import { formatBytes, formatWhen, percent } from "../../format";
   import { columns } from "../stores/columns.svelte";
@@ -29,29 +29,28 @@
     ({ downloading: "down", seeding: "up", paused: "pause", queued: "list", error: "alert", checking: "clock" } as const)[t.state],
   );
   const label = $derived(
-    ({ downloading: "Downloading", seeding: "Seeding", paused: "Paused", queued: "Queued", error: "Error", checking: "Checking" } as const)[t.state],
+    ({ downloading: tr("Downloading"), seeding: tr("Seeding"), paused: tr("Paused"), queued: tr("Queued"), error: tr("Error"), checking: tr("Checking") } as const)[t.state],
   );
   const canToggle = $derived(t.state !== "checking" && t.state !== "error");
   // Magnets show their hash until metadata arrives; say what is happening instead.
   const fetching = $derived(t.state === "checking" && t.total_bytes === 0);
-  const ownLimit = $derived(
-    "This torrent has its own speed limit" +
-      [t.limit_down_kib ? `↓ ${formatBytes(t.limit_down_kib * 1024)}/s` : "", t.limit_up_kib ? `↑ ${formatBytes(t.limit_up_kib * 1024)}/s` : ""].filter(Boolean).join("  ").replace(/^/, ": ") +
-      ". The overall limit still applies.",
-  );
+  const ownLimit = $derived.by(() => {
+    const limits = [t.limit_down_kib ? `↓ ${formatBytes(t.limit_down_kib * 1024)}/s` : "", t.limit_up_kib ? `↑ ${formatBytes(t.limit_up_kib * 1024)}/s` : ""].filter(Boolean).join("  ");
+    return limits ? tr("This torrent has its own speed limit: {limits}. The overall limit still applies.", { limits }) : tr("This torrent has its own speed limit. The overall limit still applies.");
+  });
   const caption = $derived(
     t.state === "queued"
-      ? `Waiting for a free slot · #${t.queue_pos ?? "?"} in queue`
+      ? tr("Waiting for a free slot · #{pos} in queue", { pos: t.queue_pos ?? "?" })
       : t.note
-        ? t.note
+        ? td(t.note)
         : fetching
-      ? "Fetching torrent info…"
+      ? tr("Fetching torrent info…")
       : t.state === "checking"
-        ? "Checking files…"
+        ? tr("Checking files…")
         : t.state === "downloading" && t.peers_live === 0 && t.down_bps === 0
-          ? "Looking for peers…"
+          ? tr("Looking for peers…")
           : t.state === "error"
-            ? (t.error ?? "Something went wrong.")
+            ? (t.error ?? tr("Something went wrong."))
             : "",
   );
 </script>

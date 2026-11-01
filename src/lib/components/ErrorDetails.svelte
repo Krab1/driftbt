@@ -11,7 +11,7 @@
       await navigator.clipboard.writeText(`${view.title}\n\n${view.text}`);
       copied = true;
     } catch {
-      ui.toast("Couldn't copy to the clipboard.", "error");
+      ui.toast(t("Couldn't copy to the clipboard."), "error");
     }
   }
 </script>

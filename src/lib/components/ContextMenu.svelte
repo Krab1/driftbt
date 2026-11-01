@@ -57,7 +57,7 @@
     try {
       await api.recheck(t.id);
       await torrents.refresh();
-      ui.toast("Checking the downloaded files. Anything missing or damaged will be downloaded again.");
+      ui.toast(tr("Checking the downloaded files. Anything missing or damaged will be downloaded again."));
     } catch (e) {
       ui.fail(e);
     }
@@ -96,7 +96,7 @@
     if (!t) return;
     try {
       const path = await api.createPlaylist(t.id);
-      ui.toast(`Playlist saved: ${path}`);
+      ui.toast(tr("Playlist saved: {path}", { path }));
     } catch (e) {
       ui.fail(e);
     }
@@ -112,9 +112,9 @@
     if (!t) return;
     try {
       await navigator.clipboard.writeText(`magnet:?xt=urn:btih:${t.id}&dn=${encodeURIComponent(t.name)}`);
-      ui.toast("Magnet link copied");
+      ui.toast(tr("Magnet link copied"));
     } catch {
-      ui.toast("Couldn't copy to the clipboard.", "error");
+      ui.toast(tr("Couldn't copy to the clipboard."), "error");
     }
   }
 
@@ -165,7 +165,7 @@
     const on = !simOn(s)?.enabled;
     try {
       await api.setSimulation(s.id, t.id, on);
-      ui.toast(on ? `${s.name} is simulating this torrent.` : `${s.name} stopped simulating this torrent.`);
+      ui.toast(on ? tr("{name} is simulating this torrent.", { name: s.name }) : tr("{name} stopped simulating this torrent.", { name: s.name }));
       void ui.refreshSimulated();
     } catch (e) {
       ui.fail(e);

@@ -1,4 +1,5 @@
 import type { Torrent } from "./api/types";
+import { N_ } from "./i18n.svelte";
 
 export interface TrackerRow {
   tracker: string;
@@ -15,7 +16,7 @@ export interface TrackerRow {
   etaSecs: number | null;
 }
 
-export const NO_TRACKER = "No tracker";
+export const NO_TRACKER = N_("No tracker");
 
 /** Groups torrents by tracker host and works out how much real upload each group still needs for `target`. */
 export function ratioTable(torrents: Torrent[], target: number): TrackerRow[] {

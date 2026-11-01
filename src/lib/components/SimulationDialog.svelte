@@ -18,7 +18,7 @@
       values = { ...(await api.simulatorOptions(target.plugin, target.id)) };
     } catch {
       // The form still opens, so a plugin that can't answer can be started with its own defaults.
-      problem = `${target.pluginName} didn't say what it would use, so empty boxes mean its own defaults.`;
+      problem = t("{name} didn't say what it would use, so empty boxes mean its own defaults.", { name: target.pluginName });
     }
     for (const f of target.fields) if (values[f.key] === undefined && f.default !== undefined) values[f.key] = f.default;
     // A torrent not simulated yet starts from what was used last time; one already simulated keeps its own.
@@ -64,7 +64,7 @@
       } catch {
         // Not remembering is fine.
       }
-      ui.toast(target.enabled ? `Saved. ${target.pluginName} restarted this torrent's simulation.` : `${target.pluginName} is simulating this torrent.`);
+      ui.toast(target.enabled ? t("Saved. {name} restarted this torrent's simulation.", { name: target.pluginName }) : t("{name} is simulating this torrent.", { name: target.pluginName }));
       ui.simTarget = null;
       void ui.refreshSimulated();
     } catch (e) {
@@ -78,7 +78,7 @@
     busy = true;
     try {
       await api.setSimulation(target.plugin, target.id, false);
-      ui.toast(`${target.pluginName} stopped simulating this torrent.`);
+      ui.toast(t("{name} stopped simulating this torrent.", { name: target.pluginName }));
       ui.simTarget = null;
       void ui.refreshSimulated();
     } catch (e) {

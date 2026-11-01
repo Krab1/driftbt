@@ -63,10 +63,10 @@
     const { pack, error } = parsePack(file.size > 40_000 ? "x".repeat(40_000) : await file.text());
     packBad = !pack;
     if (!pack) {
-      packNote = error ?? "That file can't be used.";
+      packNote = error ?? tr("That file can't be used.");
       return;
     }
-    packNote = (await ui.saveSettings({ theme_pack: pack })) ? `Using "${pack.name}".` : "";
+    packNote = (await ui.saveSettings({ theme_pack: pack })) ? tr("Using \"{name}\".", { name: pack.name }) : "";
     packWarnings = warnings(pack);
   }
 
@@ -86,9 +86,9 @@
     try {
       const u = await api.checkUpdate!();
       if (u) ui.update = u;
-      updateNote = u ? `Version ${u.version} is available.` : "You're up to date.";
+      updateNote = u ? tr("Version {version} is available.", { version: u.version }) : tr("You're up to date.");
     } catch (e) {
-      updateNote = (e as { message?: string }).message ?? "Couldn't check for updates.";
+      updateNote = td((e as { message?: string }).message ?? tr("Couldn't check for updates."));
     }
     checking = false;
   }
@@ -119,8 +119,8 @@
     const name = newName.trim();
     const s = ui.settings;
     if (!s) return;
-    if (!name) return void (catError = "Enter a category name.");
-    if (s.categories.some((c) => c.name.toLowerCase() === name.toLowerCase())) return void (catError = "That category already exists.");
+    if (!name) return void (catError = tr("Enter a category name."));
+    if (s.categories.some((c) => c.name.toLowerCase() === name.toLowerCase())) return void (catError = tr("That category already exists."));
     catError = "";
     await ui.saveSettings({ categories: [...s.categories, { name, save_path: newPath }] });
     newName = "";

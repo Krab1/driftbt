@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "../i18n.svelte";
+  import { t, td } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api, type Adapter, type FilterStatus, type NetworkStatus } from "../api";
   import { ui } from "../stores/ui.svelte";
@@ -33,7 +33,7 @@
     busy = label;
     const ok = await ui.saveSettings(patch);
     busy = "";
-    if (ok) ui.toast("Network settings applied");
+    if (ok) ui.toast(t("Network settings applied"));
     await load();
   }
 
@@ -44,7 +44,7 @@
 
   const age = (secs: number) => {
     const d = Math.max(0, Math.floor(Date.now() / 1000) - secs);
-    return d < 90 ? "just now" : d < 5400 ? `${Math.round(d / 60)} min ago` : d < 172800 ? `${Math.round(d / 3600)} h ago` : `${Math.round(d / 86400)} days ago`;
+    return d < 90 ? t("just now") : d < 5400 ? t("{n} min ago", { n: Math.round(d / 60) }) : d < 172800 ? t("{n} h ago", { n: Math.round(d / 3600) }) : t("{n} days ago", { n: Math.round(d / 86400) });
   };
 
   const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "list";
@@ -53,9 +53,9 @@
     const f = s.ip_filter;
     name = name.trim();
     source = source.trim();
-    if (!source) return void (listError = "Enter an address or choose a file.");
+    if (!source) return void (listError = t("Enter an address or choose a file."));
     if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source) && !/^https?:\/\//i.test(source)) return void (listError = "Only http and https addresses work.");
-    if (f.lists.some((l) => l.source === source)) return void (listError = "That list is already added.");
+    if (f.lists.some((l) => l.source === source)) return void (listError = t("That list is already added."));
     listError = "";
     let id = slug(name || source.split(/[\\/]/).pop() || "list");
     for (let n = 2; f.lists.some((l) => l.id === id); n++) id = `${slug(name || "list")}-${n}`;
@@ -73,9 +73,9 @@
     busy = "update";
     try {
       filter = await api.updateIpLists();
-      ui.toast("IP lists updated");
+      ui.toast(t("IP lists updated"));
     } catch (e) {
-      ui.toast((e as { message?: string }).message ?? "Couldn't update the lists.", "error");
+      ui.toast(td((e as { message?: string }).message ?? t("Couldn't update the lists.")), "error");
     }
     busy = "";
   }

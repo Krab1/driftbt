@@ -38,7 +38,7 @@
   const age = (secs: number | null) => {
     if (!secs) return "";
     const d = Math.max(0, Date.now() / 1000 - secs) / 86400;
-    return d < 1 ? "today" : d < 60 ? `${Math.floor(d)} d` : d < 700 ? `${Math.floor(d / 30)} mo` : `${(d / 365).toFixed(1)} y`;
+    return d < 1 ? t("today") : d < 60 ? t("{n} d", { n: Math.floor(d) }) : d < 700 ? t("{n} mo", { n: Math.floor(d / 30) }) : t("{n} y", { n: (d / 365).toFixed(1) });
   };
 
   function add(r: SearchResult) {

@@ -7,7 +7,7 @@
   let { label, value, onset, live = false }: { label: string; value: number; onset: (kib: number) => void; live?: boolean } = $props();
 
   const PRESETS = [0, 128, 256, 512, 1024, 2048, 5120, 10240, 20480, 51200];
-  const text = (k: number) => (k === 0 ? "Unlimited" : k >= 1024 && k % 1024 === 0 ? `${k / 1024} MB/s` : `${k} KB/s`);
+  const text = (k: number) => (k === 0 ? t("Unlimited") : k >= 1024 && k % 1024 === 0 ? t("{n} MB/s", { n: k / 1024 }) : t("{n} KB/s", { n: k }));
   const split = (k: number) => (k <= 0 ? { n: "", mb: false } : k % 1024 === 0 ? { n: String(k / 1024), mb: true } : { n: String(k), mb: false });
 
   // A value that isn't one of the choices (set earlier, or typed) shows as Custom with its number filled in.

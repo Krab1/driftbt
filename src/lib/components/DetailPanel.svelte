@@ -75,7 +75,7 @@
     const send = () =>
       api
         .setFiles(id, [...next], deleteUnchecked)
-        .then(() => deleteUnchecked && ui.toast("Deleted. The torrent is being checked again to repair the pieces next to the deleted files."))
+        .then(() => deleteUnchecked && ui.toast(tr("Deleted. The torrent is being checked again to repair the pieces next to the deleted files.")))
         .catch((e) => {
           override = null;
           ui.fail(e);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "../i18n.svelte";
+  import { N_, t, td } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api, type PluginField, type PluginInfo, type PluginOffer, type PluginRow, type PluginValue } from "../api";
   import { ui } from "../stores/ui.svelte";
@@ -54,7 +54,7 @@
     let ok = true;
     try {
       await api.setPluginSettings(p.id, values);
-      if (!quiet) ui.toast(`${p.name} settings saved.`);
+      if (!quiet) ui.toast(t("{name} settings saved.", { name: p.name }));
     } catch (e) {
       ui.fail(e);
       ok = false;
@@ -90,12 +90,12 @@
       const r = await api.testSearchSource(id);
       tests[id] = r.outcome === "ok" ? { busy: false, ok: true, text: r.count > 0 ? t("Working. It answered the sample search.") : t("Working, though the sample search found nothing.") } : { busy: false, ok: false, text: r.message ?? t("It didn't answer.") };
     } catch (e) {
-      tests[id] = { busy: false, ok: false, text: e instanceof Error ? e.message : "The test couldn't run." };
+      tests[id] = { busy: false, ok: false, text: e instanceof Error ? e.message : t("The test couldn't run.") };
     }
   }
 
   async function secret(p: PluginInfo, key: string, label: string, clear = false) {
-    const v = clear ? "" : prompt(`${label} (leave empty to remove it)`);
+    const v = clear ? "" : prompt(t("{label} (leave empty to remove it)", { label }));
     if (v === null) return;
     try {
       await api.setPluginSecret(p.id, key, v.trim());
@@ -126,11 +126,11 @@
   }
 
   async function install(o: PluginOffer) {
-    if (!confirm(`Download ${o.name} ${o.version}?\n\nDrift checks it against the signed plugin list before keeping it. It starts working after you restart Drift, and a new or updated plugin that asks for more access stays off until you turn it on again.`)) return;
+    if (!confirm(t("Download {name} {version}?\n\nDrift checks it against the signed plugin list before keeping it. It starts working after you restart Drift, and a new or updated plugin that asks for more access stays off until you turn it on again.", { name: o.name, version: o.version }))) return;
     busy = o.id;
     try {
       await api.installPlugin(o.id, o.version);
-      ui.toast(`${o.name} ${o.version} is ready. Restart Drift to start using it.`);
+      ui.toast(t("{name} {version} is ready. Restart Drift to start using it.", { name: o.name, version: o.version }));
     } catch (e) {
       ui.fail(e);
     }
@@ -139,10 +139,10 @@
   }
 
   async function rollback(p: PluginInfo) {
-    if (!confirm(`Go back to ${p.name} ${p.previous}? It takes effect when you restart Drift.`)) return;
+    if (!confirm(t("Go back to {name} {version}? It takes effect when you restart Drift.", { name: p.name, version: p.previous ?? "" }))) return;
     try {
       await api.rollbackPlugin(p.id);
-      ui.toast(`${p.name} ${p.previous} comes back after you restart Drift.`);
+      ui.toast(t("{name} {version} comes back after you restart Drift.", { name: p.name, version: p.previous ?? "" }));
     } catch (e) {
       ui.fail(e);
     }
@@ -152,7 +152,7 @@
   async function showLog(p: PluginInfo) {
     try {
       const text = await api.pluginLog(p.id);
-      ui.detailView = { title: `${p.name} log`, text: text || "Nothing yet. The plugin hasn't written anything." };
+      ui.detailView = { title: t("{name} log", { name: p.name }), text: text || t("Nothing yet. The plugin hasn't written anything.") };
     } catch (e) {
       ui.fail(e);
     }
@@ -160,17 +160,17 @@
   onMount(() => void load().then(() => (loaded = true)));
 
   /** What a kind of plugin does, in words. */
-  const KIND: Record<string, string> = { search: "adds a search source", postprocess: "acts when a torrent finishes" };
-  const kinds = (p: PluginInfo) => p.kinds.map((k) => KIND[k] ?? k).join(", ");
+  const KIND: Record<string, string> = { search: N_("adds a search source"), postprocess: N_("acts when a torrent finishes") };
+  const kinds = (p: PluginInfo) => p.kinds.map((k) => (KIND[k] ? td(KIND[k]) : k)).join(", ");
 
-  const net = (p: PluginInfo) => (p.permissions.net.includes("*") ? "any website" : p.permissions.net.join(", "));
+  const net = (p: PluginInfo) => (p.permissions.net.includes("*") ? t("any website") : p.permissions.net.join(", "));
 
   async function toggle(p: PluginInfo, on: boolean) {
     // Permissions are shown before the first enable, not after.
     if (on) {
-      const parts = [p.permissions.net.length ? `connect to ${net(p)}` : "", p.permissions.fs.length ? `read or write ${p.permissions.fs.join(", ")}` : ""].filter(Boolean);
-      const what = parts.length ? parts.join(" and ") : "run on this computer";
-      const ok = confirm(`${p.name} ${p.version} says it will ${what}.\n\nPlugins run as their own programs and Drift can't restrict them. Only turn on plugins you trust.\n\nTurn it on?`);
+      const parts = [p.permissions.net.length ? t("connect to {what}", { what: net(p) }) : "", p.permissions.fs.length ? t("read or write {what}", { what: p.permissions.fs.join(", ") }) : ""].filter(Boolean);
+      const what = parts.length ? parts.join(t(" and ")) : t("run on this computer");
+      const ok = confirm(t("{name} {version} says it will {what}.\n\nPlugins run as their own programs and Drift can't restrict them. Only turn on plugins you trust.\n\nTurn it on?", { name: p.name, version: p.version, what }));
       if (!ok) return void (await load());
     }
     const rest = s.plugins.filter((x) => x !== p.id);
@@ -204,7 +204,7 @@
             </span>
           {/if}
           {#if p.pending}<small class="note">{t("Version {version} is ready and takes over when you restart Drift.", { version: p.pending })}</small>{/if}
-          {#if p.previous && !p.pending}<small>{t("Earlier version {version} is kept.", { version: p.previous })} <button class="link" onclick={() => rollback(p)}>{t("Go back to it")}</button></small>{/if}
+          {#if p.previous && !p.pending}<small>{t("Earlier version {version} is kept.", { version: p.previous ?? "" })} <button class="link" onclick={() => rollback(p)}>{t("Go back to it")}</button></small>{/if}
           {#if p.enabled || !p.problem}
             <details class="more">
               <summary>{p.fields.length ? t("Settings and log") : t("Log")}</summary>

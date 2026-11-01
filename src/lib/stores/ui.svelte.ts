@@ -1,5 +1,5 @@
 import { api, type GuardStatus, type LimitsStatus, type Settings, type TorrentDetails } from "../api";
-import { chosenLanguage, setLanguage } from "../i18n.svelte";
+import { chosenLanguage, setLanguage, t, td } from "../i18n.svelte";
 
 function remembered<T extends string | number | boolean>(key: string, fallback: T): T {
   try {
@@ -133,7 +133,7 @@ class Ui {
       void this.refreshLimits();
       return true;
     } catch (e) {
-      this.toast((e as { message?: string }).message ?? "Couldn't save your settings.", "error");
+      this.toast(td((e as { message?: string }).message ?? t("Couldn't save your settings.")), "error");
       try {
         this.settings = await api.getSettings();
       } catch {
@@ -152,7 +152,7 @@ class Ui {
     // A plugin that didn't answer would drop its badges for a moment: keep the last ones until everyone answers.
     if (states.some((s) => !s.ok)) return;
     const m: Record<string, string> = {};
-    for (const s of states) for (const sel of s.selections) if (sel.enabled) m[sel.info_hash] = sel.label ?? `${s.name} is simulating this torrent`;
+    for (const s of states) for (const sel of s.selections) if (sel.enabled) m[sel.info_hash] = sel.label ?? t("{name} is simulating this torrent", { name: s.name });
     if (JSON.stringify(m) !== JSON.stringify(this.simulated)) this.simulated = m;
   }
 
@@ -182,5 +182,5 @@ export function errorDetail(e: unknown): string | undefined {
 
 export function errorText(e: unknown): string {
   const m = (e as { message?: unknown })?.message;
-  return typeof m === "string" ? m : "Something went wrong. Try again.";
+  return typeof m === "string" ? td(m) : t("Something went wrong. Try again.");
 }

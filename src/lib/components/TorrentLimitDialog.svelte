@@ -19,7 +19,7 @@
     try {
       await api.setTorrentLimits(target.id, down, up);
       await torrents.refresh();
-      ui.toast(down || up ? "Speed limit saved for this torrent" : "This torrent has no speed limit of its own now");
+      ui.toast(down || up ? t("Speed limit saved for this torrent") : t("This torrent has no speed limit of its own now"));
       ui.limitTarget = null;
     } catch (e) {
       ui.fail(e);

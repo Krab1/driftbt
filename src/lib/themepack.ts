@@ -1,6 +1,8 @@
 /** Theme packs: a JSON file of colours and nothing else. No code runs; unknown keys are refused, so a pack can't
  *  reach anything but the colour tokens in tokens.css. */
 
+import { N_, t, td } from "./i18n.svelte";
+
 export type Base = "light" | "dark";
 
 export interface ThemePack {
@@ -23,14 +25,14 @@ const BASE: Record<Base, Record<string, string>> = {
 
 /** [text, background, what it is]: each must reach 4.5:1. */
 const PAIRS: [string, string, string][] = [
-  ["text-primary", "bg", "Main text on the background"],
-  ["text-primary", "surface-1", "Main text on side panels"],
-  ["text-primary", "surface-2", "Main text on menus"],
-  ["text-secondary", "bg", "Secondary text on the background"],
-  ["text-muted", "bg", "Faint text on the background"],
-  ["accent-fg", "bg", "Link and highlight text on the background"],
-  ["danger-fg", "bg", "Error text on the background"],
-  ["on-accent", "accent", "Text on accent buttons"],
+  ["text-primary", "bg", N_("Main text on the background")],
+  ["text-primary", "surface-1", N_("Main text on side panels")],
+  ["text-primary", "surface-2", N_("Main text on menus")],
+  ["text-secondary", "bg", N_("Secondary text on the background")],
+  ["text-muted", "bg", N_("Faint text on the background")],
+  ["accent-fg", "bg", N_("Link and highlight text on the background")],
+  ["danger-fg", "bg", N_("Error text on the background")],
+  ["on-accent", "accent", N_("Text on accent buttons")],
 ];
 
 const MAX_BYTES = 20 * 1024;
@@ -81,37 +83,37 @@ export function warnings(pack: ThemePack): string[] {
     const bc = b ? opaque(b) : null;
     if (!fc || !bc) continue;
     const r = contrast(fc, bc);
-    if (r < 4.5) out.push(`${what} is hard to read (${r.toFixed(1)}:1; 4.5:1 is the minimum).`);
+    if (r < 4.5) out.push(t("{what} is hard to read ({ratio}:1; 4.5:1 is the minimum).", { what: td(what), ratio: r.toFixed(1) }));
   }
   return out;
 }
 
 /** Reads a pack file. Plain-language `error` when it can't be used; otherwise the pack. */
 export function parsePack(text: string): { pack?: ThemePack; error?: string } {
-  if (text.length > MAX_BYTES) return { error: "That file is too big for a theme pack." };
+  if (text.length > MAX_BYTES) return { error: t("That file is too big for a theme pack.") };
   let v: unknown;
   try {
     v = JSON.parse(text);
   } catch {
-    return { error: "That file isn't a theme pack: it isn't valid JSON." };
+    return { error: t("That file isn't a theme pack: it isn't valid JSON.") };
   }
-  if (!v || typeof v !== "object" || Array.isArray(v)) return { error: "That file isn't a theme pack." };
+  if (!v || typeof v !== "object" || Array.isArray(v)) return { error: t("That file isn't a theme pack.") };
   const o = v as Record<string, unknown>;
-  if (o.drift_theme !== 1) return { error: "That file isn't a Drift theme pack (it needs \"drift_theme\": 1)." };
+  if (o.drift_theme !== 1) return { error: t("That file isn't a Drift theme pack (it needs \"drift_theme\": 1).") };
   const extra = Object.keys(o).filter((k) => !["drift_theme", "name", "base", "tokens"].includes(k));
-  if (extra.length) return { error: `The pack has something Drift doesn't know: "${extra[0].slice(0, 40)}".` };
+  if (extra.length) return { error: t("The pack has something Drift doesn't know: \"{what}\".", { what: extra[0].slice(0, 40) }) };
   const name = typeof o.name === "string" ? o.name.trim() : "";
-  if (!name || name.length > 40) return { error: "The pack needs a name of up to 40 characters." };
-  if (o.base !== "light" && o.base !== "dark") return { error: "The pack's \"base\" must be \"light\" or \"dark\"." };
-  if (!o.tokens || typeof o.tokens !== "object" || Array.isArray(o.tokens)) return { error: "The pack needs a \"tokens\" list of colours." };
+  if (!name || name.length > 40) return { error: t("The pack needs a name of up to 40 characters.") };
+  if (o.base !== "light" && o.base !== "dark") return { error: t("The pack's \"base\" must be \"light\" or \"dark\".") };
+  if (!o.tokens || typeof o.tokens !== "object" || Array.isArray(o.tokens)) return { error: t("The pack needs a \"tokens\" list of colours.") };
   const tokens: Record<string, string> = {};
   for (const [k, val] of Object.entries(o.tokens as Record<string, unknown>)) {
     const key = k.startsWith("--") ? k.slice(2) : k;
-    if (!(TOKENS as readonly string[]).includes(key)) return { error: `"${k.slice(0, 40)}" isn't a colour Drift lets a pack change.` };
-    if (!validColor(val)) return { error: `The colour for "${key}" isn't valid. Use a value like #1a2b3c or rgba(20, 30, 40, 0.5).` };
+    if (!(TOKENS as readonly string[]).includes(key)) return { error: t("\"{name}\" isn't a colour Drift lets a pack change.", { name: k.slice(0, 40) }) };
+    if (!validColor(val)) return { error: t("The colour for \"{name}\" isn't valid. Use a value like #1a2b3c or rgba(20, 30, 40, 0.5).", { name: key }) };
     tokens[key] = val;
   }
-  if (!Object.keys(tokens).length) return { error: "The pack doesn't change any colour." };
+  if (!Object.keys(tokens).length) return { error: t("The pack doesn't change any colour.") };
   return { pack: { name, base: o.base, tokens } };
 }
 

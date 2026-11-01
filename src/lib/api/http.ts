@@ -1,4 +1,5 @@
 // Transport for the remote web UI: the same Api over HTTP + server-sent events, talking to drift-server.
+import { t } from "../i18n.svelte";
 import type { Api, ApiError, Completed, GuardStatus, Torrent, TorrentDetails } from "./types";
 
 const KEY = "drift.token";
@@ -40,7 +41,7 @@ export function setUnauthorizedHandler(fn: () => void) {
   onUnauthorized = fn;
 }
 
-const unavailable = (what: string): ApiError => ({ code: "unavailable", message: `${what} isn't available from a remote browser.` });
+const unavailable = (what: string): ApiError => ({ code: "unavailable", message: t("{what} isn't available from a remote browser.", { what }) });
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
@@ -51,15 +52,15 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
       body: body === undefined ? undefined : JSON.stringify(body),
     });
   } catch {
-    throw { code: "offline", message: "Can't reach the server. Check that it is running and your connection is up." } satisfies ApiError;
+    throw { code: "offline", message: t("Can't reach the server. Check that it is running and your connection is up.") } satisfies ApiError;
   }
   if (res.status === 401) {
     onUnauthorized();
-    throw { code: "unauthorized", message: "Enter the access token for this server." } satisfies ApiError;
+    throw { code: "unauthorized", message: t("Enter the access token for this server.") } satisfies ApiError;
   }
   const text = await res.text();
   const data = text ? JSON.parse(text) : undefined;
-  if (!res.ok) throw (data && typeof data.message === "string" ? data : { code: "unknown", message: "Something went wrong. Try again." }) as ApiError;
+  if (!res.ok) throw (data && typeof data.message === "string" ? data : { code: "unknown", message: t("Something went wrong. Try again.") }) as ApiError;
   return data as T;
 }
 
@@ -208,11 +209,11 @@ export const httpApi: Api = {
   onShown: async () => () => {},
   takePendingOpen: async () => ({ magnets: [], files: [] }),
   setVisible: async () => {},
-  revealTorrent: async () => Promise.reject(unavailable("Showing a file in its folder")),
+  revealTorrent: async () => Promise.reject(unavailable(t("Showing a file in its folder"))),
   listAdapters: () => call("GET", "/adapters"),
   networkStatus: () => call("GET", "/network"),
   // The server can't open a dialog on your screen, so paths are typed in. They refer to the server's disk.
-  pickFile: async (current) => prompt("Path of the file on the server", current ?? "")?.trim() || null,
+  pickFile: async (current) => prompt(t("Path of the file on the server"), current ?? "")?.trim() || null,
   limitsStatus: () => call("GET", "/limits"),
   guardStatus: () => call<GuardStatus>("GET", "/guard"),
   onGuard: on<GuardStatus>("guard"),
@@ -220,7 +221,7 @@ export const httpApi: Api = {
   updateIpLists: () => call("POST", "/filter/update"),
   onWatch: on<{ added?: string; invalid?: string }>("watch"),
   onPluginNotice: on<{ text: string; error: boolean }>("plugin_notice"),
-  play: () => Promise.reject(unavailable("Playing a file")),
+  play: () => Promise.reject(unavailable(t("Playing a file"))),
   createPlaylist: (id) => call("POST", `/torrents/${enc(id)}/playlist`),
   getSettings: () => call("GET", "/settings"),
   setSettings: (s) => call("PUT", "/settings", s),
@@ -232,12 +233,12 @@ export const httpApi: Api = {
   simulatorOptions: (plugin, infoHash) => call("GET", `/simulators/${enc(plugin)}/${enc(infoHash)}/options`),
   simulatorStatus: (plugin, infoHash) => call("GET", `/simulators/${enc(plugin)}/${enc(infoHash)}/status`),
   // Installing runs code on the host, so it is only offered in the desktop app, never over the remote API.
-  pluginOffers: async () => Promise.reject(new Error("Installing plugins isn't available over the remote connection. Use Drift on the computer it runs on.")),
-  installPlugin: async () => Promise.reject(new Error("Installing plugins isn't available over the remote connection. Use Drift on the computer it runs on.")),
-  rollbackPlugin: async () => Promise.reject(new Error("Installing plugins isn't available over the remote connection. Use Drift on the computer it runs on.")),
+  pluginOffers: async () => Promise.reject(new Error(t("Installing plugins isn't available over the remote connection. Use Drift on the computer it runs on."))),
+  installPlugin: async () => Promise.reject(new Error(t("Installing plugins isn't available over the remote connection. Use Drift on the computer it runs on."))),
+  rollbackPlugin: async () => Promise.reject(new Error(t("Installing plugins isn't available over the remote connection. Use Drift on the computer it runs on."))),
   setPluginSettings: (id, values) => call("PUT", `/plugins/${enc(id)}/settings`, values),
   setPluginSecret: (id, key, value) => call("PUT", `/plugins/${enc(id)}/secrets/${enc(key)}`, { key: value }),
   pluginLog: (id) => call("GET", `/plugins/${enc(id)}/log`),
   onSnapshot: on<Torrent[]>("snapshot"),
-  pickFolder: async (current) => prompt("Path of the folder on the server", current ?? "")?.trim() || null,
+  pickFolder: async (current) => prompt(t("Path of the folder on the server"), current ?? "")?.trim() || null,
 };

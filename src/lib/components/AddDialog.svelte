@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t as tr } from "../i18n.svelte";
+  import { t as tr, tn } from "../i18n.svelte";
   import { api, type AddInput, type TorrentPreview } from "../api";
   import { formatBytes } from "../../format";
   import { torrents } from "../stores/torrents.svelte";
@@ -84,11 +84,11 @@
 
   async function submit() {
     if (!count) {
-      error = "Paste a magnet link or choose a .torrent file.";
+      error = tr("Paste a magnet link or choose a .torrent file.");
       return;
     }
     if (preview && selected.size === 0) {
-      error = "Select at least one file to download.";
+      error = tr("Select at least one file to download.");
       return;
     }
     busy = true;
@@ -121,7 +121,7 @@
     busy = false;
     if (added) {
       await torrents.refresh();
-      ui.toast(added === 1 ? "Torrent added" : `${added} torrents added`);
+      ui.toast(tn("Torrent added", "{n} torrents added", added));
     }
     if (firstError) {
       magnets = failedMagnets.join("\n");
