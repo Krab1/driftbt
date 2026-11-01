@@ -63,6 +63,36 @@ for (const file of walk(join(root, "src"))) {
   }
 }
 
+// Messages the Rust side hands to the screen as they are (errors, notes on a torrent). The screen looks them up with td().
+// Only fixed texts count: ApiError::new("code", "text"), message: "text".into(), the plain_error answers, and the *_NOTE constants.
+const rustFiles = (dir) =>
+  readdirSync(dir).flatMap((n) => {
+    const p = join(dir, n);
+    if (statSync(p).isDirectory()) return n === "target" || n === "bin" || n === "tests" ? [] : rustFiles(p);
+    return n.endsWith(".rs") ? [p] : [];
+  });
+const RS = String.raw`"((?:\\.|[^"\\\n])*)"`;
+for (const dir of ["crates", "src-tauri/src"]) {
+  for (const file of rustFiles(join(root, dir))) {
+    const raw = readFileSync(file, "utf8");
+    // what is under `#[cfg(test)]` is not shown to anyone
+    const src = blank(raw.split(/\n#\[cfg\(test\)\]/)[0]);
+    const where = (i) => `${relative(root, file)}:${src.slice(0, i).split("\n").length}`;
+    const take = (re) => { for (const m of src.matchAll(re)) add(unescape(m[1]), false, where(m.index)); };
+    take(new RegExp(String.raw`ApiError::new\(\s*"[^"]*"\s*,\s*${RS}\s*\)`, "g"));
+    take(new RegExp(String.raw`message:\s*${RS}\.into\(\)`, "g"));
+    take(new RegExp(String.raw`Self::new\(\s*"[^"]*"\s*,\s*${RS}`, "g"));
+    take(new RegExp(String.raw`const\s+\w*NOTE:\s*&str\s*=\s*${RS}`, "g"));
+    take(new RegExp(String.raw`move_notes\.insert\([^,]+,\s*${RS}\.into\(\)`, "g"));
+    if (file.endsWith("errors.rs")) {
+      // every sentence in this file is shown to someone
+      for (const m of src.matchAll(/"([A-Z][^"\n\\]{12,}[.!?])"/g)) add(m[1], false, where(m.index));
+      const body = src.slice(src.indexOf("pub fn plain_error"), src.indexOf("\n}\n", src.indexOf("pub fn plain_error")));
+      for (const m of body.matchAll(/^\s+"((?:\\.|[^"\\\n])*)"\s*$/gm)) add(unescape(m[1]), false, where(src.indexOf(m[0])));
+    }
+  }
+}
+
 const holes = (s) => [...new Set([...s.matchAll(/\{(\w+)\}/g)].map((m) => m[1]))].sort();
 const dir = join(root, "src", "locales");
 const files = readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -5));

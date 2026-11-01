@@ -225,6 +225,7 @@ export const httpApi: Api = {
   createPlaylist: (id) => call("POST", `/torrents/${enc(id)}/playlist`),
   getSettings: () => call("GET", "/settings"),
   setSettings: (s) => call("PUT", "/settings", s),
+  setNativeText: async () => {},
   search: (text) => call("POST", "/search", { text }),
   testSearchSource: (id) => call("POST", `/search/test/${enc(id)}`),
   listPlugins: () => call("GET", "/plugins"),

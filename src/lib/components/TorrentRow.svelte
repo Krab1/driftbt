@@ -50,7 +50,7 @@
         : t.state === "downloading" && t.peers_live === 0 && t.down_bps === 0
           ? tr("Looking for peers…")
           : t.state === "error"
-            ? (t.error ?? tr("Something went wrong."))
+            ? (t.error ? td(t.error) : tr("Something went wrong."))
             : "",
   );
 </script>

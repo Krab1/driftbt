@@ -120,7 +120,7 @@ Rules: no librqbit types in signatures. Errors are our `EngineError` enum. Anyth
 
 ## IPC (frontend ↔ backend)
 
-**Commands (invoke):** `add_torrent`, `pause`, `resume`, `remove`, `set_files`, `set_limits`, `get_details`, `get_settings`, `set_settings`, `open_path`, `stream_url`. All return `Result<T, ApiError{code,message}>`; the UI shows `message` verbatim.
+**Commands (invoke):** `add_torrent`, `pause`, `resume`, `remove`, `set_files`, `set_limits`, `get_details`, `get_settings`, `set_settings`, `set_native_text` (tray menu and notice words in the chosen language; desktop only), `open_path`, `stream_url`. All return `Result<T, ApiError{code,message}>`; the UI shows `message` through `td()` (see docs/I18N.md), so a message with an entry in the language file appears in that language and any other stays as written.
 
 **Events (push):**
 - `snapshot` — whole list of `TorrentStats`, throttled to 1 Hz when visible, 0.2 Hz when minimised/hidden, stopped when in tray with no window.

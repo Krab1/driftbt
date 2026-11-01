@@ -293,6 +293,28 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
 }
 
+/// A label for the tray menu or a notice: one short line of plain text.
+fn valid_label(s: &str) -> bool {
+    !s.trim().is_empty() && s.chars().count() <= 60 && !s.chars().any(char::is_control)
+}
+
+/// Gives the tray menu and the "download complete" notice their words in the chosen language.
+#[tauri::command]
+pub fn set_native_text(state: State<'_, crate::NativeText>, show: String, settings: String, quit: String, complete: String) -> ApiResult<()> {
+    if ![&show, &settings, &quit, &complete].iter().all(|s| valid_label(s)) {
+        return Err(ApiError::new("invalid_input", "Those labels aren't valid."));
+    }
+    let fail = |e: tauri::Error| {
+        eprintln!("tray text failed: {e}");
+        ApiError::new("settings", "Couldn't update the tray menu.")
+    };
+    state.show.set_text(&show).map_err(fail)?;
+    state.settings.set_text(&settings).map_err(fail)?;
+    state.quit.set_text(&quit).map_err(fail)?;
+    *state.complete.lock().unwrap() = complete;
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> ApiResult<Settings> {
     let before = state.svc.apply_settings(settings).await?;
@@ -305,4 +327,18 @@ pub async fn set_settings(state: State<'_, AppState>, settings: Settings) -> Api
         })?;
     }
     Ok(settings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::valid_label;
+
+    #[test]
+    fn tray_labels_are_short_plain_lines() {
+        assert!(valid_label("Показать Drift") && valid_label("Quit"));
+        for bad in ["", "   ", "two\nlines", "tab\there", "nul\0", &"x".repeat(61)] {
+            assert!(!valid_label(bad), "{bad:?}");
+        }
+        assert!(valid_label(&"ы".repeat(60)));
+    }
 }

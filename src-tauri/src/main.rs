@@ -28,6 +28,14 @@ use tauri_plugin_notification::NotificationExt;
 
 use platform::{autostart, OpenPayload};
 
+/// The words only the system shows (the tray menu and the "download complete" notice). The window sends them in the chosen language.
+pub struct NativeText {
+    show: MenuItem<tauri::Wry>,
+    settings: MenuItem<tauri::Wry>,
+    quit: MenuItem<tauri::Wry>,
+    complete: std::sync::Mutex<String>,
+}
+
 pub struct AppState {
     /// Everything the UI does to torrents goes through the manager (queue, categories, goals).
     pub manager: Arc<TorrentManager>,
@@ -115,6 +123,7 @@ fn create_tray(app: &tauri::App) -> tauri::Result<()> {
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
+    app.manage(NativeText { show: show.clone(), settings: settings.clone(), quit: quit.clone(), complete: std::sync::Mutex::new("Download complete".into()) });
     let mut tray = TrayIconBuilder::new()
         .tooltip("Drift")
         .menu(&menu)
@@ -296,7 +305,8 @@ fn main() {
                             }
                             let focused = handle.get_webview_window("main").and_then(|w| w.is_focused().ok()).unwrap_or(false);
                             if notify && !focused {
-                                let _ = handle.notification().builder().title("Download complete").body(&t.name).show();
+                                let title = handle.state::<NativeText>().complete.lock().unwrap().clone();
+                                let _ = handle.notification().builder().title(&title).body(&t.name).show();
                             }
                         }
                         let _ = handle.emit("snapshot", &list);
@@ -405,6 +415,7 @@ fn main() {
             commands::install_update,
             commands::get_settings,
             commands::set_settings,
+            commands::set_native_text,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Drift");

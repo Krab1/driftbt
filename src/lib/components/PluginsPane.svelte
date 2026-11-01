@@ -191,7 +191,7 @@
         <div class="meta">
           <div class="nm">{p.name} <small>{p.version}</small></div>
           {#if p.description}<span class="desc">{p.description}</span>{/if}
-          <small>It {kinds(p)}.</small>
+          <small>{t("It {what}.", { what: kinds(p) })}</small>
           {#if p.problem}
             <small class="bad">{p.problem}</small>
           {:else}
@@ -420,9 +420,5 @@
     color: var(--accent-fg);
     cursor: pointer;
     text-decoration: underline;
-  }
-  code {
-    font-family: var(--font-mono);
-    font-size: 11px;
   }
 </style>

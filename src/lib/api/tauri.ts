@@ -86,6 +86,7 @@ export const tauriApi: Api = {
   pluginLog: (id) => call("plugin_log", { id }),
   getSettings: () => call("get_settings"),
   setSettings: (settings) => call("set_settings", { settings }),
+  setNativeText: (text) => call("set_native_text", text),
   onSnapshot: on<Torrent[]>("snapshot"),
   pickFolder: async (current) => {
     const r = await open({ directory: true, multiple: false, defaultPath: current ?? undefined });

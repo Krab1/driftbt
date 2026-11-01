@@ -112,13 +112,26 @@ class Ui {
 
   async loadSettings() {
     this.settings = await api.getSettings();
-    this.followLanguage();
+    await this.followLanguage();
+    void this.pushNativeText();
+  }
+
+  /** The tray menu and the "download complete" notice are drawn by the system: hand them their words. */
+  private async pushNativeText() {
+    try {
+      await api.setNativeText({ show: t("Show Drift"), settings: t("Settings"), quit: t("Quit"), complete: t("Download complete") });
+    } catch {
+      /* the menu keeps its English words */
+    }
   }
 
   /** The saved language is the truth: whenever settings are read or saved, the window switches to it if it shows another. */
-  private followLanguage() {
+  private async followLanguage() {
     const pref = this.settings?.language;
-    if (pref && pref !== chosenLanguage()) void setLanguage(pref);
+    if (pref && pref !== chosenLanguage()) {
+      await setLanguage(pref);
+      void this.pushNativeText();
+    }
   }
 
   /** Bumped when the backend refuses a settings change, so inputs remount showing the values actually in use. */
@@ -129,7 +142,7 @@ class Ui {
     if (!this.settings) return false;
     try {
       this.settings = await api.setSettings({ ...this.settings, ...patch });
-      this.followLanguage();
+      void this.followLanguage();
       void this.refreshLimits();
       return true;
     } catch (e) {

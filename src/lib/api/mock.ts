@@ -509,6 +509,7 @@ export function createMockApi(count = 40): Api {
     pluginLog: async () => "2026-10-15 starting\nconnected to example server\nsearch 'ubuntu': 12 rows",
     getSettings: async () => ({ ...settings }),
     setSettings: async (s) => (settings = { ...s }),
+    setNativeText: async () => {},
     onSnapshot: sub(snapSubs),
     pickFolder: async () => "D:\\Torrents",
   };

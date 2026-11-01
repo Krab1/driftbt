@@ -458,6 +458,8 @@ export interface Api {
   /** An empty key removes it. The source must already be saved in settings. */
   getSettings(): Promise<Settings>;
   setSettings(s: Settings): Promise<Settings>;
+  /** The words only the system shows (tray menu, "download complete" notice), in the chosen language. Does nothing in a browser. */
+  setNativeText(text: { show: string; settings: string; quit: string; complete: string }): Promise<void>;
   /** Returns an unsubscribe function. */
   onSnapshot(cb: (list: Torrent[]) => void): Promise<() => void>;
   pickFolder(current: string | null): Promise<string | null>;

@@ -345,11 +345,6 @@
     font-family: var(--font-mono);
     font-size: 12px;
   }
-  code.inl {
-    display: inline;
-    padding: 1px 4px;
-    font-size: 11px;
-  }
   .check {
     display: flex;
     gap: 8px;
