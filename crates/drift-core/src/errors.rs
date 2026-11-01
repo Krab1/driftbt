@@ -54,7 +54,9 @@ impl From<crate::engine::EngineError> for ApiError {
             E::Timeout => Self::new("timeout", "Couldn't fetch the torrent info. Check the link, or try again in a moment."),
             E::Backend(raw) => {
                 eprintln!("engine error: {raw}");
-                Self::new("engine", "The torrent engine hit a problem. Try again.").with_detail(raw)
+                // The engine won't change a torrent's files while it is still checking what is on disk; it works a moment later.
+                let message = if raw.contains("initializing torrent") { "Can't update while torrent initializing, try again later." } else { "The torrent engine hit a problem. Try again." };
+                Self::new("engine", message).with_detail(raw)
             }
         }
     }
@@ -71,6 +73,14 @@ mod tests {
         assert!(plain_error(Some("Access is denied. (os error 5)")).unwrap().contains("can't write"));
         assert!(plain_error(Some("No such file or directory (os error 2)")).unwrap().contains("can't be found"));
         assert!(plain_error(Some("The process cannot access the file because it is being used by another process. (os error 32)")).unwrap().contains("Another program"));
+    }
+
+    #[test]
+    fn changing_files_while_the_torrent_is_checking_says_so() {
+        let e: super::ApiError = crate::engine::EngineError::Backend("can't update initializing torrent".into()).into();
+        assert_eq!(e.message, "Can't update while torrent initializing, try again later.");
+        let other: super::ApiError = crate::engine::EngineError::Backend("boom".into()).into();
+        assert!(!other.message.contains("initializing"));
     }
 
     #[test]
