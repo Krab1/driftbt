@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "../i18n.svelte";
+  import { t, tn } from "../i18n.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
 
@@ -18,7 +18,7 @@
   <Icon name="alert" />
   <span>
     {t("Your VPN isn't connected.")}
-    {#if n}{n} {n === 1 ? t("torrent is") : t("torrents are")} paused{:else}{t("Torrents are on hold")}{/if}
+    {#if n}{tn("{n} torrent is paused", "{n} torrents are paused", n)}{:else}{t("Torrents are on hold")}{/if}
     {t("until it is back.")}
   </span>
   <button class="btn" onclick={openSettings}>{t("VPN settings")}</button>

@@ -117,7 +117,7 @@
         {#each adapters as a (a.name)}
           <option value={a.name}>{a.name}{a.up && a.has_ipv4 ? "" : t(" (not connected)")} — {a.description}</option>
         {/each}
-        {#if s.vpn_guard.adapter && !adapters.some((a) => a.name === s.vpn_guard.adapter)}<option value={s.vpn_guard.adapter}>{s.vpn_guard.adapter} (not found)</option>{/if}
+        {#if s.vpn_guard.adapter && !adapters.some((a) => a.name === s.vpn_guard.adapter)}<option value={s.vpn_guard.adapter}>{t("{name} (not found)", { name: s.vpn_guard.adapter })}</option>{/if}
       </select>
       <button class="btn" onclick={loadAdapters}>{t("Refresh")}</button>
     </div>
@@ -139,7 +139,7 @@
           <div class="nm"><Icon name="file" size={14} />{l.name}</div>
           <code title={l.source}>{l.source}</code>
           <small>
-            {#if st?.updated_at}{st.ranges.toLocaleString()} ranges · updated {age(st.updated_at)}{:else}{t("Not downloaded yet")}{/if}
+            {#if st?.updated_at}{t("{n} ranges · updated {age}", { n: st.ranges.toLocaleString(), age: age(st.updated_at) })}{:else}{t("Not downloaded yet")}{/if}
             {#if st?.insecure} · <span class="warn">{t("plain http: it could be altered on the way")}</span>{/if}
           </small>
           {#if st?.error}<small class="bad" role="alert">{st.error}{st.updated_at ? t(" The previous copy is still in use.") : ""}</small>{/if}
@@ -158,10 +158,10 @@
 
     <div class="row">
       {#if !s.ip_filter.lists.some((l) => l.source === emule.source)}
-        <button class="btn" disabled={!!busy} onclick={() => addList(emule.name, emule.source)}>Add suggested: {emule.name}</button>
+        <button class="btn" disabled={!!busy} onclick={() => addList(emule.name, emule.source)}>{t("Add suggested: {name}", { name: emule.name })}</button>
       {/if}
       <button class="btn" disabled={!!busy || !s.ip_filter.lists.length} onclick={updateNow}>{busy === "update" ? t("Updating…") : t("Update now")}</button>
-      {#if filter?.enabled}<small class="num">{filter.active_ranges.toLocaleString()} ranges active</small>{/if}
+      {#if filter?.enabled}<small class="num">{t("{n} ranges active", { n: filter.active_ranges.toLocaleString() })}</small>{/if}
     </div>
     <small>
       {t("Understands eMule")} <code>{t("ipfilter.dat")}</code>{t(", PeerGuardian and plain range lists, also zipped or gzipped. Lists are checked before use: empty ones, huge ones, and ones that would block more than a quarter of the internet are ignored. This blocks connections; it doesn't hide your address, so it isn't a substitute for a VPN. Lists refresh weekly, and the engine briefly restarts when one changes.")}

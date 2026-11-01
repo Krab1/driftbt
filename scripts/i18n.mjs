@@ -49,7 +49,7 @@ for (const file of walk(join(root, "src"))) {
   if (!importsI18n.test(raw)) continue;
   const src = blank(raw);
   const where = (i) => `${relative(root, file)}:${src.slice(0, i).split("\n").length}`;
-  for (const m of src.matchAll(/(?<![\w$.])(t|tr|tn)(?=\()/g)) {
+  for (const m of src.matchAll(/(?<![\w$.])(t|tr|tn|N_)(?=\()/g)) {
     const rest = src.slice(m.index + m[1].length, m.index + m[1].length + 600);
     if (m[1] === "tn") {
       const a = T2.exec(rest);

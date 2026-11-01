@@ -91,7 +91,7 @@
 <Dialog title={t("Simulation settings")} keep onclose={() => (ui.simTarget = null)}>
   <p class="name" title={target.name}>{target.name}</p>
   {#if loading}
-    <p class="note">Asking {target.pluginName}…</p>
+    <p class="note">{t("Asking {name}…", { name: target.pluginName })}</p>
   {:else}
     {#if problem}<p class="note">{problem}</p>{/if}
     <div class="form">
@@ -115,7 +115,7 @@
         </div>
       {/each}
     </div>
-    <small>These apply to this torrent only. {target.pluginName}'s own settings (Settings → Plugins) cover the rest, such as proxies and the custom client.</small>
+    <small>{t("These apply to this torrent only. {name}'s own settings (Settings → Plugins) cover the rest, such as proxies and the custom client.", { name: target.pluginName })}</small>
   {/if}
   {#snippet footer()}
     {#if target.enabled}<button class="btn" disabled={loading || busy} onclick={stop}>{t("Stop simulation")}</button>{/if}

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "../i18n.svelte";
+  import { t, tn } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api, type SearchReport, type SearchResult } from "../api";
   import { formatBytes } from "../../format";
@@ -66,7 +66,7 @@
     <button class="btn" onclick={() => ((ui.searchOpen = false), (ui.settingsOpen = true))}>{t("Open settings")}</button>
   {:else if report}
     <p class="status" role="status">
-      {answered} of {report.sources.length} source{report.sources.length === 1 ? "" : "s"} answered · {report.results.length} result{report.results.length === 1 ? "" : "s"}
+      {tn("{a} of {n} source answered", "{a} of {n} sources answered", report.sources.length, { a: answered })} · {tn("{n} result", "{n} results", report.results.length)}
       {#each problems as p (p.id)}<span class="bad"> · {p.name}: {p.message ?? t("didn't answer")}</span>{/each}
     </p>
     {#if report.results.length}

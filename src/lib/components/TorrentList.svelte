@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t as tr } from "../i18n.svelte";
+  import { N_, t as tr, td } from "../i18n.svelte";
   import { api } from "../api";
   import { torrents, type SortKey } from "../stores/torrents.svelte";
   import { ui, errorText } from "../stores/ui.svelte";
@@ -20,7 +20,7 @@
   const slice = $derived(items.slice(start, end));
   const selIndex = $derived(items.findIndex((t) => t.id === torrents.selectedId));
 
-  const heads = $derived<{ key: SortKey; label: string; right?: boolean }[]>([{ key: "name", label: "Name" }, ...columns.shown.map((c) => ({ key: c.key, label: c.label, right: true }))]);
+  const heads = $derived<{ key: SortKey; label: string; right?: boolean }[]>([{ key: "name", label: N_("Name") }, ...columns.shown.map((c) => ({ key: c.key, label: c.label, right: true }))]);
   let picking = $state(false);
 
   async function toggle(id: string) {
@@ -70,7 +70,7 @@
     {#each heads as h (h.key)}
       <div class="hcell c-{h.key}" class:r={h.right} role="columnheader" aria-sort={torrents.sortKey === h.key ? (torrents.sortDir === 1 ? "ascending" : "descending") : "none"}>
         <button class="th" onclick={() => torrents.sortBy(h.key)}>
-          {h.label}{#if torrents.sortKey === h.key}<span class="arrow" aria-hidden="true">{torrents.sortDir === 1 ? "▲" : "▼"}</span>{/if}
+          {td(h.label)}{#if torrents.sortKey === h.key}<span class="arrow" aria-hidden="true">{torrents.sortDir === 1 ? "▲" : "▼"}</span>{/if}
         </button>
       </div>
     {/each}
@@ -81,7 +81,7 @@
         <div class="scrim" onclick={() => (picking = false)} onkeydown={(e) => e.key === "Escape" && (picking = false)}></div>
         <div class="menu" role="group" aria-label={tr("Columns")}>
           {#each COLUMNS as c (c.key)}
-            <label><input type="checkbox" checked={columns.on.includes(c.key)} onchange={(e) => columns.set(c.key, e.currentTarget.checked)} /> {c.label}</label>
+            <label><input type="checkbox" checked={columns.on.includes(c.key)} onchange={(e) => columns.set(c.key, e.currentTarget.checked)} /> {td(c.label)}</label>
           {/each}
           <button class="btn ghost reset" onclick={() => columns.reset()}>{tr("Reset to default")}</button>
         </div>

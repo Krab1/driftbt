@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t as tr } from "../i18n.svelte";
+  import { N_, t as tr, td, tn } from "../i18n.svelte";
   import { api } from "../api";
   import { formatBytes, formatEta, formatSpeed, percent } from "../../format";
   import { torrents } from "../stores/torrents.svelte";
@@ -11,10 +11,10 @@
   import Sparkline from "./Sparkline.svelte";
 
   const tabs: { key: DetailTab; label: string }[] = [
-    { key: "overview", label: "Overview" },
-    { key: "files", label: "Files" },
-    { key: "peers", label: "Peers" },
-    { key: "trackers", label: "Trackers" },
+    { key: "overview", label: N_("Overview") },
+    { key: "files", label: N_("Files") },
+    { key: "peers", label: N_("Peers") },
+    { key: "trackers", label: N_("Trackers") },
   ];
 
   const sel = $derived(torrents.selected);
@@ -152,7 +152,7 @@
     <div class="tabs" role="tablist" aria-label={tr("Details")} tabindex="-1" onkeydown={onTabKey}>
       {#each tabs as t (t.key)}
         <button role="tab" id="tab-{t.key}" aria-selected={ui.detailTab === t.key} aria-controls="pane" tabindex={ui.detailTab === t.key ? 0 : -1} class:on={ui.detailTab === t.key} onclick={() => { ui.setDetailTab(t.key); ui.setDetailOpen(true); }}>
-          {t.label}{#if t.key === "peers" && d}<span class="n num">{d.peers.length}</span>{/if}
+          {td(t.label)}{#if t.key === "peers" && d}<span class="n num">{d.peers.length}</span>{/if}
         </button>
       {/each}
     </div>
@@ -229,14 +229,13 @@
 
 {#if dropping}
   {@const have = dropping.files.reduce((a, f) => a + f.progress_bytes, 0)}
-  <Dialog title="Stop downloading {dropping.files.length === 1 ? 'this file' : dropping.files.length + ' files'}?" onclose={cancelDrop}>
+  <Dialog title={tn("Stop downloading this file?", "Stop downloading {n} files?", dropping.files.length)} onclose={cancelDrop}>
     <p class="ask">
-      {dropping.files.length === 1 ? tr("This file already has") : tr("These files already have")}
-      {formatBytes(have)} downloaded. Delete it to free the space, or keep it on disk?
+      {tn("This file already has {size} downloaded. Delete it to free the space, or keep it on disk?", "These files already have {size} downloaded. Delete it to free the space, or keep it on disk?", dropping.files.length, { size: formatBytes(have) })}
     </p>
     <ul class="askfiles">
       {#each dropping.files.slice(0, 5) as f (f.path)}<li title={f.path}>{f.path}</li>{/each}
-      {#if dropping.files.length > 5}<li>and {dropping.files.length - 5} more</li>{/if}
+      {#if dropping.files.length > 5}<li>{tr("and {n} more", { n: dropping.files.length - 5 })}</li>{/if}
     </ul>
     <p class="hint">{tr("Deleting makes the torrent check itself again, which takes a moment. A few pieces next to the deleted files are fetched once more.")}</p>
     {#snippet footer()}

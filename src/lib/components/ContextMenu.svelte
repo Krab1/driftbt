@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t as tr } from "../i18n.svelte";
+  import { N_, t as tr, td } from "../i18n.svelte";
   import { api, type QueueMove, type SimulatorState } from "../api";
   import { torrents } from "../stores/torrents.svelte";
   import { ui, errorText } from "../stores/ui.svelte";
@@ -11,10 +11,10 @@
   const inQueue = !!t && t.queue_pos !== null;
   const categories = ui.settings?.categories ?? [];
   const queueMoves: { to: QueueMove; label: string }[] = [
-    { to: "top", label: "Move to top of queue" },
-    { to: "up", label: "Move up in queue" },
-    { to: "down", label: "Move down in queue" },
-    { to: "bottom", label: "Move to bottom of queue" },
+    { to: "top", label: N_("Move to top of queue") },
+    { to: "up", label: N_("Move up in queue") },
+    { to: "down", label: N_("Move down in queue") },
+    { to: "bottom", label: N_("Move to bottom of queue") },
   ];
 
   // Simulator plugins answer on their own time, so their section appears when they have; the rest of the menu never waits.
@@ -222,7 +222,7 @@
   {#if inQueue}
     <hr />
     {#each queueMoves as m (m.to)}
-      <button role="menuitem" onclick={() => move(m.to)}><Icon name={m.to === "top" || m.to === "up" ? "up" : "down"} />{m.label}</button>
+      <button role="menuitem" onclick={() => move(m.to)}><Icon name={m.to === "top" || m.to === "up" ? "up" : "down"} />{td(m.label)}</button>
     {/each}
   {/if}
   {#if categories.length}
@@ -242,11 +242,11 @@
       {#each sims as s (s.id)}
         {@const sel = simOn(s)}
         {#if s.ok}
-          <button role="menuitemcheckbox" aria-checked={!!sel?.enabled} onclick={() => simulate(s)}><span class="tick">{sel?.enabled ? "✓" : ""}</span>{s.name}: Simulate this torrent{#if sel?.enabled && sel.label}<span class="cur">{sel.label}</span>{/if}</button>
+          <button role="menuitemcheckbox" aria-checked={!!sel?.enabled} onclick={() => simulate(s)}><span class="tick">{sel?.enabled ? "✓" : ""}</span>{tr("{name}: Simulate this torrent", { name: s.name })}{#if sel?.enabled && sel.label}<span class="cur">{sel.label}</span>{/if}</button>
           {#if sel?.enabled && s.fields.length}<button role="menuitem" onclick={() => simSettings(s)}><Icon name="sliders" />{tr("Simulation settings…")}</button>{/if}
           {#if sel?.enabled && s.has_status}<button role="menuitem" onclick={() => simStats(s)}><Icon name="list" />{tr("Simulation statistics…")}</button>{/if}
         {:else}
-          <button role="menuitem" disabled title={tr("It didn't answer. Look at its log in Settings → Plugins.")}>{s.name}: not responding</button>
+          <button role="menuitem" disabled title={tr("It didn't answer. Look at its log in Settings → Plugins.")}>{tr("{name}: not responding", { name: s.name })}</button>
         {/if}
       {/each}
     </div>

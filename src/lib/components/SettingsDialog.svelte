@@ -2,7 +2,7 @@
   import { api, remote, type Theme } from "../api";
   import { MAX_KIB } from "../rate";
   import { parsePack, warnings } from "../themepack";
-  import { LANGUAGES, t as tr } from "../i18n.svelte";
+  import { LANGUAGES, N_, t as tr, td } from "../i18n.svelte";
   import { auth } from "../stores/auth.svelte";
   import { ui } from "../stores/ui.svelte";
   import Dialog from "./Dialog.svelte";
@@ -13,11 +13,11 @@
 
   type Tab = "general" | "speed" | "queue" | "network" | "plugins";
   const tabs: { key: Tab; label: string }[] = [
-    { key: "general", label: "General" },
-    { key: "speed", label: "Speed" },
-    { key: "queue", label: "Queue and seeding" },
-    { key: "network", label: "Network" },
-    { key: "plugins", label: "Plugins" },
+    { key: "general", label: N_("General") },
+    { key: "speed", label: N_("Speed") },
+    { key: "queue", label: N_("Queue and seeding") },
+    { key: "network", label: N_("Network") },
+    { key: "plugins", label: N_("Plugins") },
   ];
 
   const stored = () => {
@@ -71,9 +71,9 @@
   }
 
   const themes: { key: Theme; label: string }[] = [
-    { key: "system", label: "System" },
-    { key: "light", label: "Light" },
-    { key: "dark", label: "Dark" },
+    { key: "system", label: N_("System") },
+    { key: "light", label: N_("Light") },
+    { key: "dark", label: N_("Dark") },
   ];
 
   let version = $state("");
@@ -144,7 +144,7 @@
     {@const s = ui.settings}
     <div class="tabs" role="tablist" aria-label={tr("Settings sections")} tabindex="-1" onkeydown={onTabKey}>
       {#each tabs as t (t.key)}
-        <button role="tab" id="stab-{t.key}" aria-selected={tab === t.key} aria-controls="spane" tabindex={tab === t.key ? 0 : -1} class:on={tab === t.key} onclick={() => pick(t.key)}>{t.label}</button>
+        <button role="tab" id="stab-{t.key}" aria-selected={tab === t.key} aria-controls="spane" tabindex={tab === t.key ? 0 : -1} class:on={tab === t.key} onclick={() => pick(t.key)}>{td(t.label)}</button>
       {/each}
     </div>
 
@@ -209,7 +209,7 @@
           <span>{tr("Theme")}</span>
           <div class="seg">
             {#each themes as th (th.key)}
-              <button role="radio" aria-checked={s.theme === th.key} class:on={s.theme === th.key} onclick={() => ui.saveSettings({ theme: th.key })}>{th.label}</button>
+              <button role="radio" aria-checked={s.theme === th.key} class:on={s.theme === th.key} onclick={() => ui.saveSettings({ theme: th.key })}>{td(th.label)}</button>
             {/each}
           </div>
         </div>

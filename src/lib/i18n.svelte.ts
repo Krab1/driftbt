@@ -60,6 +60,12 @@ export function tn(one: string, other: string, n: number, vars?: Vars): string {
   return render(pick(entry, other, lang, n), all);
 }
 
+/** Marks a fixed English text that is translated where it is shown, with `td(label)`: tables of labels, for one. Does nothing by itself. */
+export const N_ = (text: string): string => text;
+
+/** Translates a text that was marked with `N_`, or one that is not fixed (a message from the engine, say): a lookup that shows the English when there is no entry. */
+export const td = (text: string, vars?: Vars): string => t(text, vars);
+
 /** For number and date formats: the chosen language, or the computer's own formats (`undefined`) while the choice is `system`. */
 export function locale(): string | undefined {
   return pref === "system" ? undefined : lang === "xx" ? "en" : lang;

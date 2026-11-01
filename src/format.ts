@@ -1,4 +1,4 @@
-import { locale } from "./lib/i18n.svelte";
+import { locale, t } from "./lib/i18n.svelte";
 
 /** Human-readable byte size, base 1024. */
 export function formatBytes(n: number): string {
@@ -20,12 +20,12 @@ export function formatSpeed(bps: number): string {
 /** Short ETA: "45s", "4m", "1h 12m", "2d 3h". Null or negative shows a dash. */
 export function formatEta(secs: number | null): string {
   if (secs === null || secs < 0 || !Number.isFinite(secs)) return "—";
-  if (secs < 60) return `${Math.floor(secs)}s`;
+  if (secs < 60) return t("{n}s", { n: Math.floor(secs) });
   const m = Math.floor(secs / 60);
-  if (m < 60) return `${m}m`;
+  if (m < 60) return t("{n}m", { n: m });
   const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ${m % 60}m`;
-  return `${Math.floor(h / 24)}d ${h % 24}h`;
+  if (h < 24) return t("{h}h {m}m", { h, m: m % 60 });
+  return t("{d}d {h}h", { d: Math.floor(h / 24), h: h % 24 });
 }
 
 /** Whole percent, never 100 until complete. */

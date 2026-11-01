@@ -55,7 +55,7 @@
       {#each suggestions as s (s)}<button class="btn" onclick={() => add(s)}>{s}</button>{/each}
     </div>
   {/if}
-  <small>Separate tags with Enter or a comma. Up to {MAX} tags. Click a tag in the left list to show only its torrents.</small>
+  <small>{tr("Separate tags with Enter or a comma. Up to {max} tags. Click a tag in the left list to show only its torrents.", { max: MAX })}</small>
   {#snippet footer()}
     <button class="btn" onclick={() => (ui.tagTarget = null)}>{tr("Cancel")}</button>
     <button class="btn primary" onclick={save}>{tr("Save")}</button>

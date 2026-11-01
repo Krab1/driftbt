@@ -156,12 +156,12 @@
   {#if previewing}
     <p class="note busy" role="status"><span class="spinner" aria-hidden="true"></span>{tr("Fetching torrent info… You don't have to wait: add it now and everything gets downloaded. You can untick files later.")}</p>
   {:else if previewError}
-    <p class="note warn" role="status">{previewError} You can still add it.{#if more} <button class="link" onclick={() => (ui.detailView = { title: previewError, text: more })}>{tr("More details")}</button>{/if}</p>
+    <p class="note warn" role="status">{previewError} {tr("You can still add it.")}{#if more} <button class="link" onclick={() => (ui.detailView = { title: previewError, text: more })}>{tr("More details")}</button>{/if}</p>
   {:else if preview}
     <div class="field">
       <div class="phead">
         <span class="pname" title={preview.name}>{preview.name}</span>
-        <span class="num psize">{formatBytes(chosenBytes)} of {formatBytes(preview.total_bytes)}</span>
+        <span class="num psize">{tr("{a} of {b}", { a: formatBytes(chosenBytes), b: formatBytes(preview.total_bytes) })}</span>
       </div>
       {#if preview.files.length > 1}
         <div class="treebox"><FileTree files={preview.files} {selected} onchange={(n) => (selected = n)} /></div>

@@ -1,3 +1,4 @@
+import { N_ } from "../i18n.svelte";
 import { formatBytes, formatDay, formatEta, formatSpeed, percent } from "../../format";
 import type { Torrent } from "../api/types";
 import type { SortKey } from "./view";
@@ -14,18 +15,18 @@ const ratio = (t: Torrent) => (t.total_bytes ? t.uploaded_bytes / t.total_bytes 
 
 /** Every column the list can show besides the name, in display order. */
 export const COLUMNS: Column[] = [
-  { key: "progress", label: "Done", width: "56px", text: (t) => (t.state === "error" ? "" : `${percent(t.progress_bytes, t.total_bytes)}%`) },
-  { key: "size", label: "Size", width: "76px", text: (t) => (t.total_bytes ? formatBytes(t.total_bytes) : "—") },
-  { key: "speed", label: "Speed", width: "84px", text: (t) => formatSpeed(t.state === "seeding" ? t.up_bps : t.down_bps) },
-  { key: "eta", label: "ETA", width: "64px", text: (t) => (t.state === "downloading" ? formatEta(t.eta_secs) : "—") },
-  { key: "added", label: "Added", width: "96px", text: (t) => formatDay(t.added_at) },
-  { key: "finished", label: "Finished", width: "96px", text: (t) => formatDay(t.finished_at) },
-  { key: "uploaded", label: "Uploaded", width: "76px", text: (t) => formatBytes(t.uploaded_bytes) },
-  { key: "ratio", label: "Ratio", width: "56px", text: (t) => ratio(t).toFixed(2) },
-  { key: "peers", label: "Peers", width: "52px", text: (t) => String(t.peers_live) },
-  { key: "category", label: "Category", width: "96px", text: (t) => t.category ?? "—" },
-  { key: "tags", label: "Tags", width: "120px", text: (t) => (t.tags.length ? t.tags.join(", ") : "—") },
-  { key: "tracker", label: "Tracker", width: "132px", text: (t) => t.tracker ?? "—" },
+  { key: "progress", label: N_("Done"), width: "56px", text: (t) => (t.state === "error" ? "" : `${percent(t.progress_bytes, t.total_bytes)}%`) },
+  { key: "size", label: N_("Size"), width: "76px", text: (t) => (t.total_bytes ? formatBytes(t.total_bytes) : "—") },
+  { key: "speed", label: N_("Speed"), width: "84px", text: (t) => formatSpeed(t.state === "seeding" ? t.up_bps : t.down_bps) },
+  { key: "eta", label: N_("ETA"), width: "64px", text: (t) => (t.state === "downloading" ? formatEta(t.eta_secs) : "—") },
+  { key: "added", label: N_("Added"), width: "96px", text: (t) => formatDay(t.added_at) },
+  { key: "finished", label: N_("Finished"), width: "96px", text: (t) => formatDay(t.finished_at) },
+  { key: "uploaded", label: N_("Uploaded"), width: "76px", text: (t) => formatBytes(t.uploaded_bytes) },
+  { key: "ratio", label: N_("Ratio"), width: "56px", text: (t) => ratio(t).toFixed(2) },
+  { key: "peers", label: N_("Peers"), width: "52px", text: (t) => String(t.peers_live) },
+  { key: "category", label: N_("Category"), width: "96px", text: (t) => t.category ?? "—" },
+  { key: "tags", label: N_("Tags"), width: "120px", text: (t) => (t.tags.length ? t.tags.join(", ") : "—") },
+  { key: "tracker", label: N_("Tracker"), width: "132px", text: (t) => t.tracker ?? "—" },
 ];
 
 const DEFAULT: Column["key"][] = ["progress", "size", "speed", "eta"];

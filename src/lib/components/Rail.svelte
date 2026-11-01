@@ -1,23 +1,23 @@
 <script lang="ts">
-  import { t } from "../i18n.svelte";
+  import { N_, t, td } from "../i18n.svelte";
   import { torrents, type Filter } from "../stores/torrents.svelte";
   import { ui } from "../stores/ui.svelte";
   import Icon from "./Icon.svelte";
 
   const items: { key: Filter; label: string; icon: "list" | "down" | "up" | "pause" | "alert" }[] = [
-    { key: "all", label: "All", icon: "list" },
-    { key: "downloading", label: "Downloading", icon: "down" },
-    { key: "seeding", label: "Seeding", icon: "up" },
-    { key: "paused", label: "Paused", icon: "pause" },
-    { key: "error", label: "Errors", icon: "alert" },
+    { key: "all", label: N_("All"), icon: "list" },
+    { key: "downloading", label: N_("Downloading"), icon: "down" },
+    { key: "seeding", label: N_("Seeding"), icon: "up" },
+    { key: "paused", label: N_("Paused"), icon: "pause" },
+    { key: "error", label: N_("Errors"), icon: "alert" },
   ];
 </script>
 
 <nav aria-label={t("Filters")}>
   {#each items as it (it.key)}
-    <button class="item" title="{it.label} ({torrents.counts[it.key]})" class:on={torrents.filter === it.key} aria-current={torrents.filter === it.key ? "page" : undefined} onclick={() => (torrents.filter = it.key)}>
+    <button class="item" title="{td(it.label)} ({torrents.counts[it.key]})" class:on={torrents.filter === it.key} aria-current={torrents.filter === it.key ? "page" : undefined} onclick={() => (torrents.filter = it.key)}>
       <Icon name={it.icon} />
-      <span class="label">{it.label}</span>
+      <span class="label">{td(it.label)}</span>
       <span class="count num">{torrents.counts[it.key]}</span>
     </button>
   {/each}

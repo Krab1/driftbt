@@ -88,7 +88,7 @@
     tests[id] = { busy: true };
     try {
       const r = await api.testSearchSource(id);
-      tests[id] = r.outcome === "ok" ? { busy: false, ok: true, text: r.count > 0 ? "Working. It answered the sample search." : "Working, though the sample search found nothing." } : { busy: false, ok: false, text: r.message ?? "It didn't answer." };
+      tests[id] = r.outcome === "ok" ? { busy: false, ok: true, text: r.count > 0 ? t("Working. It answered the sample search.") : t("Working, though the sample search found nothing.") } : { busy: false, ok: false, text: r.message ?? t("It didn't answer.") };
     } catch (e) {
       tests[id] = { busy: false, ok: false, text: e instanceof Error ? e.message : "The test couldn't run." };
     }
@@ -195,7 +195,7 @@
           {#if p.problem}
             <small class="bad">{p.problem}</small>
           {:else}
-            <small>Connects to: {p.permissions.net.length ? net(p) : t("nothing on the internet")}</small>
+            <small>{t("Connects to: {what}", { what: p.permissions.net.length ? net(p) : t("nothing on the internet") })}</small>
           {/if}
           {#if p.kinds.includes("search") && p.enabled && !p.problem}
             <span class="test">
@@ -203,8 +203,8 @@
               {#if tests[p.id]?.text}<small class:bad={!tests[p.id].ok} class:good={tests[p.id].ok} role="status">{tests[p.id].text}</small>{/if}
             </span>
           {/if}
-          {#if p.pending}<small class="note">Version {p.pending} is ready and takes over when you restart Drift.</small>{/if}
-          {#if p.previous && !p.pending}<small>Earlier version {p.previous} is kept. <button class="link" onclick={() => rollback(p)}>{t("Go back to it")}</button></small>{/if}
+          {#if p.pending}<small class="note">{t("Version {version} is ready and takes over when you restart Drift.", { version: p.pending })}</small>{/if}
+          {#if p.previous && !p.pending}<small>{t("Earlier version {version} is kept.", { version: p.previous })} <button class="link" onclick={() => rollback(p)}>{t("Go back to it")}</button></small>{/if}
           {#if p.enabled || !p.problem}
             <details class="more">
               <summary>{p.fields.length ? t("Settings and log") : t("Log")}</summary>
@@ -269,9 +269,9 @@
       {#each offers as o (o.id)}
         <div class="item">
           <div class="meta">
-            <div class="nm">{o.name} <small>{o.version}{#if o.installed}, you have {o.installed}{/if}</small></div>
+            <div class="nm">{o.name} <small>{o.version}{#if o.installed}{t(", you have {version}", { version: o.installed })}{/if}</small></div>
             {#if o.summary}<small>{o.summary}</small>{/if}
-            {#if o.changelog}<small>What's new: {o.changelog}</small>{/if}
+            {#if o.changelog}<small>{t("What's new: {text}", { text: o.changelog })}</small>{/if}
           </div>
           {#if o.installed === o.version}
             <small>{t("Up to date")}</small>

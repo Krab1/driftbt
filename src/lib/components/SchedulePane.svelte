@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from "../i18n.svelte";
+  import { t, td } from "../i18n.svelte";
   import type { ScheduleSlot } from "../api";
   import { MAX_KIB } from "../rate";
   import { DAYS, describeSlot, fromTime, hasDay, toggleDay, toTime } from "../schedule";
@@ -26,7 +26,7 @@
     <div class="slot" role="group" aria-label="Slot {i + 1}: {describeSlot(s)}">
       <div class="days" role="group" aria-label={t("Days")}>
         {#each DAYS as d, day (d)}
-          <button class="day" class:on={hasDay(s.days, day)} aria-pressed={hasDay(s.days, day)} aria-label={d} onclick={() => patch(i, { days: toggleDay(s.days, day) })}>{d[0]}</button>
+          <button class="day" class:on={hasDay(s.days, day)} aria-pressed={hasDay(s.days, day)} aria-label={td(d)} onclick={() => patch(i, { days: toggleDay(s.days, day) })}>{td(d)[0]}</button>
         {/each}
       </div>
       <label>{t("From")} <input type="time" value={toTime(s.from_min)} onchange={(e) => patch(i, { from_min: time(e, s.from_min) })} /></label>

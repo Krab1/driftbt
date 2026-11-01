@@ -39,7 +39,7 @@
     {#if n.isFile}
       <span class="twist"></span>
     {:else}
-      <button class="twist" aria-label={opened.has(n.key) ? `Collapse ${n.name}` : `Expand ${n.name}`} onclick={() => toggleOpen(n.key)}>
+      <button class="twist" aria-label={opened.has(n.key) ? t("Collapse {name}", { name: n.name }) : t("Expand {name}", { name: n.name })} onclick={() => toggleOpen(n.key)}>
         <span class="chev" class:open={opened.has(n.key)}>▸</span>
       </button>
     {/if}

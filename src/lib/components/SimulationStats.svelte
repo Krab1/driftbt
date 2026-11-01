@@ -38,7 +38,7 @@
 <Dialog title={tr("Simulation statistics")} wide onclose={() => (ui.simStatsTarget = null)}>
   <p class="name" title={target.name}>{target.name}</p>
   {#if problem}<p class="bad">{problem}</p>{/if}
-  {#if !status && !problem}<p class="note">Asking {target.pluginName}…</p>{/if}
+  {#if !status && !problem}<p class="note">{tr("Asking {name}…", { name: target.pluginName })}</p>{/if}
   {#if status}
     {#each status.tables as t, ti (ti)}
       <section>
@@ -61,7 +61,7 @@
     {/if}
   {/if}
   {#snippet footer()}
-    <small>Kept by {target.pluginName} in memory only; gone when Drift closes.</small>
+    <small>{tr("Kept by {name} in memory only; gone when Drift closes.", { name: target.pluginName })}</small>
     <button class="btn" onclick={() => (ui.simStatsTarget = null)}>{tr("Close")}</button>
   {/snippet}
 </Dialog>
