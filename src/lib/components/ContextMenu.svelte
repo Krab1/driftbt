@@ -71,7 +71,7 @@
       if (!dir) return;
       await api.moveTorrent(t.id, dir);
       await torrents.refresh();
-      ui.toast(`Moved to ${dir}`);
+      ui.toast(tr("Moved to {dir}", { dir }));
     } catch (e) {
       ui.fail(e);
     }

@@ -54,7 +54,7 @@
     stops.push(() => clearInterval(simTimer));
     api.guardStatus().then((g) => (ui.guard = g)).catch(() => {});
     keep(api.onGuard((g) => (ui.guard = g)));
-    keep(api.onWatch((w) => (w.added ? ui.toast(`Added ${w.added} from the watch folder`) : ui.toast(`${w.invalid} isn't a valid torrent file, so it was set aside`, "error"))));
+    keep(api.onWatch((w) => (w.added ? ui.toast(tr("Added {name} from the watch folder", { name: w.added })) : ui.toast(tr("{name} isn't a valid torrent file, so it was set aside", { name: w.invalid ?? "" }), "error"))));
     keep(api.onPluginNotice((n) => ui.toast(n.text, n.error ? "error" : "info")));
     // The scheduled limit can change at any minute without a setting changing.
     const limitsTimer = setInterval(() => ui.refreshLimits(), 30_000);

@@ -183,7 +183,7 @@
   <div class="field">
     <span>{t("Plugins")}</span>
     <p class="intro">
-      {t("Plugins add things to Drift. Each one is a small separate program. A")} <b>{t("search")}</b> {t("plugin adds a place that")} <b>{t("Find online")}</b> {t("can look for torrents, and a plugin can also act when a torrent finishes (move it, show a notice). Drift comes with two search plugins. Turn on only the ones you want, and only plugins you trust.")}
+      {t("Plugins add things to Drift. Each one is a small separate program. A search plugin adds a place that Find online can look for torrents, and a plugin can also act when a torrent finishes (move it, show a notice). Drift comes with two search plugins. Turn on only the ones you want, and only plugins you trust.")}
     </p>
     {#each list as p (p.id)}
       <div class="item">
@@ -284,7 +284,7 @@
       {/each}
     {/if}
     <small>
-      {t("To add a plugin by hand, put its folder in")} <code>{t("plugins")}</code> {t("inside Drift's data folder and restart Drift. A plugin can't add or remove your torrents; the most one can do is move a finished torrent.")}
+      {t("To add a plugin by hand, put its folder in the plugins folder inside Drift's data folder and restart Drift. A plugin can't add or remove your torrents; the most one can do is move a finished torrent.")}
     </small>
   </div>
 {/key}

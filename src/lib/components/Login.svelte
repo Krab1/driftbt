@@ -19,7 +19,7 @@
 <main class="wrap">
   <form onsubmit={submit}>
     <h1>{t("Drift")}</h1>
-    <p>{t("Enter the access token for this server.")} <code>{t("drift-server --show-token")}</code> {t("prints it.")}</p>
+    <p>{t("Enter the access token for this server. {command} prints it.", { command: "drift-server --show-token" })}</p>
     <label>
       <span>{t("Access token")}</span>
       <input type="password" autocomplete="current-password" bind:value={token} aria-invalid={!!error} aria-describedby={error ? "login-err" : undefined} />

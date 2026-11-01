@@ -176,7 +176,7 @@
             <button class="btn" onclick={changeWatch}><Icon name="folder" />{s.watch_dir ? tr("Change") : tr("Choose…")}</button>
             {#if s.watch_dir}<button class="btn" onclick={() => ui.saveSettings({ watch_dir: null })}>{tr("Turn off")}</button>{/if}
           </div>
-          <small>{tr("A .torrent file dropped in this folder is added automatically, then renamed to")} <code class="inl">{tr(".torrent.added")}</code> {tr("so it isn't added twice.")}</small>
+          <small>{tr("A .torrent file dropped in this folder is added automatically, then renamed to .torrent.added so it isn't added twice.")}</small>
         </div>
 
         <div class="field">

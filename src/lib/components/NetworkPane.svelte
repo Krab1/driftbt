@@ -164,7 +164,7 @@
       {#if filter?.enabled}<small class="num">{t("{n} ranges active", { n: filter.active_ranges.toLocaleString() })}</small>{/if}
     </div>
     <small>
-      {t("Understands eMule")} <code>{t("ipfilter.dat")}</code>{t(", PeerGuardian and plain range lists, also zipped or gzipped. Lists are checked before use: empty ones, huge ones, and ones that would block more than a quarter of the internet are ignored. This blocks connections; it doesn't hide your address, so it isn't a substitute for a VPN. Lists refresh weekly, and the engine briefly restarts when one changes.")}
+      {t("Understands eMule ipfilter.dat, PeerGuardian and plain range lists, also zipped or gzipped. Lists are checked before use: empty ones, huge ones, and ones that would block more than a quarter of the internet are ignored. This blocks connections; it doesn't hide your address, so it isn't a substitute for a VPN. Lists refresh weekly, and the engine briefly restarts when one changes.")}
     </small>
   </div>
 {/key}
