@@ -44,8 +44,8 @@
   </select>
   {#if custom}
     <div class="own">
-      <input type="number" min="0" step="any" inputmode="decimal" placeholder={t("Unlimited")} aria-label="{label} custom speed" bind:value={n} onchange={() => commit()} oninput={(e) => live && commit(e.currentTarget.value)} />
-      <select aria-label="{label} unit" bind:value={mb} onchange={() => commit()}><option value={false}>{t("KB/s")}</option><option value={true}>{t("MB/s")}</option></select>
+      <input type="number" min="0" step="any" inputmode="decimal" placeholder={t("Unlimited")} aria-label={t("{label} custom speed", { label })} bind:value={n} onchange={() => commit()} oninput={(e) => live && commit(e.currentTarget.value)} />
+      <select aria-label={t("{label} unit", { label })} bind:value={mb} onchange={() => commit()}><option value={false}>{t("KB/s")}</option><option value={true}>{t("MB/s")}</option></select>
     </div>
   {/if}
 </div>

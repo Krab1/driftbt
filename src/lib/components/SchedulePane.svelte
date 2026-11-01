@@ -23,7 +23,7 @@
   <small>{t("While a slot is active its limits replace the ones above, even when \"Limit transfer speed\" is off. Zero means no limit in that direction.")}</small>
 
   {#each schedule.slots as s, i (i)}
-    <div class="slot" role="group" aria-label="Slot {i + 1}: {describeSlot(s)}">
+    <div class="slot" role="group" aria-label={t("Slot {n}: {what}", { n: i + 1, what: describeSlot(s) })}>
       <div class="days" role="group" aria-label={t("Days")}>
         {#each DAYS as d, day (d)}
           <button class="day" class:on={hasDay(s.days, day)} aria-pressed={hasDay(s.days, day)} aria-label={td(d)} onclick={() => patch(i, { days: toggleDay(s.days, day) })}>{td(d)[0]}</button>
@@ -33,7 +33,7 @@
       <label>{t("to")} <input type="time" value={toTime(s.to_min)} onchange={(e) => patch(i, { to_min: time(e, s.to_min) })} /></label>
       <label>{t("Down")} <input type="number" min="0" step="50" inputmode="numeric" value={s.down_kib || ""} placeholder={t("None")} onchange={(e) => patch(i, { down_kib: kib(e) })} /> {t("KiB/s")}</label>
       <label>{t("Up")} <input type="number" min="0" step="50" inputmode="numeric" value={s.up_kib || ""} placeholder={t("None")} onchange={(e) => patch(i, { up_kib: kib(e) })} /> {t("KiB/s")}</label>
-      <button class="btn ghost icon" aria-label="Remove slot {i + 1}" onclick={() => save(schedule.slots.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
+      <button class="btn ghost icon" aria-label={t("Remove slot {n}", { n: i + 1 })} onclick={() => save(schedule.slots.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
       <small class="sum">{describeSlot(s)}{s.from_min > s.to_min ? t(" — runs past midnight into the next day") : ""}</small>
     </div>
   {/each}

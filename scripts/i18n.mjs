@@ -84,6 +84,11 @@ for (const dir of ["crates", "src-tauri/src"]) {
     take(new RegExp(String.raw`Self::new\(\s*"[^"]*"\s*,\s*${RS}`, "g"));
     take(new RegExp(String.raw`const\s+\w*NOTE:\s*&str\s*=\s*${RS}`, "g"));
     take(new RegExp(String.raw`move_notes\.insert\([^,]+,\s*${RS}\.into\(\)`, "g"));
+    if (file.endsWith("settings_check.rs") || file.endsWith("plugins.rs")) {
+      // plain Err("...") answers that travel to the screen unchanged (a settings refusal, a plugin form refusal)
+      take(new RegExp(String.raw`Err\(\s*${RS}(?:\.into\(\)|\.to_string\(\))?\s*\)`, "g"));
+      take(new RegExp(String.raw`ok_or\(\s*${RS}\s*\)`, "g"));
+    }
     if (file.endsWith("errors.rs")) {
       // every sentence in this file is shown to someone
       for (const m of src.matchAll(/"([A-Z][^"\n\\]{12,}[.!?])"/g)) add(m[1], false, where(m.index));
@@ -139,6 +144,8 @@ for (const lang of files) {
     }
     const want = holes(k);
     for (const [f, s] of entries) {
+      // texts that are glued to a neighbour (" and ", " (not connected)") keep their spaces, or the words run together
+      if (/^\s/.test(k) !== /^\s/.test(s) || /\s$/.test(k) !== /\s$/.test(s)) problems.push(`${at}: "${k}"${f ? ` [${f}]` : ""} must start and end with spaces the way the English does`);
       const got = holes(s);
       const dropN = isObj && f === "one" && oneIsOnlyOne;
       const ok = want.every((x) => got.includes(x) || (dropN && x === "n")) && got.every((x) => want.includes(x));

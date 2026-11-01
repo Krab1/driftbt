@@ -49,7 +49,7 @@
     {#if showProgress}<span class="pc num">{percent(n.progress, n.size)}%</span>{/if}
     <span class="sz num">{formatBytes(n.size)}</span>
     {#if onplay && n.isFile && isMedia(n.key)}
-      <button class="play" aria-label="Play {n.name}" title={t("Play while downloading")} onclick={() => onplay(n.indices[0])}><Icon name="play" size={13} /></button>
+      <button class="play" aria-label={t("Play {name}", { name: n.name })} title={t("Play while downloading")} onclick={() => onplay(n.indices[0])}><Icon name="play" size={13} /></button>
     {:else if onplay}
       <span class="play-gap"></span>
     {/if}

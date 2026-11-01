@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t, tn } from "../i18n.svelte";
+  import { t, td, tn } from "../i18n.svelte";
   import { onMount } from "svelte";
   import { api, type SearchReport, type SearchResult } from "../api";
   import { formatBytes } from "../../format";
@@ -67,7 +67,7 @@
   {:else if report}
     <p class="status" role="status">
       {tn("{a} of {n} source answered", "{a} of {n} sources answered", report.sources.length, { a: answered })} · {tn("{n} result", "{n} results", report.results.length)}
-      {#each problems as p (p.id)}<span class="bad"> · {p.name}: {p.message ?? t("didn't answer")}</span>{/each}
+      {#each problems as p (p.id)}<span class="bad"> · {p.name}: {p.message ? td(p.message) : t("didn't answer")}</span>{/each}
     </p>
     {#if report.results.length}
       <ul class="results">
@@ -83,7 +83,7 @@
               </span>
             </div>
             <span class="peers num" title={t("Seeders / leechers")}>{#if r.seeders !== null}<b class="seed">{r.seeders}</b> / {r.leechers ?? "–"}{:else}–{/if}</span>
-            <button class="btn" aria-label="Add {r.title}" disabled={!r.magnet && !r.torrent_url} onclick={() => add(r)}><Icon name="plus" />{t("Add")}</button>
+            <button class="btn" aria-label={t("Add {title}", { title: r.title })} disabled={!r.magnet && !r.torrent_url} onclick={() => add(r)}><Icon name="plus" />{t("Add")}</button>
           </li>
         {/each}
       </ul>

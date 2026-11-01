@@ -54,7 +54,7 @@
     name = name.trim();
     source = source.trim();
     if (!source) return void (listError = t("Enter an address or choose a file."));
-    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source) && !/^https?:\/\//i.test(source)) return void (listError = "Only http and https addresses work.");
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(source) && !/^https?:\/\//i.test(source)) return void (listError = t("Only http and https addresses work."));
     if (f.lists.some((l) => l.source === source)) return void (listError = t("That list is already added."));
     listError = "";
     let id = slug(name || source.split(/[\\/]/).pop() || "list");
@@ -142,9 +142,9 @@
             {#if st?.updated_at}{t("{n} ranges · updated {age}", { n: st.ranges.toLocaleString(), age: age(st.updated_at) })}{:else}{t("Not downloaded yet")}{/if}
             {#if st?.insecure} · <span class="warn">{t("plain http: it could be altered on the way")}</span>{/if}
           </small>
-          {#if st?.error}<small class="bad" role="alert">{st.error}{st.updated_at ? t(" The previous copy is still in use.") : ""}</small>{/if}
+          {#if st?.error}<small class="bad" role="alert">{td(st.error)}{st.updated_at ? t(" The previous copy is still in use.") : ""}</small>{/if}
         </div>
-        <button class="btn ghost icon" aria-label="Remove {l.name}" disabled={!!busy} onclick={() => apply("list", { ip_filter: { ...s.ip_filter, lists: s.ip_filter.lists.filter((x) => x.id !== l.id) } })}><Icon name="x" size={14} /></button>
+        <button class="btn ghost icon" aria-label={t("Remove {name}", { name: l.name })} disabled={!!busy} onclick={() => apply("list", { ip_filter: { ...s.ip_filter, lists: s.ip_filter.lists.filter((x) => x.id !== l.id) } })}><Icon name="x" size={14} /></button>
       </div>
     {/each}
 

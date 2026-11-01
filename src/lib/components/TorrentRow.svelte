@@ -69,7 +69,7 @@
   tabindex="-1"
 >
   <div class="name" role="gridcell">
-    <span class="state {t.state}" title={t.error ?? label}>
+    <span class="state {t.state}" title={t.error ? td(t.error) : label}>
       <Icon name={icon} size={15} />
       <span class="sr-only">{label}</span>
     </span>
@@ -97,7 +97,7 @@ ${t.error_detail}` }; }}>{tr("Details")}</button>
       <button class="btn ghost retry" onclick={(e) => { e.stopPropagation(); ontoggle(); }}>{tr("Retry")}</button>
     {/if}
     {#if canToggle}
-      <button class="btn ghost icon" aria-label={t.state === "paused" ? "Resume" : "Pause"} onclick={(e) => { e.stopPropagation(); ontoggle(); }}>
+      <button class="btn ghost icon" aria-label={t.state === "paused" ? tr("Resume") : tr("Pause")} onclick={(e) => { e.stopPropagation(); ontoggle(); }}>
         <Icon name={t.state === "paused" ? "play" : "pause"} />
       </button>
     {/if}

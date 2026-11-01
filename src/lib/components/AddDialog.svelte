@@ -145,7 +145,7 @@
     <div class="files">
       {#each files as f, i (f.name + i)}
         <div class="chip"><Icon name="file" size={14} /><span class="fn">{f.name}</span>
-          <button class="btn ghost icon" aria-label="Remove {f.name}" onclick={() => (files = files.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
+          <button class="btn ghost icon" aria-label={tr("Remove {name}", { name: f.name })} onclick={() => (files = files.filter((_, j) => j !== i))}><Icon name="x" size={14} /></button>
         </div>
       {/each}
       <button class="btn" onclick={() => picker?.click()}><Icon name="plus" />{tr("Choose files")}</button>

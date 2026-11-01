@@ -305,7 +305,7 @@ fn main() {
                             }
                             let focused = handle.get_webview_window("main").and_then(|w| w.is_focused().ok()).unwrap_or(false);
                             if notify && !focused {
-                                let title = handle.state::<NativeText>().complete.lock().unwrap().clone();
+                                let title = handle.try_state::<NativeText>().map_or_else(|| "Download complete".to_string(), |n| n.complete.lock().unwrap().clone());
                                 let _ = handle.notification().builder().title(&title).body(&t.name).show();
                             }
                         }

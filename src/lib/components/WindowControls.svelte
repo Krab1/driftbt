@@ -39,7 +39,7 @@
   <button aria-label={t("Minimize")} onclick={() => chrome.minimize()}>
     <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M0 5h10" stroke="currentColor" /></svg>
   </button>
-  <button bind:this={maxBtn} class:hover={maxHover} aria-label={maximized ? "Restore" : "Maximize"} onclick={() => chrome.toggleMaximize()}>
+  <button bind:this={maxBtn} class:hover={maxHover} aria-label={maximized ? t("Restore") : t("Maximize")} onclick={() => chrome.toggleMaximize()}>
     {#if maximized}
       <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 2.5v-2h7v7h-2M.5 2.5h7v7h-7z" fill="none" stroke="currentColor" /></svg>
     {:else}

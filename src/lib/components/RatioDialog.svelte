@@ -29,7 +29,7 @@
               <td class="r num">{formatBytes(r.uploaded)}</td>
               <td class="r num" class:ok={r.gap === 0}>{r.ratio.toFixed(2)}</td>
               <td class="r num">{r.gap === 0 ? t("Reached") : formatBytes(r.gap)}</td>
-              <td class="r num">{r.gap === 0 ? "—" : r.etaSecs === null ? `Not uploading` : `${formatEta(r.etaSecs)} (${formatSpeed(r.upBps)})`}</td>
+              <td class="r num">{r.gap === 0 ? "—" : r.etaSecs === null ? t("Not uploading") : `${formatEta(r.etaSecs)} (${formatSpeed(r.upBps)})`}</td>
             </tr>
           {/each}
         </tbody>

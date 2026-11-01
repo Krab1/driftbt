@@ -88,9 +88,9 @@
     tests[id] = { busy: true };
     try {
       const r = await api.testSearchSource(id);
-      tests[id] = r.outcome === "ok" ? { busy: false, ok: true, text: r.count > 0 ? t("Working. It answered the sample search.") : t("Working, though the sample search found nothing.") } : { busy: false, ok: false, text: r.message ?? t("It didn't answer.") };
+      tests[id] = r.outcome === "ok" ? { busy: false, ok: true, text: r.count > 0 ? t("Working. It answered the sample search.") : t("Working, though the sample search found nothing.") } : { busy: false, ok: false, text: r.message ? td(r.message) : t("It didn't answer.") };
     } catch (e) {
-      tests[id] = { busy: false, ok: false, text: e instanceof Error ? e.message : t("The test couldn't run.") };
+      tests[id] = { busy: false, ok: false, text: e instanceof Error ? td(e.message) : t("The test couldn't run.") };
     }
   }
 
@@ -187,13 +187,13 @@
     </p>
     {#each list as p (p.id)}
       <div class="item">
-        <input type="checkbox" aria-label="Use {p.name}" checked={p.enabled} disabled={!!p.problem && !p.enabled} onchange={(e) => toggle(p, e.currentTarget.checked)} />
+        <input type="checkbox" aria-label={t("Use {name}", { name: p.name })} checked={p.enabled} disabled={!!p.problem && !p.enabled} onchange={(e) => toggle(p, e.currentTarget.checked)} />
         <div class="meta">
           <div class="nm">{p.name} <small>{p.version}</small></div>
           {#if p.description}<span class="desc">{p.description}</span>{/if}
           <small>{t("It {what}.", { what: kinds(p) })}</small>
           {#if p.problem}
-            <small class="bad">{p.problem}</small>
+            <small class="bad">{td(p.problem)}</small>
           {:else}
             <small>{t("Connects to: {what}", { what: p.permissions.net.length ? net(p) : t("nothing on the internet") })}</small>
           {/if}
@@ -231,7 +231,7 @@
                               {:else if i.type === "secret"}
                                 {@const saved = p.secrets_set.includes(`${f.key}.${row.id}.${i.key}`)}
                                 <span class="sec">
-                                  <small>{i.label}: {saved ? "saved" : t("not set")}</small>
+                                  <small>{i.label}: {saved ? t("saved") : t("not set")}</small>
                                   <button type="button" class="link" onclick={() => rowSecret(p, f, row, i)}>{saved ? t("Change") : t("Set")}</button>
                                   {#if saved}<button type="button" class="link" onclick={() => rowSecret(p, f, row, i, true)}>{t("Remove")}</button>{/if}
                                 </span>

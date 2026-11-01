@@ -45,10 +45,10 @@
   <p class="name" title={target.name}>{target.name}</p>
   <div class="box">
     {#each tags as t (t)}
-      <span class="chip">{t}<button aria-label="Remove tag {t}" onclick={() => (tags = tags.filter((x) => x !== t))}>{tr("×")}</button></span>
+      <span class="chip">{t}<button aria-label={tr("Remove tag {name}", { name: t })} onclick={() => (tags = tags.filter((x) => x !== t))}>{tr("×")}</button></span>
     {/each}
     <!-- svelte-ignore a11y_autofocus -->
-    <input type="text" aria-label={tr("Add a tag")} placeholder={tags.length ? "" : "Type a tag and press Enter"} maxlength="32" autofocus bind:value={text} {onkeydown} disabled={tags.length >= MAX} />
+    <input type="text" aria-label={tr("Add a tag")} placeholder={tags.length ? "" : tr("Type a tag and press Enter")} maxlength="32" autofocus bind:value={text} {onkeydown} disabled={tags.length >= MAX} />
   </div>
   {#if suggestions.length}
     <div class="sug" role="group" aria-label={tr("Existing tags")}>

@@ -259,13 +259,13 @@
         <div class="field">
           <span>{tr("Categories")}</span>
           {#each s.categories as c (c.name)}
-            <div class="cat"><Icon name="folder" size={14} /><span class="cn">{c.name}</span><code title={c.save_path ?? "Default download folder"}>{c.save_path ?? tr("Default folder")}</code>
-              <button class="btn ghost icon" aria-label="Remove category {c.name}" onclick={() => ui.saveSettings({ categories: s.categories.filter((x) => x.name !== c.name) })}><Icon name="x" size={14} /></button>
+            <div class="cat"><Icon name="folder" size={14} /><span class="cn">{c.name}</span><code title={c.save_path ?? tr("Default download folder")}>{c.save_path ?? tr("Default folder")}</code>
+              <button class="btn ghost icon" aria-label={tr("Remove category {name}", { name: c.name })} onclick={() => ui.saveSettings({ categories: s.categories.filter((x) => x.name !== c.name) })}><Icon name="x" size={14} /></button>
             </div>
           {/each}
           <div class="cat add">
             <input type="text" class="txt" placeholder={tr("New category")} aria-label={tr("New category name")} bind:value={newName} onkeydown={(e) => e.key === "Enter" && addCategory()} />
-            <button class="btn" onclick={pickCategoryFolder} title={newPath ?? "Use the default download folder"}><Icon name="folder" />{newPath ? tr("Folder set") : tr("Folder…")}</button>
+            <button class="btn" onclick={pickCategoryFolder} title={newPath ?? tr("Use the default download folder")}><Icon name="folder" />{newPath ? tr("Folder set") : tr("Folder…")}</button>
             <button class="btn" onclick={addCategory}><Icon name="plus" />{tr("Add")}</button>
           </div>
           {#if catError}<small class="bad" role="alert">{catError}</small>{/if}
