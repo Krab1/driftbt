@@ -137,6 +137,10 @@ mod sparse_storage {
         /// while the old one may still be finishing), so two of them never write to the same log.
         stores: Mutex<HashMap<Id20, Arc<Mutex<Option<Store>>>>>,
         files: Mutex<HashMap<Id20, Weak<Files>>>,
+        /// Every storage that may have files open for writing (a recheck leaves the old one finishing next to the new
+        /// one), for the one task that closes the idle ones.
+        sweep: Mutex<Vec<Weak<Files>>>,
+        sweeping: AtomicBool,
     }
 
     impl SessionLink {
@@ -170,6 +174,33 @@ mod sparse_storage {
                 std::thread::sleep(Duration::from_millis(20));
             }
             self.0.session.read().unwrap().upgrade().context("the session has shut down")
+        }
+
+        /// One task for the whole session closes the files nobody has written to for a while. (It used to be a task per
+        /// torrent, each waking every second for as long as the torrent existed.) It ends with the session's storages.
+        fn sweep(&self, files: &Arc<Files>) {
+            self.0.sweep.lock().unwrap().push(Arc::downgrade(files));
+            let Ok(rt) = tokio::runtime::Handle::try_current() else { return };
+            if self.0.sweeping.swap(true, Ordering::AcqRel) {
+                return;
+            }
+            let link = Arc::downgrade(&self.0);
+            rt.spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(1));
+                loop {
+                    tick.tick().await;
+                    let Some(link) = link.upgrade() else { break };
+                    // Taken out first: a slow close must not hold the lock a torrent being added also needs.
+                    let live: Vec<Arc<Files>> = {
+                        let mut all = link.sweep.lock().unwrap();
+                        all.retain(|f| f.strong_count() > 0);
+                        all.iter().filter_map(Weak::upgrade).collect()
+                    };
+                    for files in live {
+                        files.close_idle_writers();
+                    }
+                }
+            });
         }
 
         fn store_for(&self, hash: Id20) -> Arc<Mutex<Option<Store>>> {
@@ -225,17 +256,7 @@ mod sparse_storage {
                     .collect(),
             });
             self.0.0.files.lock().unwrap().insert(shared.info_hash, Arc::downgrade(&files));
-            if let Ok(rt) = tokio::runtime::Handle::try_current() {
-                let weak = Arc::downgrade(&files);
-                rt.spawn(async move {
-                    let mut tick = tokio::time::interval(Duration::from_secs(1));
-                    loop {
-                        tick.tick().await;
-                        let Some(files) = weak.upgrade() else { break };
-                        files.close_idle_writers();
-                    }
-                });
-            }
+            self.0.sweep(&files);
             Ok(Box::new(SparseStorage {
                 files,
                 // Only used to delete files and empty folders, which it knows the torrent's folder for.
@@ -1227,7 +1248,11 @@ fn id_of(h: &ManagedTorrent) -> TorrentId {
 }
 
 fn stats_of(h: &ManagedTorrent) -> TorrentStats {
-    let s = h.stats();
+    stats_from(h, &h.stats())
+}
+
+/// `s` is what `h.stats()` gave: asking is not free (it copies the progress of every file), so it is asked once.
+fn stats_from(h: &ManagedTorrent, s: &librqbit::TorrentStats) -> TorrentStats {
     let state = match s.state {
         TorrentStatsState::Initializing { paused: true } => TorrentState::Paused,
         TorrentStatsState::Initializing { paused: false } => TorrentState::Checking,
@@ -1351,9 +1376,10 @@ impl TorrentEngine for RqbitEngine {
 
     async fn details(&self, id: &TorrentId) -> Result<TorrentDetails> {
         let h = self.handle(id)?;
-        let stats = stats_of(&h);
+        let from_engine = h.stats();
+        let stats = stats_from(&h, &from_engine);
         let selected = h.only_files();
-        let progress = h.stats().file_progress;
+        let progress = from_engine.file_progress;
         // Magnets have no metadata yet: report an empty file list instead of failing.
         let files = h
             .with_metadata(|m| {

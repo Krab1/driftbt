@@ -17,7 +17,7 @@ use drift_core::library::JsonMetaStore;
 use drift_core::manager::{GuardStatus, Manager as TorrentManager, SharedSettings};
 use drift_core::netctl::{self, NetControl};
 use drift_core::background::{self, WatchEvent};
-use drift_core::model::TorrentId;
+use drift_core::model::{DetailPart, TorrentId, TorrentView};
 use drift_core::settings::{JsonFileStore, SettingsStore};
 use drift_core::ticker;
 use serde::Serialize;
@@ -54,8 +54,8 @@ pub struct AppState {
     pub settings: SharedSettings,
     /// Reported by the UI (`document.hidden`); drives how often we poll and push.
     pub visible: Arc<AtomicBool>,
-    /// Torrent whose details panel is open, if any.
-    pub watched: Arc<Mutex<Option<TorrentId>>>,
+    /// Torrent whose details panel is open, if any, and which of its lists the panel shows.
+    pub watched: Arc<Mutex<Option<(TorrentId, DetailPart)>>>,
     /// Magnets/files the app was launched with, until the UI takes them.
     pub pending_open: Mutex<OpenPayload>,
     /// Kept to flush state on exit; `None` when running the fake demo engine.
@@ -234,7 +234,7 @@ fn main() {
             let args: Vec<String> = std::env::args().skip(1).collect();
             let start_hidden = args.iter().any(|a| a == autostart::FLAG) && settings.start_minimized;
             let visible = Arc::new(AtomicBool::new(!start_hidden));
-            let watched: Arc<Mutex<Option<TorrentId>>> = Arc::new(Mutex::new(None));
+            let watched: Arc<Mutex<Option<(TorrentId, DetailPart)>>> = Arc::new(Mutex::new(None));
 
             // The state must be registered before any loop starts: they look it up on their first tick.
             let pending = platform::open_payload(&args);
@@ -283,7 +283,7 @@ fn main() {
                 let handle = app.handle().clone();
                 let vis = visible.clone();
                 let period_handle = app.handle().clone();
-                let mut prev = Vec::new();
+                let mut prev: Vec<TorrentView> = Vec::new();
                 tauri::async_runtime::spawn(ticker::run(
                     manager.clone(),
                     move || Duration::from_secs(if window_active(&period_handle, &vis) { 1 } else { 5 }),
@@ -293,8 +293,7 @@ fn main() {
                             let s = state.settings.lock().unwrap();
                             (s.notify_on_complete, s.media_player && s.playlist_on_complete)
                         };
-                        let stats: Vec<_> = list.iter().map(|v| v.stats.clone()).collect();
-                        for t in completions(&prev, &stats) {
+                        for t in completions(prev.iter().map(|v| &v.stats), list.iter().map(|v| &v.stats)) {
                             let _ = handle.emit("completed", Completed { id: t.id.clone(), name: t.name.clone() });
                             if playlists {
                                 let (engine, id) = (state.engine.clone(), t.id.clone());
@@ -309,8 +308,12 @@ fn main() {
                                 let _ = handle.notification().builder().title(&title).body(&t.name).show();
                             }
                         }
-                        let _ = handle.emit("snapshot", &list);
-                        prev = stats;
+                        // Nobody is looking while the window is hidden or minimised, and the page asks for the list
+                        // itself the moment it is shown again.
+                        if window_active(&handle, &state.visible) {
+                            let _ = handle.emit("snapshot", &list);
+                        }
+                        prev = list;
                     },
                 ));
             }
@@ -354,10 +357,10 @@ fn main() {
                 tauri::async_runtime::spawn(async move {
                     loop {
                         tokio::time::sleep(Duration::from_millis(500)).await;
-                        let id = watch.lock().unwrap().clone();
-                        if let (true, Some(id)) = (window_active(&handle, &vis), id) {
+                        let watched = watch.lock().unwrap().clone();
+                        if let (true, Some((id, part))) = (window_active(&handle, &vis), watched) {
                             if let Ok(d) = eng.details(&id).await {
-                                let _ = handle.emit("details", d);
+                                let _ = handle.emit("details", d.only(part));
                             }
                         }
                     }
@@ -376,6 +379,8 @@ fn main() {
             commands::add_torrent,
             commands::pause_torrent,
             commands::resume_torrent,
+            commands::pause_torrents,
+            commands::resume_torrents,
             commands::recheck_torrent,
             commands::move_torrent,
             commands::remove_torrent,

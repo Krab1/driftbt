@@ -291,6 +291,10 @@ impl TorrentEngine for FakeEngine {
     }
 
     async fn pause(&self, id: &TorrentId) -> Result<()> {
+        // Like the real engine: pausing something that is already paused is an error.
+        if self.inner.lock().unwrap().torrents.get(id).is_some_and(|e| e.stats.state == TorrentState::Paused) {
+            return Err(EngineError::Backend("torrent is already paused".into()));
+        }
         self.set_state(id, |s| matches!(s, TorrentState::Downloading | TorrentState::Seeding), TorrentState::Paused)
     }
 

@@ -131,6 +131,7 @@ export function createMockApi(count = 40): Api {
   };
   const selection = new Map<string, Set<number>>();
   let watched: string | null = null;
+  let watchedPart: import("./types").DetailPart = "summary";
   const snapSubs = new Set<(l: Torrent[]) => void>();
   const detailSubs = new Set<(d: TorrentDetails) => void>();
   const doneSubs = new Set<(c: Completed) => void>();
@@ -179,8 +180,9 @@ export function createMockApi(count = 40): Api {
     const t = find(id);
     return {
       stats: { ...t },
-      files: t.total_bytes ? filesFor(t, selection.get(id)) : [],
-      peers: Array.from({ length: Math.min(t.peers_live, 30) }, (_, i) => ({
+      // Like the backend: only the list the open tab shows comes along.
+      files: watchedPart === "files" && t.total_bytes ? filesFor(t, selection.get(id)) : [],
+      peers: Array.from({ length: watchedPart === "peers" ? Math.min(t.peers_live, 30) : 0 }, (_, i) => ({
         addr: `203.0.113.${i + 1}:${51000 + i}`,
         client: ["qBittorrent 5.1", "Transmission 4.0", "rqbit 9.0"][i % 3],
         transport: i % 4 === 0 ? "utp" : "tcp",
@@ -327,6 +329,12 @@ export function createMockApi(count = 40): Api {
           : t,
       );
     },
+    async pauseMany(ids) {
+      for (const id of ids) await this.pause(id);
+    },
+    async resumeMany(ids) {
+      for (const id of ids) await this.resume(id);
+    },
     remove: async (id) => {
       find(id);
       torrents = torrents.filter((t) => t.id !== id);
@@ -358,8 +366,9 @@ export function createMockApi(count = 40): Api {
       find(id);
       selection.set(id, new Set(selected));
     },
-    watchDetails: async (id) => {
+    watchDetails: async (id, part = "summary") => {
       watched = id;
+      watchedPart = part;
       return id ? details(id) : null;
     },
     onDetails: sub(detailSubs),

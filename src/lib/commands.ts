@@ -68,14 +68,10 @@ export function buildCommands(): Command[] {
   add(g, "ratio", t("Show ratios per tracker"), () => void (ui.ratioOpen = true));
   add(g, "details", ui.detailOpen ? t("Hide details panel") : t("Show details panel"), () => ui.setDetailOpen(!ui.detailOpen));
   add(g, "pause-all", t("Pause all torrents"), () =>
-    act(async () => {
-      for (const t of torrents.all) if (t.state === "downloading" || t.state === "seeding" || t.state === "queued") await api.pause(t.id);
-    }),
+    act(() => api.pauseMany(torrents.all.filter((t) => t.state === "downloading" || t.state === "seeding" || t.state === "queued").map((t) => t.id))),
   );
   add(g, "resume-all", t("Resume all torrents"), () =>
-    act(async () => {
-      for (const t of torrents.all) if (t.state === "paused") await api.resume(t.id);
-    }),
+    act(() => api.resumeMany(torrents.all.filter((t) => t.state === "paused").map((t) => t.id))),
   );
   const s = ui.settings;
   if (s) {

@@ -1,6 +1,6 @@
 // Transport for the remote web UI: the same Api over HTTP + server-sent events, talking to drift-server.
 import { t } from "../i18n.svelte";
-import type { Api, ApiError, Completed, GuardStatus, Torrent, TorrentDetails } from "./types";
+import type { Api, ApiError, Completed, DetailPart, GuardStatus, Torrent, TorrentDetails } from "./types";
 
 const KEY = "drift.token";
 
@@ -154,6 +154,7 @@ function on<T>(event: string) {
 
 // Details have no push channel over HTTP: poll the one torrent whose panel is open.
 let watched: string | null = null;
+let watchedPart: DetailPart = "summary";
 const detailSubs = new Set<(d: TorrentDetails) => void>();
 let detailTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -163,7 +164,7 @@ function syncDetailTimer() {
       const id = watched;
       if (!id || document.hidden) return;
       try {
-        const d = await call<TorrentDetails>("GET", `/torrents/${encodeURIComponent(id)}/details`);
+        const d = await call<TorrentDetails>("GET", `/torrents/${encodeURIComponent(id)}/details?part=${watchedPart}`);
         if (watched === id) detailSubs.forEach((cb) => cb(d));
       } catch {
         /* the next tick tries again */
@@ -188,13 +189,16 @@ export const httpApi: Api = {
   moveInQueue: (id, to) => call("PUT", `/torrents/${enc(id)}/move`, { to }),
   pause: (id) => call("POST", `/torrents/${enc(id)}/pause`),
   resume: (id) => call("POST", `/torrents/${enc(id)}/resume`),
+  pauseMany: (ids) => call("POST", "/torrents/pause", { ids }),
+  resumeMany: (ids) => call("POST", "/torrents/resume", { ids }),
   recheck: (id) => call("POST", `/torrents/${enc(id)}/recheck`),
   moveTorrent: (id, dest) => call("POST", `/torrents/${enc(id)}/move`, { dest }),
   remove: (id, deleteFiles) => call("DELETE", `/torrents/${enc(id)}?delete_files=${deleteFiles}`),
   setFiles: (id, selected, deleteUnchecked) => call("PUT", `/torrents/${enc(id)}/files`, { selected, delete_unchecked: deleteUnchecked ?? false }),
-  watchDetails: async (id) => {
+  watchDetails: async (id, part = "summary") => {
     watched = id;
-    return id ? call<TorrentDetails>("GET", `/torrents/${enc(id)}/details`) : null;
+    watchedPart = part;
+    return id ? call<TorrentDetails>("GET", `/torrents/${enc(id)}/details?part=${part}`) : null;
   },
   onDetails: async (cb) => {
     detailSubs.add(cb);

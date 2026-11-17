@@ -120,11 +120,11 @@ Rules: no librqbit types in signatures. Errors are our `EngineError` enum. Anyth
 
 ## IPC (frontend ↔ backend)
 
-**Commands (invoke):** `add_torrent`, `pause`, `resume`, `remove`, `set_files`, `set_limits`, `get_details`, `get_settings`, `set_settings`, `set_native_text` (tray menu and notice words in the chosen language; desktop only), `open_path`, `stream_url`. All return `Result<T, ApiError{code,message}>`; the UI shows `message` through `td()` (see docs/I18N.md), so a message with an entry in the language file appears in that language and any other stays as written.
+**Commands (invoke):** `add_torrent`, `pause`, `resume`, `pause_torrents` / `resume_torrents` (a list of ids in one call, for "Pause all" and "Resume all": one library save and one scheduling round however many torrents; HTTP `POST /torrents/pause|resume` with `{ ids }`; every torrent is tried and the first failure is returned), `watch_details` (`id`, `part`), `remove`, `set_files`, `set_limits`, `get_details`, `get_settings`, `set_settings`, `set_native_text` (tray menu and notice words in the chosen language; desktop only), `open_path`, `stream_url`. All return `Result<T, ApiError{code,message}>`; the UI shows `message` through `td()` (see docs/I18N.md), so a message with an entry in the language file appears in that language and any other stays as written.
 
 **Events (push):**
-- `snapshot` — whole list of `TorrentStats`, throttled to 1 Hz when visible, 0.2 Hz when minimised/hidden, stopped when in tray with no window.
-- `details` — for the selected torrent only, 2 Hz while the panel is open.
+- `snapshot` — whole list of `TorrentStats`, 1 Hz while the window is visible. While it is hidden or minimised the round still runs (every 5 s, for the queue, goals and completion notices) but nothing is sent; the page asks for the list itself when it is shown again.
+- `details` — for the selected torrent only, 2 Hz while the panel is open. `watch_details` says which of the two long lists the open tab shows (`part`: `files`, `peers` or `summary` for neither) and the other arrives empty (`TorrentDetails::only`); over HTTP it is `GET /torrents/{id}/details?part=…`, and without `part` both lists are sent. The engine contract is unchanged: the trimming happens after `details()`.
 - `toast` — completion, errors, "added".
 
 The backend owns a single tick task (`core::ticker`) that polls the engine, runs `queue`/`rules`, and emits. The UI never polls. The list is virtualised; sorting/filtering is client-side over the snapshot.

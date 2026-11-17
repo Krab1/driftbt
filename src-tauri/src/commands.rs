@@ -9,7 +9,7 @@ use drift_core::manager::{GuardStatus, LimitsStatus};
 use drift_core::netctl::FilterStatus;
 use drift_core::playlist;
 use drift_core::service::AddInput;
-use drift_core::model::{TorrentDetails, TorrentId, TorrentPreview, TorrentView};
+use drift_core::model::{DetailPart, TorrentDetails, TorrentId, TorrentPreview, TorrentView};
 use drift_core::queue::Move;
 use drift_core::rules::Goal;
 use drift_core::search::SearchReport;
@@ -56,6 +56,17 @@ pub async fn resume_torrent(state: State<'_, AppState>, id: TorrentId) -> ApiRes
     Ok(state.manager.resume(&id).await?)
 }
 
+/// "Pause all" and "Resume all": one call, one save, one scheduling round, however many torrents.
+#[tauri::command]
+pub async fn pause_torrents(state: State<'_, AppState>, ids: Vec<TorrentId>) -> ApiResult<()> {
+    Ok(state.manager.pause_many(&ids).await?)
+}
+
+#[tauri::command]
+pub async fn resume_torrents(state: State<'_, AppState>, ids: Vec<TorrentId>) -> ApiResult<()> {
+    Ok(state.manager.resume_many(&ids).await?)
+}
+
 #[tauri::command]
 pub async fn remove_torrent(state: State<'_, AppState>, id: TorrentId, delete_files: bool) -> ApiResult<()> {
     Ok(state.manager.remove(&id, delete_files).await?)
@@ -93,13 +104,14 @@ pub async fn set_files(state: State<'_, AppState>, id: TorrentId, selected: Vec<
     Ok(state.svc.manager.set_files(&id, selected, delete_unchecked.unwrap_or(false)).await?)
 }
 
-/// Tells the backend which torrent's details the UI shows (or `None`), and returns them right away;
-/// after that they arrive as `details` events while the window is visible.
+/// Tells the backend which torrent's details the UI shows (or `None`) and which of its lists (`part`: files, peers
+/// or neither), and returns them right away; after that they arrive as `details` events while the window is visible.
 #[tauri::command]
-pub async fn watch_details(state: State<'_, AppState>, id: Option<TorrentId>) -> ApiResult<Option<TorrentDetails>> {
-    *state.watched.lock().unwrap() = id.clone();
+pub async fn watch_details(state: State<'_, AppState>, id: Option<TorrentId>, part: Option<DetailPart>) -> ApiResult<Option<TorrentDetails>> {
+    let part = part.unwrap_or_default();
+    *state.watched.lock().unwrap() = id.clone().map(|id| (id, part));
     match id {
-        Some(id) => Ok(Some(state.engine.details(&id).await?)),
+        Some(id) => Ok(Some(state.engine.details(&id).await?.only(part))),
         None => Ok(None),
     }
 }

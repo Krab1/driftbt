@@ -47,7 +47,7 @@ curl -X DELETE -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8793/api/torr
 curl -N        -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8793/api/events      # live snapshots (server-sent events)
 ```
 
-Routes: `GET/POST /api/torrents`, `POST /api/inspect`, `DELETE /api/torrents/{id}`, `POST .../pause|resume|playlist`, `PUT .../category|tags|goal|move|files`, `GET .../details`, `GET/PUT /api/settings`, `GET /api/limits|guard|adapters|network|filter`, `POST /api/filter/update`, `POST /api/search`, `GET /api/search/keys`, `PUT /api/search/keys/{id}`, `GET /api/events`, `GET /api/health` (no token). Errors are `{ "code": "...", "message": "plain language" }` with a matching status (401 wrong token, 404 unknown torrent, 400 bad input).
+Routes: `GET/POST /api/torrents`, `POST /api/inspect`, `DELETE /api/torrents/{id}`, `POST .../pause|resume|playlist`, `POST /api/torrents/pause|resume` with body `{ "ids": [...] }` (several at once: every one is tried, the first failure is returned), `PUT .../category|tags|goal|move|files`, `GET .../details` (add `?part=summary`, `files` or `peers` to leave out the file list, the peer list or both; a torrent can have tens of thousands of files), `GET/PUT /api/settings`, `GET /api/limits|guard|adapters|network|filter`, `POST /api/filter/update`, `POST /api/search`, `GET /api/search/keys`, `PUT /api/search/keys/{id}`, `GET /api/events`, `GET /api/health` (no token). Errors are `{ "code": "...", "message": "plain language" }` with a matching status (401 wrong token, 404 unknown torrent, 400 bad input).
 
 ## Run it at logon / at boot
 

@@ -22,3 +22,21 @@ Measured 2026-10-14, Windows 11, 2560×1440 display, release build unless noted.
 
 ## How to re-measure
 Memory: run the release exe, sum private memory of `drift.exe` and the `msedgewebview2.exe` processes whose command line contains `app.drift.client`. Frames: `DRIFT_FAKE=1000 DRIFT_CDP_PORT=9222` on a debug build, then `node scripts/cdp.mjs evalfile frames.js` (a 4 s `requestAnimationFrame` loop that scrolls the list). Debug-only `DRIFT_WV_ARGS` passes extra Chromium flags for experiments.
+
+## Review of 2026-11-16: large torrents and bulk actions
+The numbers above are for the everyday case (1,000 torrents, list view). A read through the code for what grows with file count and torrent count found these; the frontend figures are Node micro-benchmarks of the same functions, not measurements in the app, and the Rust-side ones were not measured.
+
+| What | Before | After |
+|---|---|---|
+| Files tab, building the file tree (runs on every details update, 2 Hz) | 5,000 files in one folder 46 ms; 20,000 in one folder 620 ms; 20,000 nested 79 ms | 2.5 ms; 8-19 ms; 15 ms (a map for the folder lookup, one kept `Intl.Collator`) |
+| "Pause all" / "Resume all" | one IPC call per torrent, each with a full library save, and each resume with a full scheduling round over every torrent | one call, one save, one round (`Manager::pause_many` / `resume_many`); the VPN guard uses the same path |
+| Details update for a torrent with 20,000 files | 2.5 MB of JSON twice a second on every tab | the file list only on the Files tab, the peers only on the Peers tab |
+| Speed history for the detail graph | 120 samples kept for every torrent: about 12 MB of heap per 1,000 torrents | kept for the selected torrent only (the graph starts again when you select another) |
+| Closing idle write handles | one 1 Hz task per torrent, paused and seeding ones included | one task per session |
+| Hidden or minimised window | the whole list was still serialised and sent every 5 s | nothing is sent; the page refreshes when shown |
+| Date columns (Added, Finished) | 1 ms per update for 20 visible rows (`toLocaleDateString` sets up a formatter per call) | 0.02 ms (formatters kept per language) |
+| Copies per scheduling round | every torrent's stats copied twice more after the engine made them, the whole settings copied twice | none of those |
+
+Checked and left alone: list filter + sort (0.4 ms per update at 1,000 torrents, 2.7 ms at 5,000); the size-optimised release profile (SHA-1 goes through the Windows crypto API, so hashing is not affected); sending a `.torrent` as a JSON number array (3.6x its size, but once per add).
+
+Not re-measured: idle CPU and memory with a large real list. The idle figure above is with no torrents.

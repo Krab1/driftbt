@@ -6,10 +6,11 @@ use crate::model::{TorrentId, TorrentState, TorrentStats};
 
 /// Torrents that finished downloading between two snapshots: they were `Downloading` before and
 /// are `Seeding` now. Torrents that were merely checked and found complete, or that appear for
-/// the first time already seeding, are not completions.
-pub fn completions<'a>(prev: &[TorrentStats], curr: &'a [TorrentStats]) -> Vec<&'a TorrentStats> {
-    let before: HashMap<&TorrentId, TorrentState> = prev.iter().map(|t| (&t.id, t.state)).collect();
-    curr.iter()
+/// the first time already seeding, are not completions. Takes anything that walks over stats, so a caller holding
+/// whole list rows compares them as they are instead of copying every torrent's stats out first.
+pub fn completions<'a, 'b>(prev: impl IntoIterator<Item = &'b TorrentStats>, curr: impl IntoIterator<Item = &'a TorrentStats>) -> Vec<&'a TorrentStats> {
+    let before: HashMap<&TorrentId, TorrentState> = prev.into_iter().map(|t| (&t.id, t.state)).collect();
+    curr.into_iter()
         .filter(|t| t.state == TorrentState::Seeding && before.get(&t.id) == Some(&TorrentState::Downloading))
         .collect()
 }

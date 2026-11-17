@@ -16,8 +16,9 @@ class TorrentStore {
   selectedId = $state<string | null>(null);
   /** Total speeds, one sample per snapshot, newest last (about two minutes). */
   history = $state.raw<{ d: number; u: number }[]>([]);
-  /** The same samples per torrent, for the detail panel graph. Kept for torrents still in the list. */
-  perTorrent = $state.raw<Map<string, { d: number; u: number }[]>>(new Map());
+  /** The same samples for the selected torrent, for the detail panel graph. Only that one is kept (the graph starts
+   *  again when another torrent is selected): a history per torrent cost about 12 MB for every 1,000 torrents. */
+  selectedHistory = $state.raw<{ id: string; samples: { d: number; u: number }[] } | null>(null);
 
   tagCounts = $derived.by(() => {
     const m = new Map<string, number>();
@@ -59,9 +60,9 @@ class TorrentStore {
       const d = list.reduce((s, t) => s + t.down_bps, 0);
       const u = list.reduce((s, t) => s + t.up_bps, 0);
       this.history = [...this.history.slice(-119), { d, u }];
-      const next = new Map<string, { d: number; u: number }[]>();
-      for (const t of list) next.set(t.id, [...(this.perTorrent.get(t.id) ?? []).slice(-119), { d: t.down_bps, u: t.up_bps }]);
-      this.perTorrent = next;
+      const sel = this.selectedId === null ? undefined : list.find((t) => t.id === this.selectedId);
+      const kept = this.selectedHistory;
+      this.selectedHistory = sel ? { id: sel.id, samples: [...(kept?.id === sel.id ? kept.samples.slice(-119) : []), { d: sel.down_bps, u: sel.up_bps }] } : null;
     });
   }
 

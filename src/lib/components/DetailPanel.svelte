@@ -21,15 +21,26 @@
   // Details are only trusted when they belong to the torrent that is selected right now.
   const d = $derived(ui.details && sel && ui.details.stats.id === sel.id ? ui.details : null);
   const stats = $derived(d?.stats ?? sel);
-  const samples = $derived(sel ? (torrents.perTorrent.get(sel.id) ?? []) : []);
+  const samples = $derived(sel && torrents.selectedHistory?.id === sel.id ? torrents.selectedHistory.samples : []);
+
+  // The details carry the file list only for the Files tab and the peers only for the Peers tab: a torrent can
+  // have tens of thousands of files, and the details arrive twice a second.
+  const part = $derived(ui.detailTab === "files" ? "files" : ui.detailTab === "peers" ? "peers" : "summary");
+  /** The details on screen were asked for with the tab that is open now, so an empty list in them is really empty. */
+  let listsReady = $state(false);
 
   // Ask the backend to push details for the selected torrent only while the panel is open.
   $effect(() => {
     const id = ui.detailOpen ? torrents.selectedId : null;
     let stale = false;
+    listsReady = false;
     api
-      .watchDetails(id)
-      .then((first) => !stale && (ui.details = first))
+      .watchDetails(id, part)
+      .then((first) => {
+        if (stale) return;
+        ui.details = first;
+        listsReady = true;
+      })
       .catch(() => !stale && (ui.details = null));
     return () => {
       stale = true;
@@ -152,7 +163,7 @@
     <div class="tabs" role="tablist" aria-label={tr("Details")} tabindex="-1" onkeydown={onTabKey}>
       {#each tabs as t (t.key)}
         <button role="tab" id="tab-{t.key}" aria-selected={ui.detailTab === t.key} aria-controls="pane" tabindex={ui.detailTab === t.key ? 0 : -1} class:on={ui.detailTab === t.key} onclick={() => { ui.setDetailTab(t.key); ui.setDetailOpen(true); }}>
-          {td(t.label)}{#if t.key === "peers" && d}<span class="n num">{d.peers.length}</span>{/if}
+          {td(t.label)}{#if t.key === "peers" && d}<span class="n num">{d.stats.peers_live}</span>{/if}
         </button>
       {/each}
     </div>
@@ -196,7 +207,7 @@
           <button class="btn" onclick={reveal}><Icon name="folder" />{tr("Show in folder")}</button>
         </div>
       {:else if ui.detailTab === "files"}
-        {#if !d}
+        {#if !d || !listsReady}
           <p class="hint">{tr("Loading…")}</p>
         {:else if d.files.length === 0}
           <p class="hint">{tr("The file list appears once the torrent info has been fetched.")}</p>
@@ -204,7 +215,9 @@
           {#key treeKey}<FileTree files={d.files} {selected} onchange={changeFiles} showProgress onplay={ui.settings?.media_player === false ? undefined : (i) => play(i)} />{/key}
         {/if}
       {:else if ui.detailTab === "peers"}
-        {#if !d || d.peers.length === 0}
+        {#if d && !listsReady}
+          <p class="hint">{tr("Loading…")}</p>
+        {:else if !d || d.peers.length === 0}
           <p class="hint">{stats.state === "paused" ? tr("Resume the torrent to connect to peers.") : tr("No peers connected yet.")}</p>
         {:else}
           <table>

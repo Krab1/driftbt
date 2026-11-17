@@ -126,6 +126,32 @@ pub struct TorrentDetails {
     pub save_path: String,
 }
 
+/// Which of a torrent's two long lists the asker shows. The details of the open torrent are sent again and again, and
+/// a torrent can have tens of thousands of files, so the list nobody is looking at is left out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DetailPart {
+    /// Files and peers both (what a plain `GET .../details` gives).
+    #[default]
+    All,
+    /// Neither list.
+    Summary,
+    Files,
+    Peers,
+}
+
+impl TorrentDetails {
+    pub fn only(mut self, part: DetailPart) -> Self {
+        if !matches!(part, DetailPart::All | DetailPart::Files) {
+            self.files = Vec::new();
+        }
+        if !matches!(part, DetailPart::All | DetailPart::Peers) {
+            self.peers = Vec::new();
+        }
+        self
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PreviewFile {
     pub index: usize,

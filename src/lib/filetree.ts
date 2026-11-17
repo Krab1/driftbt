@@ -29,21 +29,26 @@ export function isMedia(path: string): boolean {
 
 export type CheckState = "all" | "none" | "some";
 
-const byName = (a: TreeNode, b: TreeNode) =>
-  a.isFile === b.isFile ? a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) : a.isFile ? 1 : -1;
+// One collator for every comparison: `localeCompare` with options sets one up per call.
+const names = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const byName = (a: TreeNode, b: TreeNode) => (a.isFile === b.isFile ? names.compare(a.name, b.name) : a.isFile ? 1 : -1);
 
 /** Groups flat `a/b/c.txt` paths into folders (folders first, then files, natural order). */
 export function buildTree(files: FileLike[]): TreeNode[] {
   const root: TreeNode = { name: "", key: "", size: 0, progress: 0, indices: [], children: [], isFile: false };
+  // Every node by its key, so finding a file's folder doesn't walk the folder's children (20,000 files in one
+  // folder took 600 ms that way, and the tree is rebuilt on every details update).
+  const byKey = new Map<string, TreeNode>();
   for (const f of files) {
     const parts = f.path.split(/[\\/]/).filter(Boolean);
     let node = root;
+    let key = "";
     parts.forEach((part, i) => {
-      const last = i === parts.length - 1;
-      const key = parts.slice(0, i + 1).join("/");
-      let child = node.children.find((c) => c.key === key);
+      key = i ? `${key}/${part}` : part;
+      let child = byKey.get(key);
       if (!child) {
-        child = { name: part, key, size: 0, progress: 0, indices: [], children: [], isFile: last };
+        child = { name: part, key, size: 0, progress: 0, indices: [], children: [], isFile: i === parts.length - 1 };
+        byKey.set(key, child);
         node.children.push(child);
       }
       child.size += f.size;

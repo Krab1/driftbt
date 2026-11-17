@@ -209,6 +209,12 @@ fn next_position(lib: &Library) -> u64 {
     lib.values().map(|m| m.position).max().map_or(1, |p| p + 1)
 }
 
+/// A torrent's bookkeeping, started (last in the queue) if it has none yet.
+fn meta_mut<'a>(lib: &'a mut Library, id: &TorrentId) -> &'a mut TorrentMeta {
+    let position = next_position(lib);
+    lib.entry(id.clone()).or_insert_with(|| TorrentMeta { position, added_at: now_secs(), ..Default::default() })
+}
+
 impl Manager {
     pub fn new(engine: Arc<dyn TorrentEngine>, store: Arc<dyn MetaStore>, settings: SharedSettings) -> Self {
         Self::with_clock(engine, store, settings, Arc::new(local_clock))
@@ -227,14 +233,14 @@ impl Manager {
     /// Speed limits for the current local time (a schedule slot wins over the global limits).
     pub fn limits_status(&self) -> LimitsStatus {
         let (weekday, minute) = (self.clock)();
-        let (l, scheduled) = self.settings().limits_at(weekday, minute);
+        let (l, scheduled) = self.settings.lock().unwrap().limits_at(weekday, minute);
         LimitsStatus { scheduled, down_bps: l.down_bps, up_bps: l.up_bps }
     }
 
     /// Pushes the limits for right now to the engine when they differ from what it has.
     pub async fn sync_limits(&self) -> Result<()> {
         let (weekday, minute) = (self.clock)();
-        let (want, _) = self.settings().limits_at(weekday, minute);
+        let (want, _) = self.settings.lock().unwrap().limits_at(weekday, minute);
         if self.state.lock().unwrap().applied_limits == Some(want) {
             return Ok(());
         }
@@ -258,16 +264,12 @@ impl Manager {
     /// One VPN-guard check: pauses everything while the chosen adapter is missing, and (optionally)
     /// resumes exactly what it paused when the adapter returns.
     pub async fn guard_check(&self, adapters: &[Adapter]) -> Result<GuardStatus> {
-        let cfg = self.settings().vpn_guard;
+        let cfg = self.settings.lock().unwrap().vpn_guard.clone();
         let v = guard::verdict(&cfg, adapters);
         let running = if v == Verdict::Unprotected { self.running_ids().await? } else { Vec::new() };
         let action = self.guard.lock().unwrap().step(v, cfg.auto_resume, &running);
-        for id in &action.pause {
-            let _ = self.pause(id).await;
-        }
-        for id in &action.resume {
-            let _ = self.resume(id).await;
-        }
+        let _ = self.pause_many(&action.pause).await;
+        let _ = self.resume_many(&action.resume).await;
         Ok(GuardStatus { state: v, paused: self.guard.lock().unwrap().paused_count() })
     }
 
@@ -295,20 +297,22 @@ impl Manager {
         self.save(&mut st);
     }
 
-    /// Lets a torrent run: clears a pause by the user and a "Files missing" hold.
-    fn release(&self, id: &TorrentId) {
-        self.with_meta(id, |m| {
+    /// Lets torrents run: clears a pause by the user and a "Files missing" hold. One save for all of them.
+    fn release(&self, ids: &[&TorrentId]) {
+        let mut st = self.state.lock().unwrap();
+        for id in ids {
+            let m = meta_mut(&mut st.lib, id);
             if m.files_missing {
                 m.progress_seen = 0;
             }
             (m.user_paused, m.files_missing) = (false, false);
-        });
+        }
+        self.save(&mut st);
     }
 
     fn with_meta(&self, id: &TorrentId, f: impl FnOnce(&mut TorrentMeta)) {
         let mut st = self.state.lock().unwrap();
-        let pos = next_position(&st.lib);
-        f(st.lib.entry(id.clone()).or_insert_with(|| TorrentMeta { position: pos, added_at: now_secs(), ..Default::default() }));
+        f(meta_mut(&mut st.lib, id));
         self.save(&mut st);
     }
 
@@ -489,43 +493,104 @@ impl Manager {
     }
 
     pub async fn pause(&self, id: &TorrentId) -> Result<()> {
-        let r = self.engine.pause(id).await;
-        if matches!(r, Err(EngineError::NotFound)) {
-            // Still waiting for its details: it is paused as soon as it exists.
-            if let Some(a) = self.state.lock().unwrap().adding.get_mut(id) {
-                a.paused = true;
-                return Ok(());
+        self.pause_many(std::slice::from_ref(id)).await
+    }
+
+    /// Pauses several torrents with one save, however many there are ("Pause all", the VPN guard). Every torrent is
+    /// tried; the first failure is what comes back.
+    pub async fn pause_many(&self, ids: &[TorrentId]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let states: HashMap<TorrentId, TorrentState> = self.engine.list().await?.into_iter().map(|t| (t.id, t.state)).collect();
+        let (mut paused, mut failed) = (Vec::new(), None);
+        for id in ids {
+            // Already stopped in the engine (waiting in the queue, say), which refuses to pause it twice: the mark
+            // below is all it needs to stay stopped when a slot frees up.
+            if states.get(id) == Some(&TorrentState::Paused) {
+                paused.push(id);
+                continue;
+            }
+            match self.engine.pause(id).await {
+                Ok(()) => paused.push(id),
+                Err(EngineError::NotFound) => {
+                    // Still waiting for its details: it is paused as soon as it exists.
+                    match self.state.lock().unwrap().adding.get_mut(id) {
+                        Some(a) => a.paused = true,
+                        None => {
+                            failed.get_or_insert(EngineError::NotFound);
+                        }
+                    }
+                }
+                Err(e) => {
+                    failed.get_or_insert(e);
+                }
             }
         }
-        r?;
-        self.with_meta(id, |m| m.user_paused = true);
-        Ok(())
+        if !paused.is_empty() {
+            let mut st = self.state.lock().unwrap();
+            for id in paused {
+                st.queued.remove(id);
+                meta_mut(&mut st.lib, id).user_paused = true;
+            }
+            self.save(&mut st);
+        }
+        failed.map_or(Ok(()), Err)
     }
 
     pub async fn resume(&self, id: &TorrentId) -> Result<()> {
-        // A torrent that is still waiting for its details (or failed to get them): nothing to start yet, but a failed
-        // one is tried again.
-        let waiting = self.state.lock().unwrap().adding.get(id).map(|a| a.retry.clone());
-        if let Some(retry) = waiting {
-            if !self.engine.list().await?.iter().any(|t| &t.id == id) {
-                let mut st = self.state.lock().unwrap();
-                if let Some(a) = st.adding.get_mut(id) {
-                    a.paused = false;
-                    if a.error.is_some() {
-                        retry.notify_one();
+        self.resume_many(std::slice::from_ref(id)).await
+    }
+
+    /// Resumes several torrents with one save and one scheduling round, however many there are ("Resume all", the VPN
+    /// guard). Every torrent is tried; the first failure is what comes back.
+    pub async fn resume_many(&self, ids: &[TorrentId]) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let list = self.engine.list().await?;
+        let in_engine: HashMap<&TorrentId, &TorrentStats> = list.iter().map(|t| (&t.id, t)).collect();
+        let limited = self.settings.lock().unwrap().max_active_downloads > 0;
+        let (mut released, mut failed) = (Vec::new(), None);
+        for id in ids {
+            let Some(t) = in_engine.get(id) else {
+                // Still waiting for its details (or failed to get them): nothing to start yet, but a failed one is
+                // tried again.
+                match self.state.lock().unwrap().adding.get_mut(id) {
+                    Some(a) => {
+                        a.paused = false;
+                        if a.error.is_some() {
+                            a.retry.notify_one();
+                        }
                     }
+                    None => {
+                            failed.get_or_insert(EngineError::NotFound);
+                        }
                 }
-                return Ok(());
+                continue;
+            };
+            // The guard's own resume goes through here too, after it has cleared its tripped flag.
+            if self.guard_tripped() {
+                failed.get_or_insert(EngineError::Blocked);
+                continue;
             }
+            // Several downloads with a limit on how many run: the round below starts the ones there is room for.
+            // Starting each of them here first would wake hundreds of torrents only to queue them again a moment later.
+            let left_to_the_queue = limited && ids.len() > 1 && !complete(t) && t.state == TorrentState::Paused;
+            if !left_to_the_queue {
+                if let Err(e) = self.engine.resume(id).await {
+                    failed.get_or_insert(e);
+                    continue;
+                }
+            }
+            released.push(id);
         }
-        // The guard's own resume goes through here too, after it has cleared its tripped flag.
-        if self.guard_tripped() {
-            return Err(EngineError::Blocked);
+        if !released.is_empty() {
+            self.release(&released);
+            // If every slot is busy this immediately pushes the lowest-priority torrent back into the queue.
+            self.tick().await?;
         }
-        self.engine.resume(id).await?;
-        self.release(id);
-        // If every slot is busy this immediately pushes the lowest-priority torrent back into the queue.
-        self.tick().await.map(|_| ())
+        failed.map_or(Ok(()), Err)
     }
 
     /// Moves a torrent's files to `dest` (see `TorrentEngine::relocate`). Refused while the VPN guard holds traffic,
@@ -632,7 +697,7 @@ impl Manager {
         if t.state == TorrentState::Paused {
             self.engine.resume(id).await?;
         }
-        self.release(id);
+        self.release(&[id]);
         if incomplete {
             self.move_in_queue(id, Move::Top).await
         } else {
@@ -774,12 +839,16 @@ impl Manager {
     }
 
     fn views(list: Vec<TorrentStats>, st: &State, resumed: &HashSet<TorrentId>, goal_paused: &HashSet<TorrentId>) -> Vec<TorrentView> {
-        let mut incomplete: Vec<(u64, &TorrentId)> =
-            list.iter().filter(|t| !complete(t)).map(|t| (st.lib.get(&t.id).map_or(u64::MAX, |m| m.position), &t.id)).collect();
+        // Queue positions by place in `list`, so the list itself is handed on below instead of copied torrent by torrent.
+        let mut incomplete: Vec<(u64, &TorrentId, usize)> =
+            list.iter().enumerate().filter(|(_, t)| !complete(t)).map(|(i, t)| (st.lib.get(&t.id).map_or(u64::MAX, |m| m.position), &t.id, i)).collect();
         incomplete.sort();
-        let rank: std::collections::HashMap<&TorrentId, u32> = incomplete.iter().enumerate().map(|(n, (_, id))| (*id, n as u32 + 1)).collect();
+        let mut rank: Vec<Option<u32>> = vec![None; list.len()];
+        for (n, (_, _, i)) in incomplete.iter().enumerate() {
+            rank[*i] = Some(n as u32 + 1);
+        }
 
-        let waiting = st.adding.iter().filter(|(id, _)| !list.iter().any(|t| &t.id == *id)).map(|(id, a)| {
+        let waiting: Vec<TorrentView> = st.adding.iter().filter(|(id, _)| !list.iter().any(|t| &t.id == *id)).map(|(id, a)| {
             let meta = st.lib.get(id);
             let failed = a.error.is_some();
             TorrentView {
@@ -813,24 +882,25 @@ impl Manager {
                 limit_down_kib: 0,
                 limit_up_kib: 0,
             }
-        });
+        }).collect();
 
-        list.iter()
-            .map(|t| {
-                let meta = st.lib.get(&t.id);
-                let mut stats = t.clone();
+        list.into_iter()
+            .zip(rank)
+            .map(|(mut stats, queue_pos)| {
+                let meta = st.lib.get(&stats.id);
+                let engine_state = stats.state;
                 let mut note = None;
-                if st.queued.contains(&t.id) && matches!(t.state, TorrentState::Paused | TorrentState::Downloading | TorrentState::Checking) {
+                if st.queued.contains(&stats.id) && matches!(engine_state, TorrentState::Paused | TorrentState::Downloading | TorrentState::Checking) {
                     stats.state = TorrentState::Queued;
                     stats.down_bps = 0;
                     stats.eta_secs = None;
-                } else if resumed.contains(&t.id) && t.state == TorrentState::Paused {
+                } else if resumed.contains(&stats.id) && engine_state == TorrentState::Paused {
                     stats.state = TorrentState::Downloading;
                 }
-                if goal_paused.contains(&t.id) {
+                if goal_paused.contains(&stats.id) {
                     stats.state = TorrentState::Paused;
                 }
-                let moving = st.move_notes.get(&t.id).cloned();
+                let moving = st.move_notes.get(&stats.id).cloned();
                 if meta.is_some_and(|m| m.files_missing) {
                     stats.state = TorrentState::Paused;
                     stats.down_bps = 0;
@@ -841,7 +911,7 @@ impl Manager {
                     note = Some(SEED_GOAL_NOTE.to_string());
                 }
                 TorrentView {
-                    queue_pos: rank.get(&t.id).copied(),
+                    queue_pos,
                     category: meta.and_then(|m| m.category.clone()),
                     tags: meta.map(|m| m.tags.clone()).unwrap_or_default(),
                     note: moving.or(note),
@@ -862,8 +932,11 @@ impl Manager {
         // A failed limit update must not stop the scheduler; it is retried next tick.
         let _ = self.sync_limits().await;
         let list = self.engine.list().await?;
-        let s = self.settings();
-        let min_seed = u64::from(s.min_seed_minutes) * 60;
+        // Only what a round needs: the whole settings (plugins, a theme pack...) would be copied every second otherwise.
+        let (min_seed, move_on_complete, default_goal, max_active) = {
+            let s = self.settings.lock().unwrap();
+            (u64::from(s.min_seed_minutes) * 60, s.move_on_complete.is_some(), s.default_goal, s.max_active_downloads as usize)
+        };
 
         let (plan, goal_stopped) = {
             let mut st = self.state.lock().unwrap();
@@ -892,7 +965,7 @@ impl Manager {
                         m.finished_at = Some(now_secs());
                         structural = true;
                         st.finished.push(t.id.clone());
-                        if s.move_on_complete.is_some() {
+                        if move_on_complete {
                             st.pending_moves.push(t.id.clone());
                         }
                     }
@@ -923,7 +996,7 @@ impl Manager {
                     m.seed_secs += dt;
                     st.dirty = true;
                     let m = st.lib.get_mut(&t.id).expect("present");
-                    let goal = rules::effective(m.goal, s.default_goal);
+                    let goal = rules::effective(m.goal, default_goal);
                     if !m.goal_reached && !goal.is_empty() && rules::reached(goal, t.uploaded_bytes, t.total_bytes, m.seed_secs, min_seed) {
                         m.goal_reached = true;
                         goal_stopped.insert(t.id.clone());
@@ -940,7 +1013,7 @@ impl Manager {
                     goal_stopped: false,
                 });
             }
-            let plan = queue::plan(&items, s.max_active_downloads as usize);
+            let plan = queue::plan(&items, max_active);
             st.queued = plan.queued.clone();
             if structural || (st.dirty && st.last_save.elapsed().as_secs() >= SAVE_EVERY_SECS) {
                 self.save(&mut st);
@@ -1280,6 +1353,52 @@ mod tests {
         assert_eq!(states(&v), [(1, Downloading), (2, Paused), (3, Downloading)], "the paused torrent's slot goes to the next in line");
         let v = m.tick().await.unwrap();
         assert_eq!(states(&v), [(1, Downloading), (2, Paused), (3, Downloading)]);
+    }
+
+    #[tokio::test]
+    async fn pausing_a_queued_torrent_keeps_it_out_of_a_slot_that_frees_up() {
+        use TorrentState::*;
+        let (engine, m, _) = setup(1);
+        for n in 1..=2 {
+            m.add(mag(n), None, vec![]).await.unwrap();
+        }
+        assert_eq!(states(&m.tick().await.unwrap()), [(1, Downloading), (2, Queued)]);
+        // The engine has it stopped already and refuses to pause it twice; the pause still counts.
+        m.pause(&id(2)).await.unwrap();
+        assert_eq!(states(&m.snapshot().await.unwrap()), [(1, Downloading), (2, Paused)], "shown as paused at once, not after the next round");
+        engine.advance(&id(1), 10_000);
+        m.tick().await.unwrap();
+        assert_eq!(states(&m.tick().await.unwrap()), [(1, Seeding), (2, Paused)]);
+    }
+
+    #[tokio::test]
+    async fn pausing_and_resuming_many_at_once_ends_where_one_by_one_would() {
+        use TorrentState::*;
+        let (engine, m, _) = setup(2);
+        m.add(mag(1), None, vec![]).await.unwrap();
+        engine.advance(&id(1), 10_000); // one of them is seeding
+        for n in 2..=5 {
+            m.add(mag(n), None, vec![]).await.unwrap();
+        }
+        assert_eq!(states(&m.tick().await.unwrap()), [(1, Seeding), (2, Downloading), (3, Downloading), (4, Queued), (5, Queued)]);
+        let all: Vec<TorrentId> = (1..=5).map(id).collect();
+
+        m.pause_many(&all).await.unwrap();
+        assert!(states(&m.tick().await.unwrap()).iter().all(|(_, s)| *s == Paused), "queued ones included, and none takes a freed slot");
+
+        m.resume_many(&all).await.unwrap();
+        let v = m.snapshot().await.unwrap();
+        assert_eq!(states(&v), [(1, Seeding), (2, Downloading), (3, Downloading), (4, Queued), (5, Queued)]);
+        let running = engine.list().await.unwrap().iter().filter(|t| t.state == Downloading).count();
+        assert_eq!(running, 2, "only the two with a slot run in the engine");
+
+        // A torrent that isn't there fails, and the rest are still done.
+        let mut some = vec![id(99)];
+        some.extend(all.clone());
+        assert!(matches!(m.pause_many(&some).await, Err(EngineError::NotFound)));
+        assert!(states(&m.tick().await.unwrap()).iter().all(|(_, s)| *s == Paused));
+        assert!(matches!(m.resume_many(&some).await, Err(EngineError::NotFound)));
+        assert_eq!(states(&m.tick().await.unwrap())[0], (1, Seeding));
     }
 
     #[tokio::test]

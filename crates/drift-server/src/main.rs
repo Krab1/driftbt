@@ -157,7 +157,7 @@ async fn run() -> Result<(), String> {
     // Snapshots every 2 s (1 s while somebody is listening), completion detection and playlists.
     {
         let (tx, settings, engine) = (tx.clone(), settings.clone(), engine.clone());
-        let mut prev = Vec::new();
+        let mut prev: Vec<drift_core::model::TorrentView> = Vec::new();
         tokio::spawn(drift_core::ticker::run(
             manager.clone(),
             {
@@ -165,8 +165,7 @@ async fn run() -> Result<(), String> {
                 move || Duration::from_secs(if tx.receiver_count() > 0 { 1 } else { 5 })
             },
             move |list| {
-                let stats: Vec<_> = list.iter().map(|v| v.stats.clone()).collect();
-                for t in completions(&prev, &stats) {
+                for t in completions(prev.iter().map(|v| &v.stats), list.iter().map(|v| &v.stats)) {
                     let _ = tx.send(Event::new("completed", &serde_json::json!({ "id": t.id, "name": t.name })));
                     let playlists = {
                         let s = settings.lock().unwrap();
@@ -182,7 +181,7 @@ async fn run() -> Result<(), String> {
                 if tx.receiver_count() > 0 {
                     let _ = tx.send(Event::new("snapshot", &list));
                 }
-                prev = stats;
+                prev = list;
             },
         ));
     }

@@ -15,7 +15,7 @@ use axum::{Json, Router};
 use drift_core::errors::ApiError;
 use drift_core::guard::Adapter;
 use drift_core::manager::{GuardStatus, LimitsStatus};
-use drift_core::model::{NetworkStatus, TorrentDetails, TorrentId, TorrentPreview, TorrentView};
+use drift_core::model::{DetailPart, NetworkStatus, TorrentDetails, TorrentId, TorrentPreview, TorrentView};
 use drift_core::netctl::FilterStatus;
 use drift_core::queue::Move;
 use drift_core::rules::Goal;
@@ -104,6 +104,8 @@ pub fn router(shared: S) -> Router {
         .route("/torrents", get(list).post(add))
         .route("/inspect", post(inspect))
         .route("/torrents/{id}", delete(remove))
+        .route("/torrents/pause", post(pause_many))
+        .route("/torrents/resume", post(resume_many))
         .route("/torrents/{id}/pause", post(pause))
         .route("/torrents/{id}/resume", post(resume))
         .route("/torrents/{id}/recheck", post(recheck))
@@ -178,6 +180,20 @@ async fn inspect(State(s): State<S>, Json(b): Json<InspectBody>) -> Res<TorrentP
 
 async fn pause(State(s): State<S>, Path(id): Path<String>) -> Res<()> {
     Ok(Json(s.svc.manager.pause(&TorrentId(id)).await?))
+}
+
+#[derive(Deserialize)]
+struct IdsBody {
+    ids: Vec<TorrentId>,
+}
+
+/// Several torrents in one call ("Pause all"): one save and one scheduling round, however many.
+async fn pause_many(State(s): State<S>, Json(b): Json<IdsBody>) -> Res<()> {
+    Ok(Json(s.svc.manager.pause_many(&b.ids).await?))
+}
+
+async fn resume_many(State(s): State<S>, Json(b): Json<IdsBody>) -> Res<()> {
+    Ok(Json(s.svc.manager.resume_many(&b.ids).await?))
 }
 
 #[derive(Deserialize)]
@@ -268,8 +284,15 @@ async fn set_files(State(s): State<S>, Path(id): Path<String>, Json(b): Json<Fil
     Ok(Json(s.svc.manager.set_files(&TorrentId(id), b.selected, b.delete_unchecked).await?))
 }
 
-async fn details(State(s): State<S>, Path(id): Path<String>) -> Res<TorrentDetails> {
-    Ok(Json(s.svc.engine.details(&TorrentId(id)).await?))
+#[derive(Deserialize)]
+struct DetailsQuery {
+    /// `summary`, `files` or `peers` leaves out the lists the asker doesn't show; without it both are sent.
+    #[serde(default)]
+    part: DetailPart,
+}
+
+async fn details(State(s): State<S>, Path(id): Path<String>, Query(q): Query<DetailsQuery>) -> Res<TorrentDetails> {
+    Ok(Json(s.svc.engine.details(&TorrentId(id)).await?.only(q.part)))
 }
 
 async fn playlist(State(s): State<S>, Path(id): Path<String>) -> Res<String> {
@@ -488,6 +511,15 @@ mod tests {
 
         let (st, d) = call(&app, "GET", &format!("/api/torrents/{id}/details"), Some(TOKEN), None).await;
         assert_eq!(st, StatusCode::OK, "{d}");
+        assert!(!d["files"].as_array().unwrap().is_empty(), "a plain details call still lists the files");
+        let (_, d) = call(&app, "GET", &format!("/api/torrents/{id}/details?part=summary"), Some(TOKEN), None).await;
+        assert!(d["files"].as_array().unwrap().is_empty() && d["save_path"].is_string(), "{d}");
+
+        let ids = serde_json::json!({ "ids": [id] });
+        assert_eq!(call(&app, "POST", "/api/torrents/pause", Some(TOKEN), Some(ids.clone())).await.0, StatusCode::OK);
+        assert_eq!(call(&app, "GET", "/api/torrents", Some(TOKEN), None).await.1[0]["state"], "paused");
+        assert_eq!(call(&app, "POST", "/api/torrents/resume", Some(TOKEN), Some(ids)).await.0, StatusCode::OK);
+        assert_ne!(call(&app, "GET", "/api/torrents", Some(TOKEN), None).await.1[0]["state"], "paused");
 
         assert_eq!(call(&app, "DELETE", &format!("/api/torrents/{id}"), Some(TOKEN), None).await.0, StatusCode::OK);
         let (_, list) = call(&app, "GET", "/api/torrents", Some(TOKEN), None).await;

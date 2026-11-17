@@ -370,6 +370,9 @@ export interface UpdateInfo {
   notes: string | null;
 }
 
+/** Which of a torrent's long lists the details carry: its files, its peers, or neither. */
+export type DetailPart = "summary" | "files" | "peers";
+
 export interface Api {
   /** Looks for a newer version now. null means you're up to date. Desktop app only. */
   checkUpdate?(): Promise<UpdateInfo | null>;
@@ -394,8 +397,9 @@ export interface Api {
   moveInQueue(id: string, to: QueueMove): Promise<void>;
   /** `deleteUnchecked` also deletes what was downloaded of the files that are no longer chosen. */
   setFiles(id: string, selected: number[], deleteUnchecked?: boolean): Promise<void>;
-  /** Choose which torrent's details are pushed (or null). Returns its current details at once. */
-  watchDetails(id: string | null): Promise<TorrentDetails | null>;
+  /** Choose which torrent's details are pushed (or null), and which of its long lists come with them (the other
+   *  arrives empty). Returns its current details at once. */
+  watchDetails(id: string | null, part?: DetailPart): Promise<TorrentDetails | null>;
   onDetails(cb: (d: TorrentDetails) => void): Promise<() => void>;
   onCompleted(cb: (c: Completed) => void): Promise<() => void>;
   /** Magnets/files the OS opened the app with (second launch or file association). */
@@ -426,6 +430,9 @@ export interface Api {
   createPlaylist(id: string): Promise<string>;
   pause(id: string): Promise<void>;
   resume(id: string): Promise<void>;
+  /** Several at once ("Pause all"): one call instead of one per torrent. Every torrent is tried; rejects with the first failure. */
+  pauseMany(ids: string[]): Promise<void>;
+  resumeMany(ids: string[]): Promise<void>;
   /** Hashes the downloaded files again and re-downloads anything missing or damaged. */
   recheck(id: string): Promise<void>;
   /** Moves the torrent's files into this folder (on the machine running Drift) and keeps seeding from there. */

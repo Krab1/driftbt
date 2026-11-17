@@ -34,14 +34,24 @@ export function percent(progress: number, total: number): number {
   return Math.min(100, Math.floor((progress / total) * 100));
 }
 
+// One formatter per language and kind, kept: `toLocaleDateString` sets one up on every call, and the list asks for
+// two dates per visible row on every update.
+const dateFormats = new Map<string, Intl.DateTimeFormat>();
+function dateFormat(withTime: boolean): Intl.DateTimeFormat {
+  const key = `${locale() ?? ""}|${withTime}`;
+  let f = dateFormats.get(key);
+  if (!f) dateFormats.set(key, (f = new Intl.DateTimeFormat(locale(), withTime ? { dateStyle: "medium", timeStyle: "short" } : { dateStyle: "medium" })));
+  return f;
+}
+
 /** Unix seconds as a compact local date for list columns; the full time shows on hover. */
 export function formatDay(secs: number | null): string {
   if (!secs) return "—";
-  return new Date(secs * 1000).toLocaleDateString(locale(), { dateStyle: "medium" });
+  return dateFormat(false).format(secs * 1000);
 }
 
 /** Unix seconds as a short local date and time; "—" when unknown. */
 export function formatWhen(secs: number | null): string {
   if (!secs) return "—";
-  return new Date(secs * 1000).toLocaleString(locale(), { dateStyle: "medium", timeStyle: "short" });
+  return dateFormat(true).format(secs * 1000);
 }
