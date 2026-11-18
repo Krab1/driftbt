@@ -883,11 +883,15 @@ mod sparse_storage {
                 return Ok(());
             }
             files.materialize(file_id)?;
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)?;
+            // A file that is not there stays not there. This runs after the check that starts every torrent, and a torrent
+            // whose files were deleted while Drift was closed must show as "Files missing" without its folders coming back
+            // and its full size being reserved on the disk. Writing creates the file when data really arrives; a torrent
+            // that was just added has its files already (the clash check in `init` made them).
+            if !path.exists() {
+                return Ok(());
             }
             // A handle for this alone, gone again at once.
-            let f = OpenOptions::new().create(true).write(true).truncate(false).open(&path).with_context(|| format!("error opening {path:?} for writing"))?;
+            let f = OpenOptions::new().write(true).truncate(false).open(&path).with_context(|| format!("error opening {path:?} for writing"))?;
             Ok(f.set_len(length)?)
         }
 
@@ -1850,6 +1854,39 @@ mod tests {
         let second = RqbitEngine::new(cfg()).await.unwrap();
         assert_eq!(second.list().await.unwrap().len(), 1, "the torrent came back");
         assert!(!dl.exists(), "restoring created nothing on disk");
+        second.shutdown().await;
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Files deleted while the app was closed stay deleted when it starts: the torrent is checked (and found empty), but its
+    /// folders are not made again and no space is reserved for it.
+    #[cfg(windows)]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn restoring_a_torrent_whose_files_are_gone_does_not_bring_them_back() {
+        let root = scratch("restore-gone");
+        let (src, dl, state) = (root.join("src"), root.join("dl"), root.join("state"));
+        std::fs::create_dir_all(&state).unwrap();
+        let folder = src.join("album");
+        std::fs::create_dir_all(&folder).unwrap();
+        for i in 0..3u8 {
+            std::fs::write(folder.join(format!("f{i}.bin")), vec![i; 300_000]).unwrap();
+        }
+        let torrent = create_torrent(&folder, CreateTorrentOptions::default(), &BlockingSpawner::new(1)).await.unwrap().as_bytes().unwrap();
+        let cfg = || RqbitConfig { persistence_dir: Some(state.clone()), ..engine_cfg(&dl, None) };
+        let first = RqbitEngine::new(cfg()).await.unwrap();
+        let id = first.add(AddRequest::new(AddSource::FileBytes(torrent.to_vec()))).await.unwrap();
+        assert!(dl.join("album").exists(), "a new add still checks the folder for a clash");
+        first.shutdown().await;
+        drop(first);
+
+        std::fs::remove_dir_all(&dl).unwrap();
+        let second = RqbitEngine::new(cfg()).await.unwrap();
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while second.list().await.unwrap().iter().any(|t| t.id == id && t.state == TorrentState::Checking) && Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(second.list().await.unwrap().len(), 1, "the torrent came back");
+        assert!(!dl.exists(), "checking the torrent made nothing on disk");
         second.shutdown().await;
         let _ = std::fs::remove_dir_all(&root);
     }
